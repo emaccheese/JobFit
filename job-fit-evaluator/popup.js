@@ -31,9 +31,14 @@ const els = {
   salaryCadMax: document.getElementById("salaryCadMax"),
   salaryMxnMin: document.getElementById("salaryMxnMin"),
   salaryMxnMax: document.getElementById("salaryMxnMax"),
-  hardRejects: document.getElementById("hardRejects"),
-  softWarnings: document.getElementById("softWarnings"),
-  domainFlags: document.getElementById("domainFlags"),
+  hardRejectsPresets: document.getElementById("hardRejectsPresets"),
+  hardRejectsPhrases: document.getElementById("hardRejectsPhrases"),
+  hardRejectsPatterns: document.getElementById("hardRejectsPatterns"),
+  softWarningsPresets: document.getElementById("softWarningsPresets"),
+  softWarningsPhrases: document.getElementById("softWarningsPhrases"),
+  softWarningsPatterns: document.getElementById("softWarningsPatterns"),
+  domainFlagsPhrases: document.getElementById("domainFlagsPhrases"),
+  domainFlagsPatterns: document.getElementById("domainFlagsPatterns"),
   status: document.getElementById("status"),
 };
 
@@ -100,6 +105,62 @@ function renderProfileSelect() {
   els.profileSelect.value = store.activeProfileId;
 }
 
+const KEYWORD_KINDS = ["hardRejects", "softWarnings", "domainFlags"];
+const ADVANCED_SECTION_ID = {
+  hardRejects: "adv-hardrejects",
+  softWarnings: "adv-warnings",
+  domainFlags: "adv-domainflags",
+};
+
+// Generated from the preset definitions rather than written into the HTML, so
+// the two can't drift apart when a category is added.
+function renderPresetCheckboxes() {
+  KEYWORD_KINDS.forEach((kind) => {
+    const host = els[`${kind}Presets`];
+    if (!host) return;
+    host.innerHTML = "";
+    JOB_FIT_KEYWORDS.presetsFor(kind).forEach((preset) => {
+      const row = document.createElement("label");
+      const box = document.createElement("input");
+      box.type = "checkbox";
+      box.value = preset.id;
+      row.appendChild(box);
+      row.appendChild(document.createTextNode(preset.label));
+      host.appendChild(row);
+    });
+  });
+}
+
+function keywordConfigFromForm(kind) {
+  const host = els[`${kind}Presets`];
+  const presets = host
+    ? Array.from(host.querySelectorAll("input[type=checkbox]"))
+        .filter((box) => box.checked)
+        .map((box) => box.value)
+    : [];
+  return {
+    presets,
+    phrases: linesToArray(els[`${kind}Phrases`].value),
+    patterns: linesToArray(els[`${kind}Patterns`].value),
+  };
+}
+
+function fillKeywordConfig(kind, config) {
+  const resolved = JOB_FIT_KEYWORDS.normalizeConfig(config, kind);
+  const host = els[`${kind}Presets`];
+  if (host) {
+    host.querySelectorAll("input[type=checkbox]").forEach((box) => {
+      box.checked = resolved.presets.includes(box.value);
+    });
+  }
+  els[`${kind}Phrases`].value = arrayToLines(resolved.phrases);
+  els[`${kind}Patterns`].value = arrayToLines(resolved.patterns);
+  // Opened when it holds something, so a pattern carried over from the old
+  // format isn't hidden where you can't see why a posting is being rejected.
+  const advanced = document.getElementById(ADVANCED_SECTION_ID[kind]);
+  if (advanced) advanced.open = resolved.patterns.length > 0;
+}
+
 // Reads the per-profile fields out of the form. Deliberately does not touch
 // the LM Studio fields — those are global and saved separately.
 function collectProfileFields() {
@@ -114,9 +175,9 @@ function collectProfileFields() {
   return {
     profile: els.profile.value,
     keywords: {
-      hardRejects: linesToArray(els.hardRejects.value),
-      softWarnings: linesToArray(els.softWarnings.value),
-      domainFlags: linesToArray(els.domainFlags.value),
+      hardRejects: keywordConfigFromForm("hardRejects"),
+      softWarnings: keywordConfigFromForm("softWarnings"),
+      domainFlags: keywordConfigFromForm("domainFlags"),
     },
     expectedSalary,
   };
@@ -124,9 +185,7 @@ function collectProfileFields() {
 
 function fillFormFromProfile(profile) {
   els.profile.value = profile.profile;
-  els.hardRejects.value = arrayToLines(profile.keywords.hardRejects);
-  els.softWarnings.value = arrayToLines(profile.keywords.softWarnings);
-  els.domainFlags.value = arrayToLines(profile.keywords.domainFlags);
+  KEYWORD_KINDS.forEach((kind) => fillKeywordConfig(kind, profile.keywords[kind]));
   SALARY_CURRENCIES.forEach((cur) => {
     const range = profile.expectedSalary[cur] || { min: null, max: null };
     const { min, max } = salaryFieldsFor(cur);
@@ -156,6 +215,7 @@ async function loadSettings() {
   els.lmStudioEnableThinking.checked =
     typeof lmStudio.enableThinking === "boolean" ? lmStudio.enableThinking : JOB_FIT_DEFAULTS.lmStudio.enableThinking;
 
+  renderPresetCheckboxes();
   store = await JOB_FIT_PROFILES.load();
   renderProfileSelect();
   restoreOpenSections(stored.uiOpenSections);
@@ -299,9 +359,9 @@ async function deleteProfile() {
 // into another person's profile is nonsense), and domain flags are per-person
 // by construction.
 function resetKeywordLists() {
-  els.hardRejects.value = arrayToLines(JOB_FIT_DEFAULTS.keywords.hardRejects);
-  els.softWarnings.value = arrayToLines(JOB_FIT_DEFAULTS.keywords.softWarnings);
-  setStatus("Reject and warning lists restored (not yet saved).");
+  fillKeywordConfig("hardRejects", JOB_FIT_DEFAULTS.keywords.hardRejects);
+  fillKeywordConfig("softWarnings", JOB_FIT_DEFAULTS.keywords.softWarnings);
+  setStatus("Reject and warning categories restored (not yet saved).");
 }
 
 // The popup document is destroyed whenever it loses focus, so a <details> the
@@ -423,6 +483,86 @@ async function suggestSalary() {
   }
 }
 
+// Injects the job content script into cross-origin iframes that host a job
+// board (a company career site embedding Greenhouse). Reports what it found
+// into the PAGE console, next to the content script's own logs, because the
+// popup closes immediately and its own console is a separate window nobody
+// thinks to open.
+//
+// Failures here are reported but never rethrown: the top frame has already
+// been injected by this point, and losing that to an iframe problem would be
+// worse than the iframe being missed.
+async function injectJobFrames(tabId, files, { withCss = true } = {}) {
+  const report = (info) =>
+    chrome.scripting
+      .executeScript({
+        target: { tabId },
+        func: (payload) => console.log("[Job Fit Evaluator] frame scan:", payload),
+        args: [info],
+      })
+      .catch(() => {});
+
+  if (!chrome.webNavigation || !chrome.webNavigation.getAllFrames) {
+    await report({ error: "chrome.webNavigation unavailable — reload the extension after the manifest change" });
+    return [];
+  }
+
+  let frames;
+  try {
+    frames = await chrome.webNavigation.getAllFrames({ tabId });
+  } catch (err) {
+    await report({ error: `getAllFrames failed: ${err.message}` });
+    return [];
+  }
+
+  const candidates = (frames || []).filter((f) => f.frameId !== 0 && f.url && f.url.includes("greenhouse.io"));
+
+  // Asks Chrome directly whether the permission is actually held at runtime.
+  // This separates "the extension lacks the grant" from "this particular frame
+  // can't be scripted", which the injection error alone does not distinguish —
+  // it reports both as "manifest must request permission".
+  let granted = null;
+  try {
+    granted = await chrome.permissions.contains({ origins: ["https://job-boards.greenhouse.io/*"] });
+  } catch (err) {
+    granted = `check failed: ${err.message}`;
+  }
+
+  if (candidates.length === 0) {
+    await report({
+      permissionGranted: granted,
+      framesSeen: (frames || []).map((f) => ({ id: f.frameId, url: f.url })),
+      note: "no greenhouse.io subframe found in this tab",
+    });
+    return [];
+  }
+
+  // One frame at a time. A single executeScript call listing several frameIds
+  // is rejected as a whole if ANY of them is inaccessible — an about:blank or
+  // sandboxed frame that still reports a greenhouse URL would take the real
+  // job frame down with it. Injecting individually means one bad frame costs
+  // only itself, and the report names which frame failed and why.
+  const injected = [];
+  const outcomes = [];
+
+  for (const frame of candidates) {
+    const frameIds = [frame.frameId];
+    try {
+      if (withCss) {
+        await chrome.scripting.insertCSS({ target: { tabId, frameIds }, files: ["content.css"] });
+      }
+      await chrome.scripting.executeScript({ target: { tabId, frameIds }, files });
+      injected.push(frame.frameId);
+      outcomes.push({ id: frame.frameId, url: frame.url, injected: true });
+    } catch (err) {
+      outcomes.push({ id: frame.frameId, url: frame.url, injected: false, error: err.message });
+    }
+  }
+
+  await report({ permissionGranted: granted, frames: outcomes });
+  return injected;
+}
+
 async function evaluateCurrentTab() {
   // Guard against a double-click firing two concurrent evaluations (and two
   // concurrent LM Studio requests) before the popup has a chance to close.
@@ -435,22 +575,30 @@ async function evaluateCurrentTab() {
     btn.disabled = false;
     return;
   }
+  const files = [
+    "defaults.js",
+    "keywords.js",
+    "profiles.js",
+    "evalstore.js",
+    "extractors/text.js",
+    "extractors/generic.js",
+    "extractors/greenhouse.js",
+    "extractors/linkedin.js",
+    "jobkey.js",
+    "content.js",
+  ];
   try {
     await chrome.scripting.insertCSS({ target: { tabId: tab.id }, files: ["content.css"] });
     await chrome.scripting.executeScript({
       target: { tabId: tab.id },
-      files: [
-        "defaults.js",
-        "profiles.js",
-        "evalstore.js",
-        "extractors/text.js",
-        "extractors/generic.js",
-        "extractors/greenhouse.js",
-        "extractors/linkedin.js",
-        "jobkey.js",
-        "content.js",
-      ],
+      files
     });
+    // Find cross-origin iframes that host job content (e.g. embedded
+    // Greenhouse boards on custom-domain career sites) and inject into those
+    // specifically. allFrames: true would reject the entire call if ANY frame
+    // in the tab (ads, analytics) is on a domain we lack permission for.
+    await injectJobFrames(tab.id, files);
+
   } catch (err) {
     setStatus(injectionErrorMessage(err), { persist: true });
     btn.disabled = false;
@@ -494,27 +642,54 @@ async function summarizeCurrentTab() {
     btn.disabled = false;
     return;
   }
+  const files = [
+    "defaults.js",
+    "keywords.js",
+    "profiles.js",
+    "evalstore.js",
+    "extractors/text.js",
+    "extractors/generic.js",
+    "extractors/greenhouse.js",
+    "extractors/linkedin.js",
+    "jobkey.js",
+    "content.js",
+  ];
 
   let extracted;
   try {
     await chrome.scripting.executeScript({
       target: { tabId: tab.id },
-      files: [
-        "defaults.js",
-        "profiles.js",
-        "evalstore.js",
-        "extractors/text.js",
-        "extractors/generic.js",
-        "extractors/greenhouse.js",
-        "extractors/linkedin.js",
-        "jobkey.js",
-      ],
+      files
     });
-    const results = await chrome.scripting.executeScript({
+
+
+    // Find cross-origin job board iframes (e.g. embedded Greenhouse on
+    // custom-domain career sites). Targeted frameIds avoid the allFrames
+    // rejection issue where one inaccessible ad iframe kills the whole call.
+    const jobFrameIds = await injectJobFrames(tab.id, files, { withCss: false });
+
+    // Extract from top frame
+    const topResults = await chrome.scripting.executeScript({
       target: { tabId: tab.id },
       func: extractOnPage,
     });
-    extracted = results && results[0] && results[0].result;
+    // .result unwraps the InjectionResult ({ frameId, result }) — find() returns
+    // the wrapper, and the wrapper is truthy, so without this the downstream
+    // `if (!extracted)` guard passes and the brief is queued with an undefined
+    // posting body.
+    extracted = topResults?.find((r) => r.result)?.result || null;
+
+    // If a Greenhouse iframe exists, prefer its result. On a custom-domain
+    // career site (e.g. Nuro) the top frame only has nav/footer/blog text;
+    // the actual job posting lives in the iframe.
+    if (jobFrameIds.length > 0) {
+      const frameResults = await chrome.scripting.executeScript({
+        target: { tabId: tab.id, frameIds: jobFrameIds },
+        func: extractOnPage,
+      });
+      const frameExtracted = frameResults?.find((r) => r.result)?.result || null;
+      if (frameExtracted) extracted = frameExtracted;
+    }
   } catch (err) {
     statusEl.textContent = injectionErrorMessage(err);
     btn.disabled = false;

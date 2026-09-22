@@ -39,6 +39,7 @@ job-fit-evaluator/
 ├── content.css          # banner styles
 ├── defaults.js          # JOB_FIT_DEFAULTS — shipped defaults
 ├── profiles.js          # multi-profile store + migration
+├── keywords.js          # screening categories + phrase→regex compiler
 ├── queue.js             # serial work queue (service worker)
 ├── evalstore.js         # evaluated-job history records
 ├── jobkey.js            # canonical job identity per page
@@ -57,6 +58,38 @@ job-fit-evaluator/
 ---
 
 ## Layer 1 — deterministic dealbreaker filters (local, instant, free)
+
+> **Configured as categories and phrases, not regexes** (2026-09-22). The three
+> lists were raw regex typed into textareas, which put
+> `graduat(ing|ion) (date )?(between|in) (20\d\d)` in front of someone whose job
+> is not writing regexes — and made correctness their problem: a bare `ITAR`
+> matched "military" until somebody thought to write `\bITAR\b`.
+>
+> The three lists turned out to be different kinds of thing and now have
+> different UIs. **Hard rejects and warnings** are universal *categories* worded
+> differently by every posting, so they are ticked from a curated list
+> (`keywords.js`) — the patterns are maintained in one place and a profile with
+> a category ticked inherits improvements to it. **Domain flags** are one
+> person's skill gaps, so no preset could exist; they are plain phrases.
+> Everything keeps an *Advanced* escape hatch for raw patterns.
+>
+> `phraseToPattern()` escapes metacharacters, matches case-insensitively, turns
+> spaces into `\s+` (so a line break in the posting doesn't break a match) and
+> adds `\b` only where the phrase begins or ends with a word character — so
+> `C++` and `.NET` still work, which matters because those are exactly the terms
+> people put in domain flags.
+>
+> Each compiled entry carries a human `label` — the category name or the user's
+> own phrase — so a hard reject now reads
+> `"must be a US citizen" — US citizenship or permanent residency` rather than
+> quoting the pattern at them.
+>
+> **Migration:** an old flat array is read back through `fromLegacyList()`. A
+> category is ticked only when *every* one of its patterns is present, so a list
+> someone had edited down is never silently re-expanded; leftovers go to
+> Advanced; and a fully-bounded `\bfoo\b` comes back as the phrase `foo`. A
+> half-bounded one like `\bneural network` stays raw, because it matches
+> "networks" and re-compiling it as a phrase would quietly stop it doing that.
 
 Run regex against the extracted text. On any **hard reject** hit, show a red banner with the matched phrase and **stop** — do not call the local model.
 

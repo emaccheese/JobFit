@@ -16,6 +16,9 @@ var JOB_FIT_JOBKEY = (function () {
     "ref", "refid", "trackingid", "trk", "trkemail", "lipi", "licu",
     "midtoken", "midsig", "ebp", "originalsubdomain", "savedsearchid",
     "gh_src", "source", "src", "gclid", "fbclid", "position", "pagenum",
+    // Greenhouse embeds carry a signed token that is re-issued on every page
+    // load, so it can never be part of a job's identity.
+    "validitytoken",
   ]);
 
   function hash(str) {
@@ -42,6 +45,21 @@ var JOB_FIT_JOBKEY = (function () {
     // Classic board: /<company>/jobs/<id>
     const fromPath = location.pathname.match(/\/([^/]+)\/jobs\/(\d+)/);
     if (fromPath) return `${fromPath[1]}:${fromPath[2]}`;
+
+    // Embedded board, as used by company career sites that iframe Greenhouse:
+    //   /embed/job_app?for=<company>&token=<jobPostId>&validityToken=<rotating>
+    // The path carries no job id and the page exposes it only inside a JSON
+    // blob, so without this the key falls back to the URL — and that URL
+    // contains a token re-signed on every visit, which would file a fresh
+    // history record each time and stop the already-evaluated check ever
+    // firing. Reading for+token also produces exactly the same key as the
+    // plain board URL for the same job, so it's recognised from either route.
+    if (location.pathname.includes("/embed/")) {
+      const params = new URLSearchParams(location.search);
+      const board = params.get("for");
+      const jobId = params.get("token") || params.get("gh_jid");
+      if (board && jobId && /^\d+$/.test(jobId)) return `${board}:${jobId}`;
+    }
 
     // my.greenhouse.io candidate portal: the posting is in a dialog and the
     // URL stays on /jobs/search, so look for the link the dialog's title

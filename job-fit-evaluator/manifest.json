@@ -3,8 +3,8 @@
   "name": "JobFit",
   "version": "0.3.0",
   "description": "Evaluates a job posting on the current tab against a stored candidate profile.",
-  "permissions": ["activeTab", "scripting", "storage", "unlimitedStorage", "alarms"],
-  "host_permissions": ["http://localhost/*", "http://127.0.0.1/*"],
+  "permissions": ["activeTab", "scripting", "storage", "unlimitedStorage", "alarms", "webNavigation"],
+  "host_permissions": ["http://localhost/*", "http://127.0.0.1/*", "*://*.greenhouse.io/*"],
   "background": {
     "service_worker": "background.js"
   },

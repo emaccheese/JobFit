@@ -26,11 +26,18 @@ but not a requirement.
 
 Two layers, cheapest first.
 
-**Layer 1 — deterministic, instant, free.** Regex over the posting for things that
-end the conversation regardless of fit: no sponsorship, citizenship-only, ITAR,
-security clearance, "must already reside within commuting distance". These are
-yes/no facts, so no model is involved. A hard reject resolves immediately and never
-reaches the queue.
+**Layer 1 — deterministic, instant, free.** A keyword scan for things that end the
+conversation regardless of fit. You configure it by ticking categories — *US
+citizenship or permanent residency*, *no visa sponsorship*, *security clearance*,
+*ITAR*, *already living locally* — and adding any plain phrases of your own. These
+are yes/no facts, so no model is involved. A hard reject resolves immediately and
+never reaches the queue.
+
+Phrases are matched as whole words automatically, which is not cosmetic: a bare
+`ITAR` typed into the old regex box silently matched "mil**itar**y". Making
+boundaries the compiler's job rather than the user's removes that whole class of
+mistake. Raw patterns are still available under *Advanced* for anything the
+categories can't express.
 
 **Layer 2 — the local model.** Only postings that survive Layer 1 get scored. The
 model returns structured JSON: score, verdict, matches, gaps, required-vs-preferred
@@ -86,13 +93,18 @@ required vs preferred, comp, visa language — with the local evaluation appende
 for pasting into another assistant that already knows your CV.
 
 **Multiple profiles.** More than one candidate can be tracked separately, each with
-its own CV, salary expectations and keyword lists. Scores never mix: the same
+its own CV, salary expectations and screening rules. Scores never mix: the same
 posting evaluated for two people is two records.
 
 ## Privacy
 
-- Nothing is sent anywhere except your own `localhost`. The only host permissions
-  requested are `localhost` and `127.0.0.1`.
+- **No posting or CV is sent anywhere except your own `localhost`.** There is no
+  cloud mode and no telemetry.
+- Host permissions are `localhost`, `127.0.0.1`, and `*://*.greenhouse.io/*`. The
+  last one exists only so the extension can read a Greenhouse job board that a
+  company career site embeds in a cross-origin iframe — without it Chrome won't
+  let a script into that frame, and the posting is invisible. It is read access
+  to job-board pages, nothing more; no data leaves your machine because of it.
 - Everything is stored in `chrome.storage.local` on your machine.
 - **Form subtrees are stripped before any text is sent to the model.** This is not
   incidental: job boards render the posting next to a part-filled application form,
@@ -104,7 +116,7 @@ posting evaluated for two people is two records.
 | Site | Notes |
 |---|---|
 | LinkedIn | Both `/jobs/view/…` and the search-results layout |
-| Greenhouse | Classic job boards and the `my.greenhouse.io` candidate portal |
+| Greenhouse | Classic job boards, the `my.greenhouse.io` candidate portal, and boards embedded in a company's own career site via iframe |
 | Anything else | Generic extractor — finds the largest visible content block |
 
 Site-specific extractors give better titles, companies and locations. The generic

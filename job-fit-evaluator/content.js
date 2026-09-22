@@ -15,13 +15,16 @@
     }
   }
 
-  function compilePatterns(sources) {
-    return sources
-      .map((src) => {
+  // Takes a keyword config (ticked categories + phrases + raw patterns),
+  // compiles it, and carries each entry's human label alongside the regex so
+  // the UI can name the rule that fired without ever showing a pattern.
+  function compileConfig(config, kind) {
+    return JOB_FIT_KEYWORDS.compile(config, kind)
+      .map((entry) => {
         try {
-          return { source: src, re: new RegExp(src, "i") };
+          return { ...entry, re: new RegExp(entry.source, "i") };
         } catch (e) {
-          console.warn(`[Job Fit Evaluator] invalid keyword pattern skipped: ${src}`, e);
+          console.warn(`[Job Fit Evaluator] invalid keyword pattern skipped: ${entry.source}`, e);
           return null;
         }
       })
@@ -65,7 +68,7 @@
   // The pattern is still worth showing for a hard reject — it's the thing
   // you'd go and edit — but labelled as a rule rather than presented as prose.
   function describeHardReject(hardReject) {
-    return `"${cleanMatch(hardReject.matchedText)}" — matched rule: ${hardReject.label}`;
+    return `"${cleanMatch(hardReject.matchedText)}" — ${hardReject.label}`;
   }
 
   function dispatchExtraction() {
@@ -73,7 +76,11 @@
     let result = null;
     let extractorName = "generic";
 
-    if (host.includes("greenhouse.io") && window.__jobFit && window.__jobFit.greenhouse) {
+    // No host check on Greenhouse: as well as greenhouse.io itself, its board
+    // is embedded by company career sites on their own domain, so the
+    // extractor has to get a look regardless of hostname. It returns null
+    // quickly when its selectors aren't present.
+    if (window.__jobFit && window.__jobFit.greenhouse) {
       result = window.__jobFit.greenhouse();
       if (result) extractorName = "greenhouse";
     }
@@ -94,7 +101,9 @@
   function runLayer1(text, hardRejects) {
     for (const item of hardRejects) {
       const m = text.match(item.re);
-      if (m) return { hardReject: { label: item.source, matchedText: m[0] } };
+      // label is the category name ("US citizenship or permanent residency")
+      // or the user's own phrase — never the underlying pattern.
+      if (m) return { hardReject: { label: item.label, matchedText: m[0] } };
     }
     return { hardReject: null };
   }
@@ -317,9 +326,26 @@
   }
 
   async function run({ ignoreCache } = {}) {
+    // Logged on every run so it's immediately visible whether the injection
+    // reached the iframe: a page with an embedded board should produce two of
+    // these, the second with framed=true on a greenhouse.io host.
+    console.log(`[Job Fit Evaluator] running on ${location.hostname} (framed=${window !== window.top})`);
+
+    // On the top frame of a page that embeds a Greenhouse board, the posting
+    // is never in THIS document — defer whether or not extraction succeeded.
+    // Only deferring on failure meant a careers page with enough nav, blog and
+    // footer text to clear the generic extractor's 200-word floor would enqueue
+    // that chrome as though it were the job, alongside the real posting from
+    // the iframe.
+    if (window === window.top && document.querySelector('iframe[src*="greenhouse.io"]')) {
+      console.log("[Job Fit Evaluator] posting lives in an embedded Greenhouse iframe — deferring to it");
+      return;
+    }
+
     const { result, extractorName } = dispatchExtraction();
 
     if (!result) {
+      if (window !== window.top) return;
       console.log(`[Job Fit Evaluator] extraction failed on ${location.hostname} (no usable text found)`);
       renderBanner({
         status: "amber",
@@ -373,7 +399,7 @@
       profileFingerprint: fingerprint,
     };
 
-    const hardRejects = compilePatterns(activeProfile.keywords.hardRejects);
+    const hardRejects = compileConfig(activeProfile.keywords.hardRejects, "hardRejects");
     const layer1 = runLayer1(result.text, hardRejects);
 
     if (layer1.hardReject) {
@@ -395,8 +421,14 @@
       return;
     }
 
-    const domainFlagMatches = matchedLabels(compilePatterns(activeProfile.keywords.domainFlags), result.text);
-    const softWarningMatches = matchedLabels(compilePatterns(activeProfile.keywords.softWarnings), result.text);
+    const domainFlagMatches = matchedLabels(
+      compileConfig(activeProfile.keywords.domainFlags, "domainFlags"),
+      result.text
+    );
+    const softWarningMatches = matchedLabels(
+      compileConfig(activeProfile.keywords.softWarnings, "softWarnings"),
+      result.text
+    );
 
     const flagNotes = [
       domainFlagMatches.length ? `domain flags: ${domainFlagMatches.join(", ")}` : null,
