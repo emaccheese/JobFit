@@ -31,7 +31,7 @@ var JOB_FIT_PROFILES = (function () {
       keywords: {
         hardRejects: clone(JOB_FIT_DEFAULTS.keywords.hardRejects),
         softWarnings: clone(JOB_FIT_DEFAULTS.keywords.softWarnings),
-        domainFlags: [],
+        domainFlags: JOB_FIT_KEYWORDS.emptyConfig(),
       },
       expectedSalary: clone(JOB_FIT_DEFAULTS.expectedSalary),
     };
@@ -48,15 +48,19 @@ var JOB_FIT_PROFILES = (function () {
       id: profile.id || newId(),
       name: profile.name || "Unnamed profile",
       profile: typeof profile.profile === "string" ? profile.profile : "",
+      // normalizeConfig also migrates: a profile saved before this change holds
+      // a flat array of raw regexes, which gets read back as ticked categories
+      // plus whatever didn't belong to one. A key that never existed still
+      // picks up the current default; a list deliberately emptied stays empty.
       keywords: {
-        hardRejects: Array.isArray(keywords.hardRejects)
-          ? keywords.hardRejects
+        hardRejects: keywords.hardRejects
+          ? JOB_FIT_KEYWORDS.normalizeConfig(keywords.hardRejects, "hardRejects")
           : clone(JOB_FIT_DEFAULTS.keywords.hardRejects),
-        softWarnings: Array.isArray(keywords.softWarnings)
-          ? keywords.softWarnings
+        softWarnings: keywords.softWarnings
+          ? JOB_FIT_KEYWORDS.normalizeConfig(keywords.softWarnings, "softWarnings")
           : clone(JOB_FIT_DEFAULTS.keywords.softWarnings),
-        domainFlags: Array.isArray(keywords.domainFlags)
-          ? keywords.domainFlags
+        domainFlags: keywords.domainFlags
+          ? JOB_FIT_KEYWORDS.normalizeConfig(keywords.domainFlags, "domainFlags")
           : clone(JOB_FIT_DEFAULTS.keywords.domainFlags),
       },
       expectedSalary: profile.expectedSalary || clone(JOB_FIT_DEFAULTS.expectedSalary),

@@ -21,37 +21,35 @@ real gap from a silence, and a profile with no gaps scores everything too
 generously.
 Work authorisation: citizenship/visa status and whether you need sponsorship.
 Target: the roles, seniority and locations you actually want.`,
+  // Configured as ticked categories and plain phrases, not regexes — see
+  // keywords.js, which compiles these and owns the word-boundary handling.
+  // The category ids come from JOB_FIT_KEYWORDS.PRESETS.
   keywords: {
-    hardRejects: [
-      "without (current or future )?sponsorship",
-      "not (able|available) to sponsor",
-      "no sponsorship",
-      "must be (a )?(u\\.?s\\.? citizen|us citizen)",
-      "u\\.?s\\.? citizen(ship)? (is )?required",
-      "permanent resident",
-      "green card holder",
-      "\\bITAR\\b",
-      "security clearance",
-      "graduat(ing|ion) (date )?(between|in) (20\\d\\d)",
-      "currently pursuing a (bachelor|master)",
-      "not able to (offer|provide) relocation",
-      "no relocation (assistance|support)",
-      "within (a )?(reasonable )?commut(ing|e) distance",
-      "local candidates only",
-    ],
-    softWarnings: [
-      "export control",
-      "master'?s degree (is )?required",
-    ],
-    domainFlags: [
-      "\\bmachine learning\\b",
-      "\\bdeep learning\\b",
-      "\\bneural network",
-      "\\bPyTorch\\b",
-      "\\bTensorFlow\\b",
-      "\\bmodel training\\b",
-      "\\bcomputer vision model",
-    ],
+    hardRejects: {
+      presets: ["citizenship", "sponsorship", "clearance", "itar", "locality", "relocation", "student"],
+      phrases: [],
+      patterns: [],
+    },
+    softWarnings: {
+      presets: ["exportcontrol", "masters"],
+      phrases: [],
+      patterns: [],
+    },
+    // Personal by construction, so no categories — just the terms this
+    // candidate's profile doesn't cover.
+    domainFlags: {
+      presets: [],
+      phrases: [
+        "machine learning",
+        "deep learning",
+        "neural network",
+        "PyTorch",
+        "TensorFlow",
+        "model training",
+        "computer vision model",
+      ],
+      patterns: [],
+    },
   },
   lmStudio: {
     url: "http://localhost:1234/v1/chat/completions",
