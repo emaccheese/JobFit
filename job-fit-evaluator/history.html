@@ -1,0 +1,159 @@
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="utf-8">
+<title>Tracked jobs — Job Fit Evaluator</title>
+<style>
+  :root {
+    --bg: #f7f8fa; --card: #ffffff; --line: #e2e5ea; --text: #1d2330;
+    --muted: #616b7c; --accent: #3574d6;
+    --green: #1f8a4c; --amber: #b7791f; --red: #c0392b;
+  }
+  * { box-sizing: border-box; }
+  body {
+    margin: 0; padding: 24px 20px 60px; background: var(--bg); color: var(--text);
+    font: 14px/1.5 -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+  }
+  .wrap { max-width: 980px; margin: 0 auto; }
+  h1 { font-size: 20px; margin: 0 0 4px; }
+  .sub { color: var(--muted); font-size: 13px; margin-bottom: 18px; }
+
+  .controls {
+    background: var(--card); border: 1px solid var(--line); border-radius: 8px;
+    padding: 12px; margin-bottom: 16px; display: flex; flex-wrap: wrap; gap: 10px; align-items: flex-end;
+  }
+  .field { display: flex; flex-direction: column; gap: 4px; }
+  .field > span { font-size: 11px; font-weight: 600; color: var(--muted); text-transform: uppercase; letter-spacing: .04em; }
+  select, input[type="text"], textarea {
+    font: inherit; padding: 6px 8px; border: 1px solid #ccd2da; border-radius: 5px; background: #fff; color: inherit;
+  }
+  input[type="text"] { min-width: 200px; }
+  .field-grow { flex: 1; min-width: 200px; }
+  .field-grow input { width: 100%; }
+  .checkfield { display: flex; align-items: center; gap: 6px; font-size: 13px; padding-bottom: 6px; }
+  button {
+    font: inherit; padding: 6px 12px; border: 1px solid #ccd2da; border-radius: 5px;
+    background: #fff; color: inherit; cursor: pointer;
+  }
+  button:hover { background: #f0f2f5; }
+  button.danger { color: var(--red); border-color: #e3c0bb; }
+
+  .queue { background: var(--card); border: 1px solid var(--line); border-radius: 8px; padding: 12px; margin-bottom: 16px; }
+  .queue-head { display: flex; align-items: center; justify-content: space-between; gap: 10px; margin-bottom: 8px; }
+  .queue-actions { display: flex; gap: 8px; }
+  .queue-pause { background: #fdf3e2; color: var(--amber); border-radius: 5px; padding: 8px 10px; margin-bottom: 8px; font-size: 13px; }
+  .qrow { display: flex; align-items: center; gap: 10px; padding: 6px 0; border-top: 1px solid var(--line); font-size: 13px; }
+  .qrow:first-child { border-top: none; }
+  .qstate {
+    flex: 0 0 auto; font-size: 10px; font-weight: 700; text-transform: uppercase; letter-spacing: .04em;
+    border-radius: 3px; padding: 2px 6px; background: #eef1f5; color: var(--muted);
+  }
+  .qstate.processing { background: #eaf1fb; color: var(--accent); }
+  .qstate.failed { background: #fdeceb; color: var(--red); }
+  .qstate.done { background: #e6f4ec; color: var(--green); }
+  .qtitle { flex: 1; min-width: 0; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .qerr { color: var(--red); font-size: 12px; margin-left: 28px; padding-bottom: 6px; }
+  .qrow button { padding: 3px 8px; font-size: 12px; }
+
+  .job { background: var(--card); border: 1px solid var(--line); border-radius: 8px; margin-bottom: 10px; overflow: hidden; }
+  .job-head { display: flex; align-items: center; gap: 12px; padding: 12px 14px; cursor: pointer; }
+  .job-head:hover { background: #fafbfc; }
+  .chev { color: var(--muted); font-size: 11px; width: 10px; flex: 0 0 10px; display: inline-block; transition: transform .12s ease; }
+  .job.open .chev { transform: rotate(90deg); }
+  .score {
+    flex: 0 0 46px; height: 34px; border-radius: 6px; display: flex; align-items: center; justify-content: center;
+    font-weight: 700; font-size: 15px; color: #fff; background: var(--muted);
+  }
+  .score.green { background: var(--green); } .score.amber { background: var(--amber); } .score.red { background: var(--red); }
+  .job-title { flex: 1; min-width: 0; }
+  .job-title strong { display: block; font-size: 14px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .job-title > span { display: block; font-size: 12px; color: var(--muted); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .badge.badge-muted { background: #eef1f5; color: var(--muted); }
+  .badge {
+    display: inline-block; vertical-align: middle;
+    font-size: 10px; font-weight: 700; text-transform: uppercase; letter-spacing: .04em;
+    background: #fdeceb; color: var(--red); border-radius: 3px; padding: 2px 5px; margin-left: 6px;
+  }
+  .when { flex: 0 0 auto; font-size: 12px; color: var(--muted); text-align: right; }
+  .job-head select { flex: 0 0 auto; max-width: 240px; }
+
+  .job-body { border-top: 1px solid var(--line); padding: 14px; display: none; }
+  .job.open .job-body { display: block; }
+  .job-body h3 { font-size: 12px; text-transform: uppercase; letter-spacing: .04em; color: var(--muted); margin: 16px 0 6px; }
+  .job-body h3:first-child { margin-top: 0; }
+  .desc {
+    white-space: pre-wrap; background: #f7f8fa; border: 1px solid var(--line); border-radius: 6px;
+    padding: 10px; max-height: 340px; overflow-y: auto; font-size: 13px;
+  }
+  .tag { display: inline-block; font-size: 12px; border-radius: 4px; padding: 2px 7px; margin: 0 4px 4px 0; }
+  .tag-green { background: #e6f4ec; color: var(--green); }
+  .tag-amber { background: #fdf3e2; color: var(--amber); }
+  .tag-red { background: #fdeceb; color: var(--red); }
+  .tag-neutral { background: #eef1f5; color: var(--muted); }
+  .verdict-line { display: flex; align-items: center; gap: 8px; margin-bottom: 6px; }
+  .verdict-line strong { font-size: 18px; }
+  .verdict-word { font-size: 12px; text-transform: uppercase; letter-spacing: .04em; color: var(--muted); }
+  .brief-actions { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; margin-top: 8px; }
+  .brief-note { font-size: 12px; color: var(--muted); }
+  .notes { width: 100%; min-height: 60px; resize: vertical; }
+  .row-actions { display: flex; justify-content: space-between; align-items: center; gap: 10px; margin-top: 14px; }
+  .saved { font-size: 12px; color: var(--green); }
+  a { color: var(--accent); word-break: break-all; }
+  .empty { background: var(--card); border: 1px dashed var(--line); border-radius: 8px; padding: 40px; text-align: center; color: var(--muted); }
+</style>
+</head>
+<body>
+  <div class="wrap">
+    <h1>Tracked jobs</h1>
+    <div class="sub" id="subtitle"></div>
+
+    <div class="controls">
+      <label class="field">
+        <span>Profile</span>
+        <select id="profileSelect"></select>
+      </label>
+      <label class="field">
+        <span>Sort by</span>
+        <select id="sortSelect">
+          <option value="score-desc">Score — high to low</option>
+          <option value="score-asc">Score — low to high</option>
+          <option value="viewed-desc">Last activity — newest</option>
+          <option value="viewed-asc">Last activity — oldest</option>
+          <option value="applied-desc">Date applied — newest</option>
+          <option value="company-asc">Company A–Z</option>
+          <option value="status">Application status</option>
+        </select>
+      </label>
+      <label class="field">
+        <span>Status</span>
+        <select id="statusFilter"></select>
+      </label>
+      <label class="field field-grow">
+        <span>Search</span>
+        <input id="search" type="text" placeholder="title, company, or anything in the posting">
+      </label>
+      <label class="checkfield"><input id="hideRejects" type="checkbox"> Hide hard rejects</label>
+      <button id="exportCsv" type="button">Export CSV</button>
+    </div>
+
+    <div id="queuePanel" class="queue" hidden>
+      <div class="queue-head">
+        <strong id="queueTitle">Queue</strong>
+        <div class="queue-actions">
+          <button id="queueResume" type="button" hidden>Resume</button>
+          <button id="queueClear" type="button">Clear finished</button>
+        </div>
+      </div>
+      <div id="queuePause" class="queue-pause" hidden></div>
+      <div id="queueItems"></div>
+    </div>
+
+    <div id="list"></div>
+  </div>
+
+  <script src="defaults.js"></script>
+  <script src="profiles.js"></script>
+  <script src="evalstore.js"></script>
+  <script src="history.js"></script>
+</body>
+</html>

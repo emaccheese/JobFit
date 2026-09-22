@@ -1,0 +1,178 @@
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="utf-8">
+<title>Job Fit Evaluator</title>
+<style>
+  body { width: 360px; font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif; font-size: 13px; margin: 0; padding: 12px; }
+  h1 { font-size: 14px; margin: 0 0 8px; }
+  section { margin-bottom: 14px; }
+  label { display: block; font-weight: 600; margin-bottom: 4px; }
+  textarea, input[type="text"], input[type="number"], select { width: 100%; box-sizing: border-box; font-family: inherit; font-size: 12px; padding: 6px; border: 1px solid #ccc; border-radius: 4px; }
+  textarea { resize: vertical; }
+  .row { display: flex; gap: 8px; }
+  .row > * { flex: 1; min-width: 0; }
+  .row .currency-label { flex: 0 0 36px; align-self: center; font-weight: 600; text-align: right; }
+  button { font: inherit; padding: 6px 12px; border-radius: 4px; border: 1px solid #ccc; background: #f5f5f5; cursor: pointer; }
+  button.primary { background: #3574d6; color: white; border-color: #3574d6; }
+  #status { font-size: 11px; color: #555; margin-top: 6px; min-height: 14px; }
+  details summary { cursor: pointer; font-weight: 600; margin-bottom: 6px; }
+  details { border: 1px solid #e3e3e3; border-radius: 4px; padding: 8px; margin-bottom: 10px; }
+  details[open] summary { margin-bottom: 8px; }
+  details > section:last-child { margin-bottom: 0; }
+  .profile-bar { background: #f0f4fa; border: 1px solid #d6e0f0; border-radius: 4px; padding: 8px; margin-bottom: 12px; }
+  .profile-bar .row { margin-top: 6px; }
+  .profile-bar button { padding: 4px 6px; font-size: 11px; }
+  .profile-bar details { border: none; background: transparent; padding: 0; margin: 8px 0 0; }
+  .profile-bar details summary { font-size: 11px; font-weight: 600; color: #3a4a63; margin-bottom: 0; }
+  .profile-bar details[open] summary { margin-bottom: 4px; }
+  .hint { font-size: 11px; color: #555; margin-top: 4px; }
+</style>
+</head>
+<body>
+  <h1>Job Fit Evaluator</h1>
+
+  <div class="profile-bar">
+    <label for="profileSelect">Evaluating as</label>
+    <select id="profileSelect"></select>
+    <details id="sec-profilemanage">
+      <summary>Manage profiles</summary>
+      <div class="row">
+        <button id="profileNew" type="button">New</button>
+        <button id="profileDuplicate" type="button">Duplicate</button>
+        <button id="profileRename" type="button">Rename</button>
+        <button id="profileDelete" type="button">Delete</button>
+      </div>
+      <div class="row" id="profileNameRow" hidden>
+        <input id="profileNameInput" type="text" placeholder="Profile name">
+        <button id="profileNameOk" class="primary" type="button" style="flex:0 0 auto;">OK</button>
+        <button id="profileNameCancel" type="button" style="flex:0 0 auto;">Cancel</button>
+      </div>
+    </details>
+    <div class="hint" id="profileHint"></div>
+  </div>
+
+  <section>
+    <button id="evaluate" class="primary" type="button" style="width:100%;">Evaluate this tab</button>
+  </section>
+
+  <section>
+    <button id="summarizeTab" type="button" style="width:100%;">Summarize this tab</button>
+    <div id="summarizeStatus" style="font-size: 11px; color: #555; margin-top: 4px; min-height: 14px;"></div>
+    <textarea id="summarizeResult" rows="8" readonly hidden style="margin-top: 6px;"></textarea>
+    <button id="copySummary" type="button" hidden style="margin-top: 6px; width: 100%;">Copy</button>
+  </section>
+
+  <div id="queueStatus" class="hint" style="display:none; background:#eaf1fb; border:1px solid #cfdcf0; border-radius:4px; padding:6px 8px; margin-bottom:12px;"></div>
+
+  <section>
+    <button id="viewHistory" type="button" style="width:100%;">View tracked jobs</button>
+  </section>
+
+  <details id="sec-lmstudio">
+    <summary>Local model (LM Studio)</summary>
+    <div class="hint" style="margin-bottom:8px;">Shared by every profile — one LM Studio on this machine.</div>
+
+  <section>
+    <label for="lmStudioUrl">LM Studio endpoint</label>
+    <input id="lmStudioUrl" type="text" placeholder="http://localhost:1234/v1/chat/completions">
+  </section>
+
+  <section>
+    <label for="lmStudioModel">LM Studio model name</label>
+    <input id="lmStudioModel" type="text" placeholder="whatever's loaded, e.g. qwen2.5-coder-7b-instruct">
+  </section>
+
+  <section>
+    <label for="lmStudioTimeout">Response timeout (seconds)</label>
+    <input id="lmStudioTimeout" type="number" placeholder="300">
+  </section>
+
+  <section>
+    <label for="lmStudioReasoningEffort">Reasoning effort (for models that support it)</label>
+    <select id="lmStudioReasoningEffort">
+      <option value="">(none — model default)</option>
+      <option value="low">low</option>
+      <option value="medium">medium</option>
+      <option value="high">high</option>
+      <option value="xhigh">xhigh</option>
+    </select>
+  </section>
+
+  <section>
+    <label style="display:flex; align-items:center; gap:6px; font-weight:600;">
+      <input id="lmStudioEnableThinking" type="checkbox" style="width:auto;">
+      Enable model thinking/reasoning
+    </label>
+    <div style="font-size: 11px; color: #555; margin-top: 4px;">Off by default for speed. Some models expose this directly (stronger than just lowering reasoning effort) — check LM Studio's model page for a "Enable Thinking" custom field to confirm it's supported.</div>
+  </section>
+  </details>
+
+  <details id="sec-profile">
+    <summary>Candidate profile</summary>
+    <section>
+      <label for="profile">The CV summary this profile is scored against — keep it under ~400 words</label>
+      <textarea id="profile" rows="8"></textarea>
+    </section>
+  </details>
+
+  <details id="sec-salary">
+    <summary>Expected salary</summary>
+    <section>
+    <label>Per currency — informational: shown in Details and doesn't directly set the score, but a posting far below your floor for its currency triggers the seniority/comp check</label>
+    <div class="row" style="margin-bottom: 6px;">
+      <span class="currency-label">USD</span>
+      <input id="salaryUsdMin" type="number" placeholder="Min">
+      <input id="salaryUsdMax" type="number" placeholder="Max">
+    </div>
+    <div class="row" style="margin-bottom: 6px;">
+      <span class="currency-label">CAD</span>
+      <input id="salaryCadMin" type="number" placeholder="Min">
+      <input id="salaryCadMax" type="number" placeholder="Max">
+    </div>
+    <div class="row">
+      <span class="currency-label">MXN</span>
+      <input id="salaryMxnMin" type="number" placeholder="Min">
+      <input id="salaryMxnMax" type="number" placeholder="Max">
+    </div>
+    <button id="suggestSalary" type="button" style="width:100%; margin-top:6px;">Suggest all</button>
+    <div id="salaryReasoning" style="font-size: 11px; color: #555; margin-top: 4px;"></div>
+    </section>
+  </details>
+
+  <details id="sec-hardrejects">
+    <summary>Hard-reject phrases</summary>
+    <section>
+      <label for="hardRejects">One regex per line — checked against the posting before calling the local model</label>
+      <textarea id="hardRejects" rows="8"></textarea>
+    </section>
+  </details>
+
+  <details id="sec-warnings">
+    <summary>Warnings (amber)</summary>
+    <section>
+      <label for="softWarnings">One regex per line — flagged for your judgment but never blocks the evaluation or changes the score (e.g. "export control", which is often satisfiable, unlike ITAR)</label>
+      <textarea id="softWarnings" rows="4"></textarea>
+    </section>
+  </details>
+
+  <details id="sec-domainflags">
+    <summary>Domain flags</summary>
+    <section>
+      <label for="domainFlags">One regex per line — requirement domains to always flag and cross-check, independent of the model's own reasoning (e.g. skills your profile doesn't cover)</label>
+      <textarea id="domainFlags" rows="6"></textarea>
+    </section>
+  </details>
+
+  <div class="row">
+    <button id="save" class="primary" type="button" style="flex:1;">Save</button>
+    <button id="reset" type="button" title="Restores the hard-reject and warning lists for this profile. Leaves the candidate text, domain flags, salary and LM Studio settings alone.">Reset keyword lists</button>
+  </div>
+  <div id="status"></div>
+
+  <script src="defaults.js"></script>
+  <script src="profiles.js"></script>
+  <script src="evalstore.js"></script>
+  <script src="popup.js"></script>
+</body>
+</html>

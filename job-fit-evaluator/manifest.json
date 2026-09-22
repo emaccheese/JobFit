@@ -1,0 +1,15 @@
+{
+  "manifest_version": 3,
+  "name": "JobFit",
+  "version": "0.3.0",
+  "description": "Evaluates a job posting on the current tab against a stored candidate profile.",
+  "permissions": ["activeTab", "scripting", "storage", "unlimitedStorage", "alarms"],
+  "host_permissions": ["http://localhost/*", "http://127.0.0.1/*"],
+  "background": {
+    "service_worker": "background.js"
+  },
+  "action": {
+    "default_title": "JobFit",
+    "default_popup": "popup.html"
+  }
+}

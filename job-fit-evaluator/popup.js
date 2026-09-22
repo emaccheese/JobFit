@@ -1,0 +1,679 @@
+// MV3 service workers go idle after ~30s. Waking one via sendMessage can
+// lose a race the first time (message dispatched before its listener is
+// registered), throwing "Receiving end does not exist" even though a
+// manual retry would succeed immediately after. Retry transparently
+// instead of surfacing that as a real error.
+async function sendMessageWithRetry(message, retries = 2, delayMs = 250) {
+  for (let attempt = 0; attempt <= retries; attempt++) {
+    try {
+      return await chrome.runtime.sendMessage(message);
+    } catch (err) {
+      if (attempt === retries) throw err;
+      await new Promise((resolve) => setTimeout(resolve, delayMs));
+    }
+  }
+}
+
+const els = {
+  profileSelect: document.getElementById("profileSelect"),
+  profileNameRow: document.getElementById("profileNameRow"),
+  profileNameInput: document.getElementById("profileNameInput"),
+  profileHint: document.getElementById("profileHint"),
+  lmStudioUrl: document.getElementById("lmStudioUrl"),
+  lmStudioModel: document.getElementById("lmStudioModel"),
+  lmStudioTimeout: document.getElementById("lmStudioTimeout"),
+  lmStudioReasoningEffort: document.getElementById("lmStudioReasoningEffort"),
+  lmStudioEnableThinking: document.getElementById("lmStudioEnableThinking"),
+  profile: document.getElementById("profile"),
+  salaryUsdMin: document.getElementById("salaryUsdMin"),
+  salaryUsdMax: document.getElementById("salaryUsdMax"),
+  salaryCadMin: document.getElementById("salaryCadMin"),
+  salaryCadMax: document.getElementById("salaryCadMax"),
+  salaryMxnMin: document.getElementById("salaryMxnMin"),
+  salaryMxnMax: document.getElementById("salaryMxnMax"),
+  hardRejects: document.getElementById("hardRejects"),
+  softWarnings: document.getElementById("softWarnings"),
+  domainFlags: document.getElementById("domainFlags"),
+  status: document.getElementById("status"),
+};
+
+const SALARY_CURRENCIES = ["USD", "CAD", "MXN"];
+
+function salaryFieldsFor(currency) {
+  const key = currency.charAt(0) + currency.slice(1).toLowerCase();
+  return { min: els[`salary${key}Min`], max: els[`salary${key}Max`] };
+}
+
+function linesToArray(text) {
+  return text
+    .split("\n")
+    .map((l) => l.trim())
+    .filter(Boolean);
+}
+
+function arrayToLines(arr) {
+  return (arr || []).join("\n");
+}
+
+let statusTimer = null;
+
+function setStatus(text, { persist = false } = {}) {
+  els.status.textContent = text;
+  clearTimeout(statusTimer);
+  // Errors stay put: a message that clears itself after two seconds is no use
+  // for explaining why a button did nothing.
+  if (!persist) statusTimer = setTimeout(() => (els.status.textContent = ""), 2000);
+}
+
+// chrome.scripting refuses to inject into chrome:// pages, the Web Store,
+// PDF viewers, other extensions' pages, and any tab whose host the extension
+// can't access. Left unhandled, the rejection stranded the popup: the button
+// stayed disabled, the popup never closed, and nothing said why.
+function injectionErrorMessage(err) {
+  const raw = err && err.message ? err.message : String(err);
+  if (/cannot be scripted|Cannot access|chrome:\/\/|Extension manifest|blocked/i.test(raw)) {
+    return "Chrome won't let the extension run on this page (browser pages, the Web Store and PDFs are off-limits). Open the posting on a normal web page and try again.";
+  }
+  return `Couldn't run on this tab: ${raw}`;
+}
+
+// The whole profile store, held in memory while the popup is open so
+// switching profiles doesn't need a storage round trip per keystroke.
+let store = { profiles: [], activeProfileId: null };
+// Which profile the form fields currently belong to. Needed because a switch
+// has to write the form back to the OUTGOING profile, not the incoming one.
+let formProfileId = null;
+function activeProfile() {
+  return store.profiles.find((p) => p.id === store.activeProfileId) || store.profiles[0];
+}
+
+function renderProfileSelect() {
+  els.profileSelect.innerHTML = "";
+  store.profiles.forEach((p) => {
+    const opt = document.createElement("option");
+    opt.value = p.id;
+    opt.textContent = p.name;
+    els.profileSelect.appendChild(opt);
+  });
+  // No guard needed around this: assigning .value never fires a change event,
+  // so the switch handler can't see a programmatic repopulation.
+  els.profileSelect.value = store.activeProfileId;
+}
+
+// Reads the per-profile fields out of the form. Deliberately does not touch
+// the LM Studio fields — those are global and saved separately.
+function collectProfileFields() {
+  const expectedSalary = {};
+  SALARY_CURRENCIES.forEach((cur) => {
+    const { min, max } = salaryFieldsFor(cur);
+    expectedSalary[cur] = {
+      min: min.value === "" ? null : Number(min.value),
+      max: max.value === "" ? null : Number(max.value),
+    };
+  });
+  return {
+    profile: els.profile.value,
+    keywords: {
+      hardRejects: linesToArray(els.hardRejects.value),
+      softWarnings: linesToArray(els.softWarnings.value),
+      domainFlags: linesToArray(els.domainFlags.value),
+    },
+    expectedSalary,
+  };
+}
+
+function fillFormFromProfile(profile) {
+  els.profile.value = profile.profile;
+  els.hardRejects.value = arrayToLines(profile.keywords.hardRejects);
+  els.softWarnings.value = arrayToLines(profile.keywords.softWarnings);
+  els.domainFlags.value = arrayToLines(profile.keywords.domainFlags);
+  SALARY_CURRENCIES.forEach((cur) => {
+    const range = profile.expectedSalary[cur] || { min: null, max: null };
+    const { min, max } = salaryFieldsFor(cur);
+    min.value = range.min ?? "";
+    max.value = range.max ?? "";
+  });
+  formProfileId = profile.id;
+  document.getElementById("salaryReasoning").textContent = "";
+  applyForcedSections();
+}
+
+// Folds whatever is in the form back into the in-memory profile it came from.
+// Called before switching away and before saving.
+function captureForm() {
+  const target = store.profiles.find((p) => p.id === formProfileId);
+  if (!target) return;
+  Object.assign(target, collectProfileFields());
+}
+
+async function loadSettings() {
+  const stored = await chrome.storage.local.get(["lmStudio", "uiOpenSections"]);
+  const lmStudio = stored.lmStudio || JOB_FIT_DEFAULTS.lmStudio;
+  els.lmStudioUrl.value = lmStudio.url || JOB_FIT_DEFAULTS.lmStudio.url;
+  els.lmStudioModel.value = lmStudio.model || "";
+  els.lmStudioTimeout.value = lmStudio.timeoutSeconds || JOB_FIT_DEFAULTS.lmStudio.timeoutSeconds;
+  els.lmStudioReasoningEffort.value = lmStudio.reasoningEffort ?? JOB_FIT_DEFAULTS.lmStudio.reasoningEffort;
+  els.lmStudioEnableThinking.checked =
+    typeof lmStudio.enableThinking === "boolean" ? lmStudio.enableThinking : JOB_FIT_DEFAULTS.lmStudio.enableThinking;
+
+  store = await JOB_FIT_PROFILES.load();
+  renderProfileSelect();
+  restoreOpenSections(stored.uiOpenSections);
+  fillFormFromProfile(activeProfile());
+}
+
+async function saveSettings() {
+  captureForm();
+  await chrome.storage.local.set({
+    lmStudio: {
+      url: els.lmStudioUrl.value.trim() || JOB_FIT_DEFAULTS.lmStudio.url,
+      model: els.lmStudioModel.value.trim(),
+      timeoutSeconds:
+        els.lmStudioTimeout.value === "" ? JOB_FIT_DEFAULTS.lmStudio.timeoutSeconds : Number(els.lmStudioTimeout.value),
+      reasoningEffort: els.lmStudioReasoningEffort.value,
+      enableThinking: els.lmStudioEnableThinking.checked,
+    },
+  });
+  await JOB_FIT_PROFILES.save(store);
+  setStatus(`Saved "${activeProfile().name}".`);
+}
+
+// Switching auto-saves the outgoing profile rather than warning about unsaved
+// edits — the popup is transient enough that a "discard changes?" prompt would
+// fire constantly, and a half-typed regex persisted is harmless and editable.
+async function switchProfile(id) {
+  captureForm();
+  await JOB_FIT_PROFILES.save(store);
+  store.activeProfileId = id;
+  await JOB_FIT_PROFILES.save(store);
+  fillFormFromProfile(activeProfile());
+  setStatus(`Switched to "${activeProfile().name}".`);
+}
+
+// Name entry is inline rather than window.prompt(): a modal dialog in an
+// extension popup can dismiss the popup itself, losing the form with it.
+let pendingNameAction = null;
+
+function askForName(action, initialValue) {
+  pendingNameAction = action;
+  els.profileNameInput.value = initialValue || "";
+  els.profileNameRow.hidden = false;
+  els.profileNameInput.focus();
+  els.profileNameInput.select();
+}
+
+function cancelNamePrompt() {
+  pendingNameAction = null;
+  els.profileNameRow.hidden = true;
+  els.profileNameInput.value = "";
+}
+
+async function confirmNamePrompt() {
+  const name = els.profileNameInput.value.trim();
+  const action = pendingNameAction;
+  if (!action) return;
+  if (!name) {
+    els.profileHint.textContent = "Give the profile a name.";
+    return;
+  }
+
+  captureForm();
+
+  if (action === "rename") {
+    activeProfile().name = name;
+  } else {
+    const created =
+      action === "duplicate"
+        ? Object.assign(JOB_FIT_PROFILES.clone(activeProfile()), { id: JOB_FIT_PROFILES.newId(), name })
+        : JOB_FIT_PROFILES.blankProfile(name);
+    store.profiles.push(created);
+    store.activeProfileId = created.id;
+  }
+
+  await JOB_FIT_PROFILES.save(store);
+  renderProfileSelect();
+  fillFormFromProfile(activeProfile());
+  cancelNamePrompt();
+  els.profileHint.textContent =
+    action === "new"
+      ? "New profile — hard rejects carried over, domain flags left empty (they're specific to one person's gaps)."
+      : "";
+  setStatus(action === "rename" ? "Renamed." : `Created "${name}".`);
+}
+
+// Two-step rather than confirm(), same popup-dismissal reason as above.
+let deleteArmed = false;
+
+async function deleteProfile() {
+  const btn = document.getElementById("profileDelete");
+  if (store.profiles.length < 2) {
+    els.profileHint.textContent = "Can't delete the only profile.";
+    return;
+  }
+
+  if (!deleteArmed) {
+    deleteArmed = true;
+    btn.textContent = "Sure?";
+    // The tracked-job count goes in the warning because those records are
+    // deleted too, and that's the part you can't get back — the profile
+    // itself is a minute of retyping.
+    const tracked = await JOB_FIT_EVALSTORE.countForProfile(store.activeProfileId);
+    const jobsNote = tracked
+      ? ` and its ${tracked} tracked job${tracked === 1 ? "" : "s"} (evaluations, briefs, notes and application status)`
+      : "";
+    els.profileHint.textContent = `Click again to delete "${activeProfile().name}"${jobsNote}.`;
+    setTimeout(() => {
+      deleteArmed = false;
+      btn.textContent = "Delete";
+      if (els.profileHint.textContent.startsWith("Click again")) els.profileHint.textContent = "";
+    }, 6000);
+    return;
+  }
+
+  deleteArmed = false;
+  btn.textContent = "Delete";
+  const removed = activeProfile().name;
+  const removedId = store.activeProfileId;
+
+  // Records first: if this throws, the profile stays and the records are still
+  // reachable. The other order would strand them permanently.
+  let removedJobs = 0;
+  try {
+    removedJobs = await JOB_FIT_EVALSTORE.removeAllForProfile(removedId);
+  } catch (err) {
+    els.profileHint.textContent = `Couldn't delete that profile's jobs: ${err.message}`;
+    return;
+  }
+
+  store.profiles = store.profiles.filter((p) => p.id !== removedId);
+  store.activeProfileId = store.profiles[0].id;
+  await JOB_FIT_PROFILES.save(store);
+  renderProfileSelect();
+  fillFormFromProfile(activeProfile());
+  els.profileHint.textContent = "";
+  setStatus(removedJobs ? `Deleted "${removed}" and ${removedJobs} tracked jobs.` : `Deleted "${removed}".`);
+}
+
+// Only the reject/warning lists. The candidate text can't be reset to a
+// default that means anything once profiles exist (restoring one person's CV
+// into another person's profile is nonsense), and domain flags are per-person
+// by construction.
+function resetKeywordLists() {
+  els.hardRejects.value = arrayToLines(JOB_FIT_DEFAULTS.keywords.hardRejects);
+  els.softWarnings.value = arrayToLines(JOB_FIT_DEFAULTS.keywords.softWarnings);
+  setStatus("Reject and warning lists restored (not yet saved).");
+}
+
+// The popup document is destroyed whenever it loses focus, so a <details> the
+// user opened would collapse again on every reopen. Persist the state instead.
+const SECTION_IDS = [
+  "sec-profilemanage",
+  "sec-profile",
+  "sec-lmstudio",
+  "sec-salary",
+  "sec-hardrejects",
+  "sec-warnings",
+  "sec-domainflags",
+];
+
+function restoreOpenSections(saved) {
+  const state = saved || {};
+  SECTION_IDS.forEach((id) => {
+    const el = document.getElementById(id);
+    if (el) el.open = Boolean(state[id]);
+  });
+}
+
+// Collapsed-by-default is right until a section holds the field you can't get
+// anywhere without — an unconfigured model name, or a profile with no CV text
+// yet (which is every profile the moment after you create it). Opening those
+// beats making someone hunt for why nothing works.
+function applyForcedSections() {
+  if (!els.lmStudioModel.value.trim()) document.getElementById("sec-lmstudio").open = true;
+  if (!els.profile.value.trim()) document.getElementById("sec-profile").open = true;
+}
+
+function persistOpenSections() {
+  const state = {};
+  SECTION_IDS.forEach((id) => {
+    const el = document.getElementById(id);
+    if (el) state[id] = el.open;
+  });
+  chrome.storage.local.set({ uiOpenSections: state });
+}
+
+async function renderQueueStatus() {
+  const box = document.getElementById("queueStatus");
+  let snapshot;
+  try {
+    snapshot = await sendMessageWithRetry({ type: "JOB_FIT_QUEUE_SNAPSHOT" });
+  } catch (err) {
+    box.style.display = "none";
+    return;
+  }
+  if (!snapshot || !snapshot.items) {
+    box.style.display = "none";
+    return;
+  }
+
+  const processing = snapshot.items.find((i) => i.state === "processing");
+  const pending = snapshot.items.filter((i) => i.state === "pending").length;
+  const failed = snapshot.items.filter((i) => i.state === "failed").length;
+
+  if (!snapshot.active && !failed) {
+    box.style.display = "none";
+    return;
+  }
+
+  const parts = [];
+  if (processing) parts.push(`Processing “${processing.title || "posting"}”`);
+  if (pending) parts.push(`${pending} waiting`);
+  if (failed) parts.push(`${failed} failed`);
+  if (snapshot.state === "paused") parts.unshift("⏸ Queue paused");
+
+  box.textContent = `${parts.join(" · ")} — see tracked jobs`;
+  box.style.display = "block";
+}
+
+async function suggestSalary() {
+  const btn = document.getElementById("suggestSalary");
+  const reasoningEl = document.getElementById("salaryReasoning");
+
+  // With no CV the model has nothing to reason from and returns a plausible
+  // invented range, which is worse than no answer — you'd save it as your own
+  // expectation and every salary comparison after that would be built on it.
+  if (!els.profile.value.trim()) {
+    reasoningEl.textContent = "Fill in the candidate profile first — with no CV the model just invents a range.";
+    document.getElementById("sec-profile").open = true;
+    els.profile.focus();
+    return;
+  }
+
+  btn.disabled = true;
+  btn.textContent = "…";
+  reasoningEl.textContent = "";
+
+  try {
+    const response = await sendMessageWithRetry({
+      type: "JOB_FIT_SUGGEST_SALARY",
+      profile: els.profile.value,
+    });
+
+    if (!response || !response.ok) {
+      reasoningEl.textContent = response?.error || "Could not get a suggestion.";
+      return;
+    }
+
+    SALARY_CURRENCIES.forEach((cur) => {
+      const range = response.data[cur];
+      if (!range) return;
+      const { min, max } = salaryFieldsFor(cur);
+      if (range.min != null) min.value = range.min;
+      if (range.max != null) max.value = range.max;
+    });
+
+    reasoningEl.textContent = response.data.reasoning
+      ? `${response.data.reasoning} (review before saving)`
+      : "Suggested — review before saving.";
+  } catch (err) {
+    reasoningEl.textContent = `Error: ${err.message}`;
+  } finally {
+    btn.disabled = false;
+    btn.textContent = "Suggest all";
+  }
+}
+
+async function evaluateCurrentTab() {
+  // Guard against a double-click firing two concurrent evaluations (and two
+  // concurrent LM Studio requests) before the popup has a chance to close.
+  const btn = document.getElementById("evaluate");
+  if (btn.disabled) return;
+  btn.disabled = true;
+
+  const [tab] = await chrome.tabs.query({ active: true, currentWindow: true });
+  if (!tab?.id) {
+    btn.disabled = false;
+    return;
+  }
+  try {
+    await chrome.scripting.insertCSS({ target: { tabId: tab.id }, files: ["content.css"] });
+    await chrome.scripting.executeScript({
+      target: { tabId: tab.id },
+      files: [
+        "defaults.js",
+        "profiles.js",
+        "evalstore.js",
+        "extractors/text.js",
+        "extractors/generic.js",
+        "extractors/greenhouse.js",
+        "extractors/linkedin.js",
+        "jobkey.js",
+        "content.js",
+      ],
+    });
+  } catch (err) {
+    setStatus(injectionErrorMessage(err), { persist: true });
+    btn.disabled = false;
+    return;
+  }
+  window.close();
+}
+
+function extractOnPage() {
+  const host = location.hostname;
+  let extracted = null;
+  if (host.includes("greenhouse.io") && window.__jobFit && window.__jobFit.greenhouse) {
+    extracted = window.__jobFit.greenhouse();
+  }
+  if (!extracted && host.includes("linkedin.com") && window.__jobFit && window.__jobFit.linkedin) {
+    extracted = window.__jobFit.linkedin();
+  }
+  if (!extracted && window.__jobFit && window.__jobFit.generic) {
+    extracted = window.__jobFit.generic();
+  }
+  if (!extracted) return null;
+  // Computed in the page, where location and the DOM are available, so the
+  // popup can look this posting up in history.
+  return { ...extracted, jobKey: JOB_FIT_JOBKEY.keyFor(extracted) };
+}
+
+async function summarizeCurrentTab() {
+  const btn = document.getElementById("summarizeTab");
+  const statusEl = document.getElementById("summarizeStatus");
+  const resultEl = document.getElementById("summarizeResult");
+  const copyBtn = document.getElementById("copySummary");
+
+  btn.disabled = true;
+  resultEl.hidden = true;
+  copyBtn.hidden = true;
+  statusEl.textContent = "Extracting…";
+
+  const [tab] = await chrome.tabs.query({ active: true, currentWindow: true });
+  if (!tab?.id) {
+    statusEl.textContent = "No active tab.";
+    btn.disabled = false;
+    return;
+  }
+
+  let extracted;
+  try {
+    await chrome.scripting.executeScript({
+      target: { tabId: tab.id },
+      files: [
+        "defaults.js",
+        "profiles.js",
+        "evalstore.js",
+        "extractors/text.js",
+        "extractors/generic.js",
+        "extractors/greenhouse.js",
+        "extractors/linkedin.js",
+        "jobkey.js",
+      ],
+    });
+    const results = await chrome.scripting.executeScript({
+      target: { tabId: tab.id },
+      func: extractOnPage,
+    });
+    extracted = results && results[0] && results[0].result;
+  } catch (err) {
+    statusEl.textContent = injectionErrorMessage(err);
+    btn.disabled = false;
+    return;
+  }
+
+  if (!extracted) {
+    statusEl.textContent = "Couldn't extract job posting text on this tab.";
+    btn.disabled = false;
+    return;
+  }
+
+  // Through the same single-flight lane as evaluations, so there is never more
+  // than one request to LM Studio: two at once roughly halves the throughput
+  // of both. Priority, so it runs before queued evaluations rather than behind
+  // ten of them.
+  const active = activeProfile();
+  const requestedAt = Date.now();
+
+  let response;
+  try {
+    response = await sendMessageWithRetry({
+      type: "JOB_FIT_ENQUEUE",
+      priority: true,
+      tabId: tab.id,
+      item: {
+        kind: "summarize",
+        jobKey: extracted.jobKey,
+        profileId: active.id,
+        profileName: active.name,
+        postingText: extracted.text,
+        title: extracted.title,
+        company: extracted.company,
+        location: extracted.location,
+        url: tab.url,
+      },
+    });
+  } catch (err) {
+    statusEl.textContent = `Error: ${err.message}`;
+    btn.disabled = false;
+    return;
+  }
+
+  if (!response || !response.ok) {
+    statusEl.textContent = response?.full
+      ? `The queue already holds ${response.max} jobs — let some finish first.`
+      : response?.error || "Could not queue the summary.";
+    btn.disabled = false;
+    return;
+  }
+
+  statusEl.textContent =
+    response.position > 1
+      ? `Queued behind ${response.position - 1} job(s) — the brief is filed automatically, reopen this popup to collect it.`
+      : "Summarizing with the local model…";
+
+  const combinedText = await waitForSummary(tab.url, active.id, requestedAt);
+  if (!combinedText) {
+    statusEl.textContent =
+      "Still running — the brief is filed against this job automatically, so reopen this popup in a moment to collect it.";
+    btn.disabled = false;
+    renderQueueStatus();
+    return;
+  }
+
+  // Assembled by the service worker (header line, brief, and this profile's
+  // evaluation block) so that a brief finishing while the popup is closed is
+  // still complete and still filed. The popup only displays it.
+  resultEl.value = combinedText;
+  resultEl.hidden = false;
+  copyBtn.hidden = false;
+
+  try {
+    await navigator.clipboard.writeText(combinedText);
+    statusEl.textContent = combinedText.includes("LOCAL MODEL EVALUATION")
+      ? `Copied (includes the "${active.name}" evaluation of this posting).`
+      : "Copied to clipboard.";
+  } catch (err) {
+    statusEl.textContent = "Couldn't auto-copy — select the text below or click Copy.";
+  }
+
+  btn.disabled = false;
+  renderQueueStatus();
+}
+
+// The brief is written to storage by the service worker when the queued item
+// finishes. Poll for it while the popup happens to still be open; if the popup
+// is gone by then nothing is lost, because restoreLastSummary() picks it up on
+// the next open.
+async function waitForSummary(url, profileId, since, timeoutMs = 120000) {
+  const startedAt = Date.now();
+  while (Date.now() - startedAt < timeoutMs) {
+    const stored = await chrome.storage.local.get("lastSummary");
+    const summary = stored.lastSummary;
+    if (summary && summary.url === url && summary.profileId === profileId && summary.ts >= since) {
+      return summary.text;
+    }
+    await new Promise((resolve) => setTimeout(resolve, 1200));
+  }
+  return null;
+}
+
+async function restoreLastSummary() {
+  const [tab] = await chrome.tabs.query({ active: true, currentWindow: true });
+  if (!tab?.url) return;
+
+  const stored = await chrome.storage.local.get("lastSummary");
+  const lastSummary = stored.lastSummary;
+  if (!lastSummary || lastSummary.url !== tab.url || !lastSummary.text) return;
+  // A summary built for another profile carries that profile's evaluation
+  // block, so don't resurrect it under the current one.
+  if (lastSummary.profileId && lastSummary.profileId !== activeProfile().id) return;
+
+  document.getElementById("summarizeResult").value = lastSummary.text;
+  document.getElementById("summarizeResult").hidden = false;
+  document.getElementById("copySummary").hidden = false;
+  document.getElementById("summarizeStatus").textContent = "Summary from earlier — click Copy to copy it again.";
+}
+
+async function copySummary() {
+  const resultEl = document.getElementById("summarizeResult");
+  const statusEl = document.getElementById("summarizeStatus");
+  try {
+    await navigator.clipboard.writeText(resultEl.value);
+    statusEl.textContent = "Copied to clipboard.";
+  } catch (err) {
+    resultEl.focus();
+    resultEl.select();
+    statusEl.textContent = "Select-all done — copy manually (Cmd+C).";
+  }
+}
+
+document.getElementById("save").addEventListener("click", saveSettings);
+document.getElementById("reset").addEventListener("click", resetKeywordLists);
+els.profileSelect.addEventListener("change", (e) => switchProfile(e.target.value));
+document.getElementById("profileNew").addEventListener("click", () => askForName("new", ""));
+document.getElementById("profileDuplicate").addEventListener("click", () =>
+  askForName("duplicate", `${activeProfile().name} copy`)
+);
+document.getElementById("profileRename").addEventListener("click", () => askForName("rename", activeProfile().name));
+document.getElementById("profileDelete").addEventListener("click", deleteProfile);
+document.getElementById("profileNameOk").addEventListener("click", confirmNamePrompt);
+document.getElementById("profileNameCancel").addEventListener("click", cancelNamePrompt);
+els.profileNameInput.addEventListener("keydown", (e) => {
+  if (e.key === "Enter") confirmNamePrompt();
+  if (e.key === "Escape") cancelNamePrompt();
+});
+SECTION_IDS.forEach((id) => document.getElementById(id)?.addEventListener("toggle", persistOpenSections));
+document.getElementById("evaluate").addEventListener("click", evaluateCurrentTab);
+document.getElementById("suggestSalary").addEventListener("click", suggestSalary);
+document.getElementById("summarizeTab").addEventListener("click", summarizeCurrentTab);
+document.getElementById("copySummary").addEventListener("click", copySummary);
+// An extension page rather than a popup view: it needs room, and it keeps full
+// chrome.storage access without the popup's habit of destroying itself on blur.
+document.getElementById("viewHistory").addEventListener("click", () => {
+  chrome.tabs.create({ url: chrome.runtime.getURL("history.html") });
+});
+
+// restoreLastSummary() reads the active profile, so it has to wait for the
+// store to be in memory.
+loadSettings().then(restoreLastSummary);
+renderQueueStatus();

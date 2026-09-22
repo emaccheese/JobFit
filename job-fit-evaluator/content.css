@@ -1,0 +1,105 @@
+#job-fit-banner {
+  position: fixed;
+  top: 0;
+  left: 0;
+  right: 0;
+  z-index: 2147483647;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 10px 16px;
+  font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+  font-size: 14px;
+  color: #111;
+  box-shadow: 0 2px 6px rgba(0, 0, 0, 0.15);
+}
+
+#job-fit-banner.jf-red { background: #fdecea; border-bottom: 3px solid #d93025; }
+#job-fit-banner.jf-amber { background: #fff4e5; border-bottom: 3px solid #f29900; }
+#job-fit-banner.jf-neutral { background: #eaf1fb; border-bottom: 3px solid #3574d6; }
+#job-fit-banner.jf-green { background: #e6f4ea; border-bottom: 3px solid #1e8e3e; }
+
+#job-fit-banner .jf-main {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  flex: 1;
+  min-width: 0;
+}
+
+#job-fit-banner .jf-label {
+  font-weight: 700;
+  white-space: nowrap;
+}
+
+#job-fit-banner .jf-summary {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+#job-fit-banner .jf-actions {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-shrink: 0;
+}
+
+#job-fit-banner button {
+  font: inherit;
+  cursor: pointer;
+  border: 1px solid rgba(0, 0, 0, 0.2);
+  background: white;
+  border-radius: 4px;
+  padding: 4px 10px;
+}
+
+#job-fit-details {
+  position: fixed;
+  /* Fallback only. content.js measures the banner and overrides this inline,
+     because this number has no way to track the banner's real height (50px at
+     the current padding and button size). */
+  top: 48px;
+  left: 0;
+  right: 0;
+  z-index: 2147483646;
+  max-height: 40vh;
+  overflow-y: auto;
+  background: white;
+  border-bottom: 1px solid rgba(0, 0, 0, 0.15);
+  box-shadow: 0 4px 8px rgba(0, 0, 0, 0.1);
+  padding: 12px 16px;
+  font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+  font-size: 13px;
+  color: #111;
+}
+
+#job-fit-details h4 {
+  margin: 8px 0 4px;
+  font-size: 12px;
+  text-transform: uppercase;
+  letter-spacing: 0.03em;
+  color: #555;
+}
+
+#job-fit-details .jf-tag {
+  display: inline-block;
+  margin: 2px 4px 2px 0;
+  padding: 2px 8px;
+  border-radius: 12px;
+  font-size: 12px;
+}
+
+#job-fit-details .jf-tag-red { background: #fdecea; color: #b3261e; }
+#job-fit-details .jf-tag-amber { background: #fff4e5; color: #a15c00; }
+#job-fit-details .jf-tag-green { background: #e6f4ea; color: #14622f; }
+
+#job-fit-details .jf-tag-neutral {
+  display: block;
+  background: #eaf1fb;
+  color: #1e4b8f;
+  border-radius: 4px;
+  margin: 2px 0;
+  padding: 4px 8px;
+}
