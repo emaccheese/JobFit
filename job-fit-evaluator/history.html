@@ -38,6 +38,21 @@
   button:hover { background: #f0f2f5; }
   button.danger { color: var(--red); border-color: #e3c0bb; }
 
+  .backup {
+    display: flex; align-items: center; justify-content: space-between; gap: 12px; flex-wrap: wrap;
+    background: var(--card); border: 1px solid var(--line); border-radius: 8px;
+    padding: 10px 12px; margin-bottom: 16px;
+  }
+  .backup-text { font-size: 13px; }
+  .backup-text strong { display: block; }
+  .backup-text span { color: var(--muted); font-size: 12px; }
+  .backup-actions { display: flex; gap: 8px; }
+  .backup-status {
+    border-radius: 6px; padding: 10px 12px; margin: -8px 0 16px; font-size: 13px;
+    background: #e6f4ec; color: var(--green); border: 1px solid #cfe6d9; white-space: pre-line;
+  }
+  .backup-status.error { background: #fdeceb; color: var(--red); border-color: #f0cfcc; }
+
   .queue { background: var(--card); border: 1px solid var(--line); border-radius: 8px; padding: 12px; margin-bottom: 16px; }
   .queue-head { display: flex; align-items: center; justify-content: space-between; gap: 10px; margin-bottom: 8px; }
   .queue-actions { display: flex; gap: 8px; }
@@ -54,6 +69,20 @@
   .qtitle { flex: 1; min-width: 0; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
   .qerr { color: var(--red); font-size: 12px; margin-left: 28px; padding-bottom: 6px; }
   .qrow button { padding: 3px 8px; font-size: 12px; }
+  .qscore {
+    flex: 0 0 auto; min-width: 30px; text-align: center; font-weight: 700; font-size: 12px;
+    border-radius: 4px; padding: 2px 6px; background: #eef1f5; color: var(--muted);
+  }
+  .qscore.green { background: #e6f4ec; color: var(--green); }
+  .qscore.amber { background: #fdf3e2; color: var(--amber); }
+  .qscore.red { background: #fdeceb; color: var(--red); }
+
+  .stale {
+    display: flex; align-items: center; justify-content: space-between; gap: 12px; flex-wrap: wrap;
+    background: #fdf3e2; border: 1px solid #f0dcb8; color: var(--amber);
+    border-radius: 8px; padding: 10px 12px; margin-bottom: 16px; font-size: 13px;
+  }
+  .stale button { flex: 0 0 auto; }
 
   .job { background: var(--card); border: 1px solid var(--line); border-radius: 8px; margin-bottom: 10px; overflow: hidden; }
   .job-head { display: flex; align-items: center; gap: 12px; padding: 12px 14px; cursor: pointer; }
@@ -135,6 +164,21 @@
       <label class="checkfield"><input id="hideRejects" type="checkbox"> Hide hard rejects</label>
       <button id="exportCsv" type="button">Export CSV</button>
     </div>
+
+    <div class="backup">
+      <div class="backup-text">
+        <strong>Backup</strong>
+        <span>Profiles, LM&nbsp;Studio settings and every tracked job — everything the CSV leaves out.</span>
+      </div>
+      <div class="backup-actions">
+        <button id="exportData" type="button">Back up all data</button>
+        <button id="importData" type="button">Restore from backup…</button>
+        <input id="importFile" type="file" accept="application/json,.json" hidden>
+      </div>
+    </div>
+    <div id="backupStatus" class="backup-status" hidden></div>
+
+    <div id="staleNotice" class="stale" hidden></div>
 
     <div id="queuePanel" class="queue" hidden>
       <div class="queue-head">

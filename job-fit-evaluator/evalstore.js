@@ -147,6 +147,40 @@ var JOB_FIT_EVALSTORE = (function () {
     return keys.map((k) => stored[k]).filter(Boolean);
   }
 
+  // --- backup -------------------------------------------------------------
+
+  async function allRecordKeys() {
+    if (typeof chrome.storage.local.getKeys === "function") {
+      return (await chrome.storage.local.getKeys()).filter((k) => k.startsWith(PREFIX));
+    }
+    return Object.keys(await chrome.storage.local.get(null)).filter((k) => k.startsWith(PREFIX));
+  }
+
+  // Every tracked job, across every profile.
+  async function exportRecords() {
+    const keys = await allRecordKeys();
+    if (!keys.length) return [];
+    const stored = await chrome.storage.local.get(keys);
+    return keys.map((k) => stored[k]).filter(Boolean);
+  }
+
+  // Writes one record from a backup file. The storage key is rebuilt from the
+  // record's own profileId and jobKey rather than taken from the file, so a
+  // hand-edited or malformed backup can't write to arbitrary storage keys.
+  // Existing records are never overwritten: a restore must not silently
+  // discard an application status or notes added since the backup.
+  async function importRecord(record) {
+    if (!record || typeof record !== "object") return "invalid";
+    const { profileId, jobKey } = record;
+    if (!profileId || !jobKey || typeof profileId !== "string" || typeof jobKey !== "string") return "invalid";
+
+    const existing = await get(profileId, jobKey);
+    if (existing) return "skipped";
+
+    await chrome.storage.local.set({ [recordKey(profileId, jobKey)]: { ...record, profileId, jobKey } });
+    return "added";
+  }
+
   async function countForProfile(profileId) {
     return (await keysForProfile(profileId)).length;
   }
@@ -182,7 +216,11 @@ var JOB_FIT_EVALSTORE = (function () {
       e.gaps && e.gaps.length ? `Gaps: ${e.gaps.join(", ")}` : null,
       e.required_gaps && e.required_gaps.length ? `Required gaps: ${e.required_gaps.join(", ")}` : null,
       e.seniority_flag ? `Seniority/comp check: ${e.seniority_flag}` : null,
-      e.score_cap_reasons && e.score_cap_reasons.length ? `Score cap applied: ${e.score_cap_reasons.join(", ")}` : null,
+      e.score_cap_reasons && e.score_cap_reasons.length
+        ? `Score cap applied: ${e.score_cap_reasons.join(", ")}${
+            e.raw_score != null ? ` (model scored ${e.raw_score}, capped to ${e.score})` : ""
+          }`
+        : null,
       record.softWarnings && record.softWarnings.length
         ? `Warnings (worth asking about, not rejects): ${record.softWarnings.join(", ")}`
         : null,
@@ -215,6 +253,8 @@ var JOB_FIT_EVALSTORE = (function () {
     list,
     countForProfile,
     removeAllForProfile,
+    exportRecords,
+    importRecord,
     statusLabel,
     formatEvaluation,
   };

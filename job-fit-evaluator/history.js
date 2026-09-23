@@ -409,6 +409,16 @@ function renderQueue(queue) {
       el("span", "qtitle", `${item.title || item.url || item.jobKey}${item.kind === "summarize" ? "  (brief)" : ""}`)
     );
 
+    // Read from the record rather than stored on the queue item: the score
+    // belongs to the record, and the worker writes it before marking the item
+    // done, so it is already in `records` by the time this runs.
+    const finished = records.find((r) => r.jobKey === item.jobKey);
+    // Evaluations only — a brief carries no score of its own, and showing the
+    // job's score on a brief row implies it produced it.
+    if (item.kind !== "summarize" && item.state === "done" && finished && finished.score != null) {
+      row.appendChild(el("span", `qscore ${scoreClass(finished.score)}`, String(finished.score)));
+    }
+
     if (item.state === "failed") {
       const retry = el("button", null, "Retry");
       retry.addEventListener("click", async () => {
@@ -590,12 +600,238 @@ function renderProfileOptions() {
   els.profileSelect.value = store.profiles.some((p) => p.id === wanted) ? wanted : store.profiles[0].id;
 }
 
+// ---------------------------------------------------------------------------
+// Backup / restore
+//
+// The CSV export covers tracked jobs only. Profiles, LM Studio settings and a
+// job's status, notes and brief are not in it — and uninstalling the extension
+// wipes chrome.storage.local with no warning, which is exactly how a search
+// history gets lost. This is the full picture.
+// ---------------------------------------------------------------------------
+
+const BACKUP_FORMAT = "jobfit-backup";
+const BACKUP_VERSION = 1;
+
+function showBackupStatus(text, isError = false) {
+  const box = document.getElementById("backupStatus");
+  box.textContent = text;
+  box.className = `backup-status${isError ? " error" : ""}`;
+  box.hidden = false;
+}
+
+async function exportData() {
+  const stored = await chrome.storage.local.get(["profiles", "activeProfileId", "lmStudio"]);
+  // The queue and lastSummary are deliberately left out: both are transient
+  // working state, and the queue holds tab ids that mean nothing on restore.
+  const payload = {
+    format: BACKUP_FORMAT,
+    version: BACKUP_VERSION,
+    exportedAt: new Date().toISOString(),
+    profiles: stored.profiles || [],
+    activeProfileId: stored.activeProfileId || null,
+    lmStudio: stored.lmStudio || null,
+    records: await JOB_FIT_EVALSTORE.exportRecords(),
+  };
+
+  const url = URL.createObjectURL(new Blob([JSON.stringify(payload, null, 2)], { type: "application/json" }));
+  const link = document.createElement("a");
+  link.href = url;
+  link.download = `jobfit-backup-${new Date().toISOString().slice(0, 10)}.json`;
+  link.click();
+  URL.revokeObjectURL(url);
+
+  showBackupStatus(
+    `Backed up ${payload.profiles.length} profile(s) and ${payload.records.length} tracked job(s). ` +
+      `Keep the file somewhere outside this folder — uninstalling the extension erases its storage.`
+  );
+}
+
+// Everything here comes from a file on disk, so it is treated as untrusted:
+// only known fields are read, profiles go through normalize() before being
+// stored, and nothing existing is ever overwritten.
+async function importData(file) {
+  let payload;
+  try {
+    payload = JSON.parse(await file.text());
+  } catch (err) {
+    showBackupStatus(`That file isn't valid JSON: ${err.message}`, true);
+    return;
+  }
+
+  if (!payload || payload.format !== BACKUP_FORMAT) {
+    showBackupStatus("That doesn't look like a JobFit backup file.", true);
+    return;
+  }
+  if (payload.version > BACKUP_VERSION) {
+    showBackupStatus(`That backup was written by a newer version (v${payload.version}).`, true);
+    return;
+  }
+
+  // Assigns the module-level `store`, not a local one: a local would shadow it,
+  // and the refresh at the end would then repopulate the selector from the
+  // stale copy — an imported profile would be saved but never appear.
+  store = await JOB_FIT_PROFILES.load();
+  const existingIds = new Set(store.profiles.map((p) => p.id));
+  let profilesAdded = 0;
+  let profilesSkipped = 0;
+
+  (Array.isArray(payload.profiles) ? payload.profiles : []).forEach((raw) => {
+    if (!raw || typeof raw !== "object" || !raw.id) return;
+    if (existingIds.has(raw.id)) {
+      profilesSkipped++;
+      return;
+    }
+    store.profiles.push(JOB_FIT_PROFILES.normalize(raw));
+    existingIds.add(raw.id);
+    profilesAdded++;
+  });
+
+  if (profilesAdded) await JOB_FIT_PROFILES.save(store);
+
+  let added = 0;
+  let skipped = 0;
+  let invalid = 0;
+  for (const record of Array.isArray(payload.records) ? payload.records : []) {
+    // Only for profiles that exist here, so a job can't be orphaned into a
+    // profile nothing references.
+    if (!record || !existingIds.has(record.profileId)) {
+      invalid++;
+      continue;
+    }
+    const outcome = await JOB_FIT_EVALSTORE.importRecord(record);
+    if (outcome === "added") added++;
+    else if (outcome === "skipped") skipped++;
+    else invalid++;
+  }
+
+  // Applied only when nothing is configured here, so restoring a friend's
+  // backup can't silently repoint your endpoint at theirs.
+  const current = await chrome.storage.local.get("lmStudio");
+  let settingsNote = "";
+  if (payload.lmStudio && !(current.lmStudio && current.lmStudio.model)) {
+    await chrome.storage.local.set({ lmStudio: payload.lmStudio });
+    settingsNote = "\nLM Studio settings restored.";
+  } else if (payload.lmStudio) {
+    settingsNote = "\nLM Studio settings left alone — you already have a model configured.";
+  }
+
+  const lines = [
+    `Restored from ${payload.exportedAt ? payload.exportedAt.slice(0, 10) : "backup"}.`,
+    `Profiles: ${profilesAdded} added${profilesSkipped ? `, ${profilesSkipped} already here` : ""}.`,
+    `Jobs: ${added} added${skipped ? `, ${skipped} already here` : ""}${invalid ? `, ${invalid} unusable` : ""}.`,
+    "Nothing existing was overwritten.",
+  ];
+  showBackupStatus(lines.join("\n") + settingsNote);
+
+  renderProfileOptions();
+  await loadProfile(els.profileSelect.value);
+}
+
+// A record is stale when the profile it was scored under has changed, or when
+// it was scored by a different model. Both matter because the page ranks by
+// score: a list mixing scores from an old CV or a swapped-out model is a
+// ranking that looks authoritative and isn't.
+async function findStaleRecords() {
+  const profile = store.profiles.find((p) => p.id === viewProfileId);
+  if (!profile) return { stale: [], reason: null };
+
+  const fingerprint = JOB_FIT_PROFILES.fingerprint(profile);
+  const settings = await chrome.storage.local.get("lmStudio");
+  const model = (settings.lmStudio && settings.lmStudio.model) || "";
+
+  let profileChanged = 0;
+  let modelChanged = 0;
+  const stale = records.filter((r) => {
+    // Only jobs that were actually scored and still have their posting text —
+    // without the text there is nothing to re-send.
+    if (r.score == null || !r.text || r.hardReject) return false;
+    const byProfile = r.profileFingerprint !== fingerprint;
+    const byModel = (r.model || "") !== model;
+    if (byProfile) profileChanged++;
+    if (byModel) modelChanged++;
+    return byProfile || byModel;
+  });
+
+  const reasons = [];
+  if (profileChanged) reasons.push("the profile has changed");
+  if (modelChanged) reasons.push("a different model is configured");
+  return { stale, reason: reasons.join(" and "), profile, fingerprint };
+}
+
+async function renderStaleNotice() {
+  const box = document.getElementById("staleNotice");
+  const { stale, reason } = await findStaleRecords();
+  if (!stale.length) {
+    box.hidden = true;
+    return;
+  }
+  box.hidden = false;
+  box.innerHTML = "";
+  const count = stale.length;
+  box.appendChild(
+    el(
+      "span",
+      null,
+      `${count} job${count === 1 ? "" : "s"} ${count === 1 ? "is" : "are"} out of date — ${reason}. ` +
+        `${count === 1 ? "Its score isn't" : "Their scores aren't"} comparable with the rest of this list.`
+    )
+  );
+  const btn = el("button", null, `Re-queue ${stale.length}`);
+  btn.addEventListener("click", () => requeueStale(btn));
+  box.appendChild(btn);
+}
+
+// Re-runs stale jobs through the normal queue. The posting text is already on
+// the record, so this needs no tab and no page visit.
+async function requeueStale(btn) {
+  btn.disabled = true;
+  btn.textContent = "Queueing…";
+
+  const { stale, profile, fingerprint } = await findStaleRecords();
+  let queued = 0;
+  let rejected = 0;
+
+  for (const record of stale) {
+    const response = await queueMessage({
+      type: "JOB_FIT_ENQUEUE",
+      item: {
+        kind: "evaluate",
+        jobKey: record.jobKey,
+        profileId: profile.id,
+        profileName: profile.name,
+        profileSnapshot: { profile: profile.profile, expectedSalary: profile.expectedSalary, fingerprint },
+        postingText: record.text,
+        title: record.title,
+        company: record.company,
+        location: record.location,
+        url: record.url,
+        extractor: record.extractor,
+        domainFlags: record.domainFlags || [],
+        softWarnings: record.softWarnings || [],
+      },
+    });
+    if (response && response.ok && !response.duplicate) queued++;
+    // The queue caps at 10; the rest stay stale and can be re-queued next time.
+    else if (response && response.full) { rejected = stale.length - queued; break; }
+  }
+
+  btn.disabled = false;
+  btn.textContent = `Re-queue ${stale.length}`;
+  showBackupStatus(
+    rejected
+      ? `Queued ${queued}. The queue is full, so ${rejected} still need re-scoring — come back once these finish.`
+      : `Queued ${queued} job${queued === 1 ? "" : "s"} for re-scoring.`
+  );
+  refreshQueue();
+}
+
 async function loadProfile(profileId) {
   viewProfileId = profileId;
   openKeys.clear();
   records = await JOB_FIT_EVALSTORE.list(profileId);
   render();
   await refreshQueue();
+  await renderStaleNotice();
 }
 
 async function init() {
@@ -620,6 +856,15 @@ async function init() {
   );
   els.search.addEventListener("input", render);
   document.getElementById("exportCsv").addEventListener("click", exportCsv);
+  document.getElementById("exportData").addEventListener("click", exportData);
+  document.getElementById("importData").addEventListener("click", () =>
+    document.getElementById("importFile").click()
+  );
+  document.getElementById("importFile").addEventListener("change", async (e) => {
+    const file = e.target.files && e.target.files[0];
+    e.target.value = ""; // so picking the same file twice still fires
+    if (file) await importData(file);
+  });
   document.getElementById("queueResume").addEventListener("click", async () => {
     await queueMessage({ type: "JOB_FIT_QUEUE_RESUME" });
     refreshQueue();
