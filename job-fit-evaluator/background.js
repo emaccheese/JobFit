@@ -304,7 +304,9 @@ async function callLmStudio(systemPrompt, userPrompt) {
   }
 
   try {
-    return { ok: true, data: extractJson(raw) };
+    // The model is reported back so it can be stored on the record: scores from
+    // different models are not comparable, and the history page sorts by score.
+    return { ok: true, data: extractJson(raw), model: model || "" };
   } catch (err) {
     return { ok: false, failure: "parse", error: "Could not parse JSON from the model's response.", raw };
   }
@@ -405,7 +407,16 @@ function applyScoreCaps(data, { domainFlags, seniorityFlag }) {
     capReasons.push("seniority/comp mismatch");
   }
 
-  return { ...data, score, score_cap_reasons: capReasons.length ? capReasons : undefined };
+  // raw_score preserves what the model actually said. The caps are heuristics,
+  // so seeing only the capped number leaves no way to judge whether the cap was
+  // fair — "40, seniority/comp mismatch" reads very differently once you know
+  // the model scored it 78.
+  return {
+    ...data,
+    score,
+    raw_score: capReasons.length ? data.score : undefined,
+    score_cap_reasons: capReasons.length ? capReasons : undefined,
+  };
 }
 
 // expectedSalary arrives in the message rather than being read from storage
@@ -531,6 +542,7 @@ async function runQueuedEvaluation(item) {
       text: item.postingText,
       extractor: item.extractor,
       profileFingerprint: snapshot.fingerprint,
+      model: result.model || "",
       hardReject: null,
       evaluation: result.data,
       score: result.data.score,

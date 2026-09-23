@@ -515,7 +515,20 @@ async function injectJobFrames(tabId, files, { withCss = true } = {}) {
     return [];
   }
 
-  const candidates = (frames || []).filter((f) => f.frameId !== 0 && f.url && f.url.includes("greenhouse.io"));
+  // Matched on the frame's HOST, not on a substring of its URL. A real
+  // Greenhouse board page loads a Google API proxy iframe whose hash contains
+  // "#parent=https%3A%2F%2Fjob-boards.greenhouse.io" — plain text once you
+  // account for :// being encoded — which a substring test happily matched,
+  // and the content script was then injected into a Google RPC shim.
+  const candidates = (frames || []).filter((f) => {
+    if (f.frameId === 0 || !f.url) return false;
+    try {
+      const url = new URL(f.url);
+      return url.hostname.endsWith("greenhouse.io");
+    } catch (err) {
+      return false;
+    }
+  });
 
   // Asks Chrome directly whether the permission is actually held at runtime.
   // This separates "the extension lacks the grant" from "this particular frame

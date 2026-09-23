@@ -226,6 +226,20 @@
     return "red";
   }
 
+  // A genuine embedded board: hosted on greenhouse.io AND served from an embed
+  // path. Substring matching the whole src is what produced the false positive
+  // described above.
+  function findEmbeddedBoardFrame() {
+    return Array.from(document.querySelectorAll("iframe[src]")).find((frame) => {
+      try {
+        const url = new URL(frame.src, location.href);
+        return url.hostname.endsWith("greenhouse.io") && url.pathname.includes("/embed/");
+      } catch (err) {
+        return false;
+      }
+    });
+  }
+
   function timeAgo(ts) {
     const days = Math.floor((Date.now() - ts) / 86400000);
     if (days === 0) return "today";
@@ -292,7 +306,13 @@
         { title: "Gaps", items: e.gaps, tagClass: "jf-tag-amber" },
         { title: "Required gaps", items: e.required_gaps, tagClass: "jf-tag-red" },
         { title: "Seniority/comp check", items: e.seniority_flag ? [e.seniority_flag] : [], tagClass: "jf-tag-red" },
-        { title: "Score cap applied", items: e.score_cap_reasons || [], tagClass: "jf-tag-amber" },
+        {
+          title: "Score cap applied",
+          items: (e.score_cap_reasons || []).map((reason) =>
+            e.raw_score != null ? `${reason} (model scored ${e.raw_score}, capped to ${e.score})` : reason
+          ),
+          tagClass: "jf-tag-amber",
+        },
         {
           title: "Warnings — worth asking about, not automatic rejects",
           items: record.softWarnings,
@@ -331,18 +351,25 @@
     // these, the second with framed=true on a greenhouse.io host.
     console.log(`[Job Fit Evaluator] running on ${location.hostname} (framed=${window !== window.top})`);
 
-    // On the top frame of a page that embeds a Greenhouse board, the posting
-    // is never in THIS document — defer whether or not extraction succeeded.
-    // Only deferring on failure meant a careers page with enough nav, blog and
-    // footer text to clear the generic extractor's 200-word floor would enqueue
-    // that chrome as though it were the job, alongside the real posting from
-    // the iframe.
-    if (window === window.top && document.querySelector('iframe[src*="greenhouse.io"]')) {
+    const { result, extractorName } = dispatchExtraction();
+
+    // On the top frame of a page that EMBEDS a Greenhouse board, the posting is
+    // never in this document, so hand off to the iframe. Two conditions, and
+    // neither alone was enough:
+    //
+    // Defer only when this document produced no site-specific extraction. A
+    // real Greenhouse board is read by the greenhouse extractor right here, and
+    // deferring away from a page that can read itself is never right.
+    //
+    // And identify the board by the iframe's HOST, not by a substring of its
+    // URL. A real board page loads a Google API proxy iframe whose hash carries
+    // "#parent=https%3A%2F%2Fjob-boards.greenhouse.io" — only :// is encoded, so
+    // the hostname sits there in plain text and matched src*="greenhouse.io".
+    // The board then deferred to a Google RPC shim and evaluated nothing.
+    if (window === window.top && (!result || extractorName === "generic") && findEmbeddedBoardFrame()) {
       console.log("[Job Fit Evaluator] posting lives in an embedded Greenhouse iframe — deferring to it");
       return;
     }
-
-    const { result, extractorName } = dispatchExtraction();
 
     if (!result) {
       if (window !== window.top) return;
@@ -369,13 +396,21 @@
     const activeProfile = await JOB_FIT_PROFILES.getActive();
     const fingerprint = JOB_FIT_PROFILES.fingerprint(activeProfile);
 
+    const settings = await chrome.storage.local.get("lmStudio");
+    const currentModel = (settings.lmStudio && settings.lmStudio.model) || "";
+
     const cached = ignoreCache ? null : await JOB_FIT_EVALSTORE.get(activeProfile.id, jobKey);
     if (cached) {
-      // A cached result is only valid for the profile it was produced under.
-      // If the CV text, keyword lists or salary expectations have changed
-      // since, re-run rather than showing a score those edits would change —
-      // otherwise editing a keyword looks like it did nothing at all.
-      if (cached.profileFingerprint === fingerprint) {
+      // A cached result is only valid for the profile AND the model that
+      // produced it. Profile: if the CV, keyword lists or salary expectations
+      // changed, re-run rather than showing a score those edits would change.
+      // Model: scores from different models aren't comparable, and the history
+      // page ranks by score — a cached number from a model you've since
+      // swapped out would sit in that ranking pretending to belong.
+      const profileChanged = cached.profileFingerprint !== fingerprint;
+      const modelChanged = (cached.model || "") !== currentModel;
+
+      if (!profileChanged && !modelChanged) {
         renderResult(cached, {
           cached: true,
           profileName: activeProfile.name,
@@ -383,7 +418,11 @@
         });
         return;
       }
-      console.log("[Job Fit Evaluator] cached result is stale (profile changed since) — re-evaluating");
+      console.log(
+        `[Job Fit Evaluator] cached result is stale (${profileChanged ? "profile" : ""}${
+          profileChanged && modelChanged ? " and " : ""
+        }${modelChanged ? "model" : ""} changed since) — re-evaluating`
+      );
     }
 
     const baseRecord = {
