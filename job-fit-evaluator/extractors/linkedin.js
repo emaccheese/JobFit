@@ -11,10 +11,37 @@
   // name a different posting than the one on screen. Correlate on the job id
   // from the page URL instead — and return null rather than guess, since a
   // confidently wrong job title is worse than none.
+  // Labels LinkedIn attaches to a job that are emphatically not its title.
+  // Several of these are rendered as links to the job itself.
+  const NOT_A_TITLE =
+    /^(on-?site|remote|hybrid|full-?time|part-?time|contract|temporary|internship|volunteer|easy apply|apply|save|saved|promoted|actively hiring|be an early applicant|entry level|associate|mid-senior level|director|executive|\d+\+? applicants?|view job|see job)$/i;
+
+  function inHeading(anchor) {
+    return Boolean(anchor.closest("h1, h2, h3") || anchor.querySelector("h1, h2, h3"));
+  }
+
+  // Several anchors on the page point at the same job — the title, and also
+  // pills like "On-site" and "Promoted". querySelector took whichever came
+  // first in the DOM, which is how a posting ended up titled "On-site" or
+  // "Remote". Worse, findHeaderContainer walks up FROM this anchor, so the
+  // wrong pick poisoned the company and location too.
   function findTitleAnchor() {
     const jobId = currentJobId();
     if (!jobId) return null;
-    return document.querySelector(`a[href*="/jobs/view/${jobId}"]`);
+
+    const candidates = Array.from(document.querySelectorAll(`a[href*="/jobs/view/${jobId}"]`))
+      .map((anchor) => ({ anchor, text: (anchor.innerText || "").trim() }))
+      .filter(({ text }) => text && !NOT_A_TITLE.test(text));
+
+    if (!candidates.length) return null;
+
+    // The title is the heading for this job — checked in both nesting
+    // directions, since the anchor may wrap the heading or sit inside it.
+    const heading = candidates.find(({ anchor }) => inHeading(anchor));
+    if (heading) return heading.anchor;
+
+    // Otherwise the longest label: pills are a word or two, titles are not.
+    return candidates.sort((a, b) => b.text.length - a.text.length)[0].anchor;
   }
 
   // Every class in this UI is hashed (and changes between collapsed and
