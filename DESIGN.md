@@ -523,6 +523,16 @@ from the popup's **View evaluated jobs**. An extension page rather than a popup
 view: it needs the width, and it keeps full `chrome.storage` access without the
 popup's habit of destroying itself the moment it loses focus.
 
+**Picking the LinkedIn title anchor** (found in testing, 2026-09-22). Several
+anchors on a job page point at the same job id — the title, but also pills like
+"On-site", "Remote" and "Promoted". `querySelector` returned whichever came
+first in the DOM, which is how postings arrived titled "On-site". Worse,
+`findHeaderContainer` walks up *from that anchor*, so a wrong pick corrupted the
+company and location too. The picker now rejects known pill labels, prefers an
+anchor inside a heading (checked in both nesting directions, since the anchor
+may wrap the heading or sit within it), and otherwise takes the longest label —
+returning null rather than a confidently wrong title.
+
 ### Job identity — the part that's easy to get wrong
 
 **A URL is not a job.** The same LinkedIn posting is reachable as
@@ -626,6 +636,62 @@ collapses to title, company, score, date and the status dropdown; expanded it
 shows the link, the model's verdict and tags, the condensed brief, the full
 extracted posting, a notes field and a two-click delete. CSV export covers
 whatever the filters currently show.
+
+**Identifying an embedded board by host, not by substring** (found in testing,
+2026-09-22). The top-frame defer looked for `iframe[src*="greenhouse.io"]`. A
+genuine Greenhouse board page loads a Google API proxy iframe whose hash is
+`#parent=https%3A%2F%2Fjob-boards.greenhouse.io` — only `://` is encoded, so the
+hostname sits in the URL as plain text and the substring matched. The board
+concluded it was a wrapper page, deferred to what was actually a Google RPC
+shim, and evaluated nothing.
+
+Two independent conditions now, because neither alone was sufficient:
+
+- The frame must be **hosted** on greenhouse.io and served from an `/embed/`
+  path (`new URL(frame.src).hostname` rather than a substring of the whole src).
+- The defer only happens when this document produced **no site-specific
+  extraction** (`!result || extractorName === "generic"`). A real board is read
+  by the greenhouse extractor in place, and deferring away from a page that can
+  read itself is never right — so a future loose selector cannot break it again.
+
+The same substring flaw was in `injectJobFrames`, which is why the content
+script was then injected into the gapi frame; it filters on hostname too.
+
+**A score is only valid for the profile AND the model that produced it.** The
+staleness check originally covered the profile alone, so swapping models left
+cached scores presented as current — and the page ranks by score, so a list
+mixing two models' numbers looks authoritative and isn't. Records now store
+`model`, the cache check compares it alongside the fingerprint, and the
+tracked-jobs page counts out-of-date records and offers to **re-queue** them.
+That re-queue needs no tab and no page visit: the posting text is on the record.
+
+**`raw_score` survives a cap.** `applyScoreCaps` overwrote `score` in place, so
+a capped result showed "40 — seniority/comp mismatch" with no sign the model had
+said 78. The caps are heuristics; judging whether one was fair requires the
+number it replaced. Both are shown wherever the cap is reported.
+
+**Queue rows show the score by reading the record, not by storing it.** The
+score belongs to the record, and the worker writes it before the pump marks the
+item done — so it is already in `records` when the queue re-renders. Copying it
+onto the queue item would have been a second source of truth that a
+re-evaluation could leave stale. Brief items are excluded: they have no score,
+and showing the job's score on a brief row implies it produced it.
+
+**Backup / restore.** `chrome.storage.local` is erased when the extension is
+uninstalled — silently, with no undo — and the CSV export only ever covered
+tracked jobs, not profiles, settings, status, notes or briefs. *Back up all
+data* writes the lot as JSON; *Restore from backup* merges it.
+
+The import treats the file as untrusted: only known fields are read, profiles
+go through `normalize()` before being stored, records are only accepted for a
+profile that exists here, and each record's storage key is **rebuilt from its
+own profileId and jobKey** rather than taken from the file — so a hand-edited
+backup cannot write outside the `ev:` namespace. Nothing existing is ever
+overwritten, because a restore must not discard an application status or a note
+added since the backup was taken. The queue and `lastSummary` are excluded:
+both are transient, and the queue holds tab ids that mean nothing on restore.
+LM Studio settings are applied only when no model is configured locally, so
+restoring someone else's backup can't silently repoint your endpoint at theirs.
 
 **The page refreshes itself.** Evaluations are written by a content script in
 whatever tab the posting is open in, so without a `chrome.storage.onChanged`

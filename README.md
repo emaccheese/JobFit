@@ -88,6 +88,14 @@ application status pipeline (not applied → applied → interviewing → offer 
 rejected / ghosted), free-text notes, search across the posting body, and CSV
 export.
 
+**Backup.** *Back up all data* writes a JSON file containing your profiles,
+LM Studio settings and every tracked job — status, notes and briefs included,
+all of which the CSV leaves out. *Restore from backup* merges a file back in
+and **never overwrites anything already present**, so restoring an old backup
+can't discard a status you've updated since. Worth doing before you touch
+`chrome://extensions`: uninstalling an extension erases its storage with no
+warning and no undo.
+
 **Briefs.** *Summarize* condenses a posting into a compact brief — role, stack,
 required vs preferred, comp, visa language — with the local evaluation appended,
 for pasting into another assistant that already knows your CV.
