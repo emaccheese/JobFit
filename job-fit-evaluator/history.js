@@ -204,6 +204,55 @@ function buildBriefActions(record) {
   return wrap;
 }
 
+// Re-scores this one job with the current model and profile. Hard rejects are
+// left alone: they come from the keyword scan, which the model never overrides.
+// The result it replaces is kept on the record (see saveEvaluation).
+function buildEvaluateActions(record) {
+  const wrap = el("div", "brief-actions");
+  const note = el("span", "brief-note", "");
+  const label = record.score == null ? "Evaluate this job" : "Re-evaluate";
+
+  if (!record.text) {
+    note.textContent = "No stored posting text for this job, so it can't be re-scored from here.";
+    wrap.appendChild(note);
+    return wrap;
+  }
+
+  const button = el("button", null, label);
+  button.addEventListener("click", async () => {
+    const profile = store.profiles.find((p) => p.id === viewProfileId);
+    if (!profile) {
+      note.textContent = "This profile no longer exists.";
+      return;
+    }
+    button.disabled = true;
+    button.textContent = "Queueing…";
+    const response = await queueMessage({
+      type: "JOB_FIT_ENQUEUE",
+      priority: true,
+      item: evaluateItem(record, profile, JOB_FIT_PROFILES.fingerprint(profile)),
+    });
+
+    if (!response || !response.ok) {
+      button.disabled = false;
+      button.textContent = label;
+      note.textContent = response && response.full
+        ? `Queue is full (${response.max}) — let some finish first.`
+        : "Couldn't queue it.";
+      return;
+    }
+
+    button.textContent = response.duplicate ? "Already queued" : "Queued";
+    note.textContent =
+      (response.position > 1 ? "Running after the job in progress" : "Running now") +
+      " — the new score appears here on its own; the current one is kept as a previous result.";
+    refreshQueue();
+  });
+  wrap.appendChild(button);
+  wrap.appendChild(note);
+  return wrap;
+}
+
 // Resolved from the profile list rather than the record's stored copy, so a
 // renamed profile is named correctly in a brief copied from an old job.
 function profileDisplayName(record) {
@@ -332,6 +381,8 @@ function renderJob(record) {
       );
     }
   }
+
+  if (!record.hardReject) body.appendChild(buildEvaluateActions(record));
 
   body.appendChild(el("h3", null, "Condensed brief"));
   if (record.summary) body.appendChild(el("div", "desc", record.summary));
@@ -907,6 +958,26 @@ async function renderStaleNotice() {
   box.appendChild(btn);
 }
 
+// A queue item that re-scores a stored job under the given profile. The
+// posting text is already on the record, so no tab or page visit is needed.
+function evaluateItem(record, profile, fingerprint) {
+  return {
+    kind: "evaluate",
+    jobKey: record.jobKey,
+    profileId: profile.id,
+    profileName: profile.name,
+    profileSnapshot: { profile: profile.profile, expectedSalary: profile.expectedSalary, fingerprint },
+    postingText: record.text,
+    title: record.title,
+    company: record.company,
+    location: record.location,
+    url: record.url,
+    extractor: record.extractor,
+    domainFlags: record.domainFlags || [],
+    softWarnings: record.softWarnings || [],
+  };
+}
+
 // Re-runs stale jobs through the normal queue. The posting text is already on
 // the record, so this needs no tab and no page visit.
 async function requeueStale(btn) {
@@ -920,21 +991,7 @@ async function requeueStale(btn) {
   for (const record of stale) {
     const response = await queueMessage({
       type: "JOB_FIT_ENQUEUE",
-      item: {
-        kind: "evaluate",
-        jobKey: record.jobKey,
-        profileId: profile.id,
-        profileName: profile.name,
-        profileSnapshot: { profile: profile.profile, expectedSalary: profile.expectedSalary, fingerprint },
-        postingText: record.text,
-        title: record.title,
-        company: record.company,
-        location: record.location,
-        url: record.url,
-        extractor: record.extractor,
-        domainFlags: record.domainFlags || [],
-        softWarnings: record.softWarnings || [],
-      },
+      item: evaluateItem(record, profile, fingerprint),
     });
     if (response && response.ok && !response.duplicate) queued++;
     // The queue caps at 10; the rest stay stale and can be re-queued next time.
