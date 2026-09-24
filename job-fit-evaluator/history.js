@@ -212,6 +212,70 @@ function buildBriefActions(record) {
   return wrap;
 }
 
+// The model's reasoning for one evaluation. Shared by the current result and
+// the previous ones, so an old score reads exactly like a current one.
+function evaluationTags(parent, e) {
+  tagList(parent, "Matches", e.matches, "tag-green");
+  tagList(parent, "Gaps", e.gaps, "tag-amber");
+  tagList(parent, "Required gaps", e.required_gaps, "tag-red");
+  tagList(parent, "Seniority / comp check", e.seniority_flag ? [e.seniority_flag] : [], "tag-red");
+  tagList(parent, "Score cap applied", e.score_cap_reasons, "tag-amber");
+  if (e.salary) {
+    tagList(
+      parent,
+      "Salary",
+      [
+        `Posting: ${e.salary.posting_stated}`,
+        `Market estimate: ${e.salary.estimated_market_range}`,
+        `vs. expectation: ${e.salary.vs_candidate_expectation}`,
+        e.salary.note,
+      ],
+      "tag-neutral"
+    );
+  }
+}
+
+// Earlier results for this job, newest first, kept by saveEvaluation when the
+// job was re-scored. Each is collapsed to one line — score, verdict, model,
+// date — and expands to that run's full reasoning, so two models can be
+// compared on the same posting.
+function appendPreviousResults(body, record) {
+  const previous = record.previous || [];
+  if (!previous.length) return;
+
+  body.appendChild(el("h3", null, `Previous scores (${previous.length})`));
+  const list = el("div", "previous-list");
+  previous.forEach((p) => {
+    const item = document.createElement("details");
+    item.className = "previous";
+    const summary = document.createElement("summary");
+    summary.appendChild(el("span", `qscore ${p.hardReject ? "red" : scoreClass(p.score)}`, String(p.score ?? "—")));
+    const verdict = p.hardReject ? "hard reject" : (p.evaluation && p.evaluation.verdict) || p.verdict;
+    const parts = [
+      verdict,
+      p.model || "unknown model",
+      p.evaluatedAt ? formatDate(p.evaluatedAt) : null,
+      p.profileFingerprint && p.profileFingerprint !== record.profileFingerprint ? "older profile" : null,
+    ].filter(Boolean);
+    summary.appendChild(el("span", "previous-meta", parts.join(" · ")));
+    item.appendChild(summary);
+
+    const detail = el("div", "previous-body");
+    if (p.hardReject) {
+      detail.appendChild(el("div", null, `${p.hardReject.label}: "${p.hardReject.matchedText}"`));
+    } else if (p.evaluation) {
+      if (p.evaluation.one_line) detail.appendChild(el("div", null, p.evaluation.one_line));
+      if (p.durationMs) detail.appendChild(el("div", "meta-line", `Scored in ${Math.round(p.durationMs / 1000)}s`));
+      evaluationTags(detail, p.evaluation);
+    } else {
+      detail.appendChild(el("div", "meta-line", "No reasoning was stored for this run."));
+    }
+    item.appendChild(detail);
+    list.appendChild(item);
+  });
+  body.appendChild(list);
+}
+
 // Re-scores this one job with the current model and profile. Hard rejects are
 // left alone: they come from the keyword scan, which the model never overrides.
 // The result it replaces is kept on the record (see saveEvaluation).
@@ -371,29 +435,13 @@ function renderJob(record) {
     if (record.durationMs) {
       body.appendChild(el("div", "meta-line", `Scored in ${Math.round(record.durationMs / 1000)}s${record.model ? ` by ${record.model}` : ""}`));
     }
-    tagList(body, "Matches", e.matches, "tag-green");
-    tagList(body, "Gaps", e.gaps, "tag-amber");
-    tagList(body, "Required gaps", e.required_gaps, "tag-red");
-    tagList(body, "Seniority / comp check", e.seniority_flag ? [e.seniority_flag] : [], "tag-red");
-    tagList(body, "Score cap applied", e.score_cap_reasons, "tag-amber");
+    evaluationTags(body, e);
     tagList(body, "Warnings", record.softWarnings, "tag-amber");
     tagList(body, "Domain flags", record.domainFlags, "tag-neutral");
-    if (e.salary) {
-      tagList(
-        body,
-        "Salary",
-        [
-          `Posting: ${e.salary.posting_stated}`,
-          `Market estimate: ${e.salary.estimated_market_range}`,
-          `vs. expectation: ${e.salary.vs_candidate_expectation}`,
-          e.salary.note,
-        ],
-        "tag-neutral"
-      );
-    }
   }
 
   if (!record.hardReject) body.appendChild(buildEvaluateActions(record));
+  appendPreviousResults(body, record);
 
   body.appendChild(el("h3", null, "Condensed brief"));
   if (record.summary) body.appendChild(el("div", "desc", record.summary));

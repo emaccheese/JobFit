@@ -129,6 +129,12 @@
   .selection-bar button.primary { background: var(--accent); border-color: var(--accent); color: #fff; }
   .select-box { flex: 0 0 auto; margin: 0; cursor: pointer; }
   .select-box:disabled { cursor: default; opacity: .35; }
+  .previous-list { display: flex; flex-direction: column; gap: 4px; }
+  .previous { border: 1px solid var(--line); border-radius: 6px; }
+  .previous > summary { display: flex; align-items: center; gap: 10px; padding: 6px 10px; cursor: pointer; font-size: 13px; }
+  .previous[open] > summary { border-bottom: 1px solid var(--line); }
+  .previous-meta { color: var(--muted); }
+  .previous-body { padding: 4px 12px 10px; }
   .badge.badge-stale { text-transform: none; letter-spacing: 0; font-weight: 600; }
   /* A class that sets `display` beats the user agent's [hidden] rule. Applied
      blanket rather than per-class so the next hidden element can't reintroduce
