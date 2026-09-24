@@ -172,6 +172,11 @@
       if (result) extractorName = "linkedin";
     }
 
+    if (!result && host.includes("indeed.") && window.__jobFit && window.__jobFit.indeed) {
+      result = window.__jobFit.indeed();
+      if (result) extractorName = "indeed";
+    }
+
     if (!result && window.__jobFit && window.__jobFit.workday) {
       result = window.__jobFit.workday();
       if (result) extractorName = "workday";

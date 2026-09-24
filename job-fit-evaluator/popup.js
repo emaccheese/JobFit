@@ -559,6 +559,7 @@ function probePage() {
     greenhouse: Boolean(document.querySelector(".job__description, .application-description")),
     embedded: hasEmbeddedBoard,
     jibe: Boolean(document.querySelector("descriptions-app #description-body")),
+    indeed: location.hostname.includes("indeed.") && Boolean(document.querySelector("#jobDescriptionText, .simple-job-description-html")),
     workday: Boolean(document.querySelector('[data-automation-id="jobPostingDescription"]')),
   };
 }
@@ -585,7 +586,8 @@ async function checkPage() {
   if (probe.linkedin) setReady("pageDot", "pageState", "ok", "LinkedIn posting detected.");
   else if (probe.greenhouse) setReady("pageDot", "pageState", "ok", "Greenhouse posting detected.");
   else if (probe.embedded) setReady("pageDot", "pageState", "ok", "Embedded Greenhouse board detected.");
-  else if (probe.workday) setReady("pageDot", "pageState", "ok", "Workday posting detected.");
+  else if (probe.indeed) setReady("pageDot", "pageState", "ok", "Indeed posting detected.");
+  else if (probe.workday)setReady("pageDot", "pageState", "ok", "Workday posting detected.");
   else if (probe.jibe)setReady("pageDot", "pageState", "ok", "Jibe career-site posting detected.");
   else
     setReady(
@@ -819,6 +821,7 @@ async function evaluateCurrentTab() {
     "extractors/linkedin.js",
     "extractors/jibe.js",
     "extractors/workday.js",
+    "extractors/indeed.js",
     "jobkey.js",
     "content.js",
   ];
@@ -888,6 +891,7 @@ async function summarizeCurrentTab() {
     "extractors/linkedin.js",
     "extractors/jibe.js",
     "extractors/workday.js",
+    "extractors/indeed.js",
     "jobkey.js",
     "content.js",
   ];

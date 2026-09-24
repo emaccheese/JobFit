@@ -86,7 +86,12 @@ var JOB_FIT_JOBKEY = (function () {
       if (id) return `greenhouse:${id}`;
     }
 
-    const workdayId = window.__jobFit && window.__jobFit.workdayJobId && window.__jobFit.workdayJobId();
+    if (host.includes("indeed.")) {
+      const jk = window.__jobFit && window.__jobFit.indeedJobKey && window.__jobFit.indeedJobKey();
+      if (jk) return `indeed:${jk}`;
+    }
+
+    const workdayId =window.__jobFit && window.__jobFit.workdayJobId && window.__jobFit.workdayJobId();
     if (workdayId) return `workday:${workdayId}`;
 
     const jibeId =window.__jobFit && window.__jobFit.jibeJobId && window.__jobFit.jibeJobId();
