@@ -629,6 +629,12 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
     });
     return true;
   }
+  if (message?.type === "JOB_FIT_OPEN_HISTORY") {
+    const params = new URLSearchParams({ profile: message.profileId || "", job: message.jobKey || "" });
+    chrome.tabs.create({ url: `${chrome.runtime.getURL("history.html")}?${params.toString()}` });
+    sendResponse({ ok: true });
+    return false;
+  }
   if (message?.type === "JOB_FIT_QUEUE_SNAPSHOT") {
     JOB_FIT_QUEUE.snapshot().then(sendResponse);
     return true;

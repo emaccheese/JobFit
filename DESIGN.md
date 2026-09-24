@@ -501,6 +501,23 @@ Two ways the UI could strand itself, both fixed in the 2026-09-19 audit:
 
 ---
 
+## Popup readiness
+
+Both "why isn't it working?" moments are answered before you click. On open the
+popup GETs `/v1/models` — derived from the configured chat-completions URL,
+since POSTing to that would run a generation — and reports reachable /
+unreachable, plus **whether the configured model name is actually loaded**.
+That last check catches the HTTP error that would otherwise pause the whole
+queue, and catches it before ten jobs are sitting behind it.
+
+It also probes the current tab with a cheap selector check (not the extractors,
+which walk the DOM) and says whether a LinkedIn posting, a Greenhouse posting
+or an embedded board was found. Evaluate is never disabled on a "no posting"
+result — the generic extractor may still succeed — the popup just stops it
+being a surprise.
+
+---
+
 ## Banner UI (content.css)
 
 Inject a fixed bar at the top of the page:
@@ -513,6 +530,19 @@ Inject a fixed bar at the top of the page:
 Keep it dismissable. Don't cover the page's own apply button.
 
 **Radix UI dialogs (my.greenhouse.io's candidate portal) treat any click outside their own DOM subtree as a dismiss signal**, and our banner lives in `document.body` — so clicking Evaluate/Details/Dismiss on the banner would close the job dialog underneath it. Fix: stop `pointerdown`/`mousedown`/`click` from bubbling past the banner and details panel elements, so the event never reaches the document-level listener Radix uses to detect outside clicks.
+
+---
+
+The score is a coloured badge rather than text sharing weight with the verdict,
+using the same green/amber/red thresholds as the tracked-jobs page — the same
+number should look the same in both places. A hard reject shows no badge, since
+its `0` is a marker rather than a score.
+
+A **Tracked jobs** action opens the page deep-linked to that record
+(`history.html?profile=…&job=…`). Content scripts cannot open tabs, so the
+worker does it. On arrival the page clears any filter that would hide the job,
+expands it, scrolls to it and flashes it — landing at the top of a long list
+would defeat the point.
 
 ---
 
@@ -629,6 +659,48 @@ is the view that tells you to follow up or let it go.
 
 ### Page
 
+The list is what the page is for, so the chrome above it is kept small. The
+standing Backup panel became one **Data** control in the toolbar, and the
+controls bar is sized to stay on a single row — it was wrapping and costing
+60px directly above the first job.
+
+**Funnel chips** (All / Not applied / Waiting / In play / Closed) replace the
+grey count line and double as filters, because the question the page should
+answer is "what do I do next?", not "what happened?". Chips and the Status
+dropdown are mutually exclusive — using one clears the other — so the list is
+never filtered by two controls at once. A bucket with nothing in it is hidden
+unless it is the one selected.
+
+**"Needs attention"** is the page answering what to do next rather than what
+happened. Four rules, first match wins, most decisive first:
+
+| Rule | Reason shown |
+|---|---|
+| `status = offer` | offer — decide |
+| `status = interviewing` | interview scheduled |
+| not applied and `score >= 75` | strong match (91) — not applied |
+| `status = applied` and silent ≥ 14 days | no reply in 19 days |
+
+The 75 threshold is deliberately the banner's green boundary: if the tool calls
+something a strong match and you haven't acted, that is the thing to act on.
+Ghosted, rejected and withdrawn never qualify — those are decisions already
+made — and a hard reject is disqualified rather than pending.
+
+Each flagged row **states its reason** inline, not only behind the filter: a
+list of jobs with no stated reason is just another filter, and the reason is
+the useful part. The chip is first, amber, and **hidden entirely when the count
+is zero** — an empty "needs attention" is the best possible state and shouldn't
+occupy the eye.
+
+**Status reads from the row edge**, not from the controls: a coloured left
+border, with closed rows faded to ~60% (they stay findable without competing
+with rows that need something). Score badges keep the green/amber/red channel
+to themselves so the two signals never collide, and status dropdowns are
+borderless until hover or focus — eight bordered selects turned the list into
+a form. Dates collapsed to one relative line, with the absolute date in the
+tooltip.
+
+
 Sort by score (default, high→low), score low→high, date evaluated, date applied,
 company, or status. Filter by status, free-text search across title / company /
 location / **notes** / posting body, and a hide-hard-rejects toggle. Each row
@@ -676,6 +748,13 @@ item done — so it is already in `records` when the queue re-renders. Copying i
 onto the queue item would have been a second source of truth that a
 re-evaluation could leave stale. Brief items are excluded: they have no score,
 and showing the job's score on a brief row implies it produced it.
+
+**Settings save as you type.** Chrome destroys the popup document the moment it
+loses focus, and nothing was written until Save was pressed — so editing the CV
+and clicking anything outside the popup lost the edit silently. Writes are now
+debounced 400ms after typing stops, flushed on blur, with `visibilitychange`
+and `pagehide` as a last line of defence rather than the mechanism: an async
+storage write started during teardown is not guaranteed to finish.
 
 **Backup / restore.** `chrome.storage.local` is erased when the extension is
 uninstalled — silently, with no undo — and the CSV export only ever covered

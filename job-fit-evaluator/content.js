@@ -159,7 +159,7 @@
     document.body.appendChild(panel);
   }
 
-  function renderBanner({ status, label, summary, sections, extraActions }) {
+  function renderBanner({ status, label, summary, sections, extraActions, score }) {
     removeExistingBanner();
 
     const banner = document.createElement("div");
@@ -169,6 +169,13 @@
 
     const main = document.createElement("div");
     main.className = "jf-main";
+
+    if (score != null) {
+      const scoreEl = document.createElement("span");
+      scoreEl.className = `jf-score ${statusForScore(score)}`;
+      scoreEl.textContent = String(score);
+      main.appendChild(scoreEl);
+    }
 
     const labelEl = document.createElement("span");
     labelEl.className = "jf-label";
@@ -251,6 +258,17 @@
 
   // Single renderer for both a fresh evaluation and one read back out of
   // history, so the two can't drift into showing different things.
+  function openInTrackedJobs(record) {
+    // Content scripts can't open tabs, so the worker does it — and it carries
+    // the job key so the page can scroll to and expand that record rather than
+    // dropping you at the top of a long list.
+    sendMessageWithRetry({
+      type: "JOB_FIT_OPEN_HISTORY",
+      profileId: record.profileId,
+      jobKey: record.jobKey,
+    }).catch(() => {});
+  }
+
   function renderResult(record, { cached, profileName, onReevaluate, saveError }) {
     const warnings = [];
     if (saveError) warnings.push(`Result shown but NOT saved to history: ${saveError}`);
@@ -264,7 +282,10 @@
       : [];
 
     const prefix = cached ? `[saved · evaluated ${timeAgo(record.lastEvaluatedAt)}] ` : "";
-    const extraActions = cached ? [{ label: "Re-evaluate", onClick: onReevaluate }] : [];
+    const extraActions = [
+      ...(cached ? [{ label: "Re-evaluate", onClick: onReevaluate }] : []),
+      ...(record.jobKey ? [{ label: "Tracked jobs", onClick: () => openInTrackedJobs(record) }] : []),
+    ];
 
     if (record.hardReject) {
       renderBanner({
@@ -297,7 +318,8 @@
 
     renderBanner({
       status: statusForScore(e.score),
-      label: `${e.score} · ${e.verdict}`,
+      score: e.score,
+      label: e.verdict || "",
       summary: prefix + (e.one_line || ""),
       sections: [
         ...warningSection,

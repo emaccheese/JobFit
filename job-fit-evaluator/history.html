@@ -20,17 +20,23 @@
 
   .controls {
     background: var(--card); border: 1px solid var(--line); border-radius: 8px;
-    padding: 12px; margin-bottom: 16px; display: flex; flex-wrap: wrap; gap: 10px; align-items: flex-end;
+    padding: 10px 12px; margin-bottom: 12px; display: flex; flex-wrap: wrap; gap: 8px; align-items: flex-end;
   }
   .field { display: flex; flex-direction: column; gap: 4px; }
   .field > span { font-size: 11px; font-weight: 600; color: var(--muted); text-transform: uppercase; letter-spacing: .04em; }
   select, input[type="text"], textarea {
     font: inherit; padding: 6px 8px; border: 1px solid #ccd2da; border-radius: 5px; background: #fff; color: inherit;
   }
-  input[type="text"] { min-width: 200px; }
-  .field-grow { flex: 1; min-width: 200px; }
+  input[type="text"] { min-width: 0; }
+  /* Small enough that the whole bar stays on one row at a normal window width;
+     the Data control was wrapping and costing 60px of vertical space above the
+     list, which is the thing the page exists to show. */
+  .field-grow { flex: 1; min-width: 140px; }
   .field-grow input { width: 100%; }
-  .checkfield { display: flex; align-items: center; gap: 6px; font-size: 13px; padding-bottom: 6px; }
+  .checkfield {
+    display: flex; align-items: center; gap: 6px; font-size: 13px; padding-bottom: 6px;
+    flex: 0 0 auto; white-space: nowrap;
+  }
   button {
     font: inherit; padding: 6px 12px; border: 1px solid #ccd2da; border-radius: 5px;
     background: #fff; color: inherit; cursor: pointer;
@@ -38,26 +44,47 @@
   button:hover { background: #f0f2f5; }
   button.danger { color: var(--red); border-color: #e3c0bb; }
 
-  .backup {
-    display: flex; align-items: center; justify-content: space-between; gap: 12px; flex-wrap: wrap;
-    background: var(--card); border: 1px solid var(--line); border-radius: 8px;
-    padding: 10px 12px; margin-bottom: 16px;
+  /* Funnel chips: the page should say what to do next, not just what happened. */
+  .funnel { display: flex; flex-wrap: wrap; gap: 6px; margin-bottom: 18px; }
+  .funnel button {
+    display: flex; align-items: baseline; gap: 6px;
+    border: 1px solid var(--line); background: var(--card); border-radius: 999px;
+    padding: 5px 12px; font-size: 13px; color: var(--muted); cursor: pointer;
   }
-  .backup-text { font-size: 13px; }
-  .backup-text strong { display: block; }
-  .backup-text span { color: var(--muted); font-size: 12px; }
-  .backup-actions { display: flex; gap: 8px; }
+  .funnel button:hover { border-color: #c3ccd8; }
+  .funnel button strong { color: var(--text); font-weight: 600; }
+  .funnel button.urgent { border-color: #e8cfa0; background: #fdf3e2; color: var(--amber); }
+  .funnel button.urgent strong { color: var(--amber); }
+  .funnel button.urgent[aria-pressed="true"] { background: var(--amber); border-color: var(--amber); color: #fbeacc; }
+  .funnel button.urgent[aria-pressed="true"] strong { color: #fff; }
+  .funnel button[aria-pressed="true"] { background: var(--accent); border-color: var(--accent); color: #dbe7f8; }
+  .funnel button[aria-pressed="true"] strong { color: #fff; }
+
+  /* Occasional actions live behind one control instead of a standing panel. */
+  .data-menu { border: 1px solid #ccd2da; border-radius: 5px; padding: 0; margin: 0 0 0 auto; position: relative; }
+  .data-menu > summary {
+    cursor: pointer; list-style: none; padding: 6px 12px; font-size: 14px; font-weight: 400; margin: 0;
+  }
+  .data-menu > summary::-webkit-details-marker { display: none; }
+  .data-menu[open] > summary { border-bottom: 1px solid var(--line); }
+  .data-menu-body {
+    position: absolute; right: 0; top: 100%; z-index: 5; width: 260px;
+    display: flex; flex-direction: column; gap: 6px; align-items: stretch;
+    background: var(--card); border: 1px solid var(--line); border-radius: 8px;
+    padding: 10px; margin-top: 4px; box-shadow: 0 6px 16px rgba(0,0,0,.08);
+  }
+  .data-menu-body .hint { font-size: 11px; color: var(--muted); margin: 2px 0 0; line-height: 1.4; }
   .backup-status {
     border-radius: 6px; padding: 10px 12px; margin: -8px 0 16px; font-size: 13px;
     background: #e6f4ec; color: var(--green); border: 1px solid #cfe6d9; white-space: pre-line;
   }
   .backup-status.error { background: #fdeceb; color: var(--red); border-color: #f0cfcc; }
 
-  .queue { background: var(--card); border: 1px solid var(--line); border-radius: 8px; padding: 12px; margin-bottom: 16px; }
-  .queue-head { display: flex; align-items: center; justify-content: space-between; gap: 10px; margin-bottom: 8px; }
+  .queue { background: var(--card); border: 1px solid var(--line); border-radius: 8px; padding: 8px 12px; margin-bottom: 12px; }
+  .queue-head { display: flex; align-items: center; justify-content: space-between; gap: 10px; margin-bottom: 4px; }
   .queue-actions { display: flex; gap: 8px; }
   .queue-pause { background: #fdf3e2; color: var(--amber); border-radius: 5px; padding: 8px 10px; margin-bottom: 8px; font-size: 13px; }
-  .qrow { display: flex; align-items: center; gap: 10px; padding: 6px 0; border-top: 1px solid var(--line); font-size: 13px; }
+  .qrow { display: flex; align-items: center; gap: 10px; padding: 5px 0; border-top: 1px solid var(--line); font-size: 13px; }
   .qrow:first-child { border-top: none; }
   .qstate {
     flex: 0 0 auto; font-size: 10px; font-weight: 700; text-transform: uppercase; letter-spacing: .04em;
@@ -80,11 +107,25 @@
   .stale {
     display: flex; align-items: center; justify-content: space-between; gap: 12px; flex-wrap: wrap;
     background: #fdf3e2; border: 1px solid #f0dcb8; color: var(--amber);
-    border-radius: 8px; padding: 10px 12px; margin-bottom: 16px; font-size: 13px;
+    border-radius: 8px; padding: 8px 12px; margin-bottom: 12px; font-size: 13px;
   }
   .stale button { flex: 0 0 auto; }
 
-  .job { background: var(--card); border: 1px solid var(--line); border-radius: 8px; margin-bottom: 10px; overflow: hidden; }
+  .job {
+    background: var(--card); border: 1px solid var(--line); border-left: 3px solid transparent;
+    border-radius: 8px; margin-bottom: 10px; overflow: hidden;
+  }
+  /* Status reads from the edge of the row. Score badges keep the green/amber/red
+     channel to themselves, so the two signals never compete. */
+  .job.st-applied      { border-left-color: #9db8e0; }
+  .job.st-interviewing { border-left-color: var(--accent); }
+  .job.st-offer        { border-left-color: var(--green); }
+  .job.st-ghosted      { border-left-color: #e0c48d; }
+  .job.st-closed       { border-left-color: transparent; opacity: .62; }
+  .job.st-closed:hover { opacity: 1; }
+  /* Brief highlight when arriving from a banner, so the job you asked for is
+     obvious among identical-looking rows. */
+  .job.flash { box-shadow: 0 0 0 3px rgba(53, 116, 214, .35); }
   .job-head { display: flex; align-items: center; gap: 12px; padding: 12px 14px; cursor: pointer; }
   .job-head:hover { background: #fafbfc; }
   .chev { color: var(--muted); font-size: 11px; width: 10px; flex: 0 0 10px; display: inline-block; transition: transform .12s ease; }
@@ -98,13 +139,19 @@
   .job-title strong { display: block; font-size: 14px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
   .job-title > span { display: block; font-size: 12px; color: var(--muted); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
   .badge.badge-muted { background: #eef1f5; color: var(--muted); }
+  .badge.badge-attention { background: #fdf3e2; color: var(--amber); text-transform: none; letter-spacing: 0; font-weight: 600; }
   .badge {
     display: inline-block; vertical-align: middle;
     font-size: 10px; font-weight: 700; text-transform: uppercase; letter-spacing: .04em;
     background: #fdeceb; color: var(--red); border-radius: 3px; padding: 2px 5px; margin-left: 6px;
   }
-  .when { flex: 0 0 auto; font-size: 12px; color: var(--muted); text-align: right; }
-  .job-head select { flex: 0 0 auto; max-width: 240px; }
+  .when { flex: 0 0 auto; font-size: 12px; color: var(--muted); text-align: right; white-space: nowrap; }
+  .job-head select {
+    flex: 0 0 auto; max-width: 240px;
+    border-color: transparent; background: transparent; color: var(--muted);
+    transition: border-color .12s, background .12s, color .12s;
+  }
+  .job-head:hover select, .job-head select:focus { border-color: #ccd2da; background: #fff; color: inherit; }
 
   .job-body { border-top: 1px solid var(--line); padding: 14px; display: none; }
   .job.open .job-body { display: block; }
@@ -135,6 +182,7 @@
   <div class="wrap">
     <h1>Tracked jobs</h1>
     <div class="sub" id="subtitle"></div>
+    <div class="funnel" id="funnel"></div>
 
     <div class="controls">
       <label class="field">
@@ -162,20 +210,18 @@
         <input id="search" type="text" placeholder="title, company, or anything in the posting">
       </label>
       <label class="checkfield"><input id="hideRejects" type="checkbox"> Hide hard rejects</label>
-      <button id="exportCsv" type="button">Export CSV</button>
+      <details class="data-menu" id="dataMenu">
+        <summary>Data</summary>
+        <div class="data-menu-body">
+          <button id="exportCsv" type="button">Export CSV</button>
+          <button id="exportData" type="button">Back up all data</button>
+          <button id="importData" type="button">Restore from backup…</button>
+          <input id="importFile" type="file" accept="application/json,.json" hidden>
+          <p class="hint">A backup holds profiles, LM Studio settings and every tracked job — everything the CSV leaves out. Uninstalling the extension erases all of it.</p>
+        </div>
+      </details>
     </div>
 
-    <div class="backup">
-      <div class="backup-text">
-        <strong>Backup</strong>
-        <span>Profiles, LM&nbsp;Studio settings and every tracked job — everything the CSV leaves out.</span>
-      </div>
-      <div class="backup-actions">
-        <button id="exportData" type="button">Back up all data</button>
-        <button id="importData" type="button">Restore from backup…</button>
-        <input id="importFile" type="file" accept="application/json,.json" hidden>
-      </div>
-    </div>
     <div id="backupStatus" class="backup-status" hidden></div>
 
     <div id="staleNotice" class="stale" hidden></div>

@@ -27,6 +27,18 @@
   .profile-bar details summary { font-size: 11px; font-weight: 600; color: #3a4a63; margin-bottom: 0; }
   .profile-bar details[open] summary { margin-bottom: 4px; }
   .hint { font-size: 11px; color: #555; margin-top: 4px; }
+  /* Both of the "why isn't it working?" questions, answered before you click:
+     is the model reachable, and does this page even hold a posting. */
+  .readiness {
+    background: #fff; border: 1px solid #e3e3e3; border-radius: 4px;
+    padding: 7px 9px; margin-bottom: 10px; font-size: 11px; color: #444;
+  }
+  .ready-row { display: flex; align-items: center; gap: 7px; line-height: 1.5; }
+  .ready-row + .ready-row { margin-top: 3px; }
+  .dot { flex: 0 0 auto; width: 7px; height: 7px; border-radius: 50%; background: #c9ced6; }
+  .dot.ok { background: #1e8e3e; }
+  .dot.warn { background: #f29900; }
+  .dot.bad { background: #d93025; }
   .presets label { display: flex; align-items: flex-start; gap: 7px; font-weight: 400; margin-bottom: 5px; line-height: 1.35; }
   .presets input[type="checkbox"] { width: auto; margin: 2px 0 0; flex: 0 0 auto; }
   details.advanced { border: none; border-top: 1px solid #e3e3e3; border-radius: 0; padding: 8px 0 0; margin: 10px 0 0; }
@@ -36,6 +48,11 @@
 </head>
 <body>
   <h1>JobFit</h1>
+
+  <div id="readiness" class="readiness">
+    <div class="ready-row"><span class="dot" id="modelDot"></span><span id="modelState">Checking the local model…</span></div>
+    <div class="ready-row"><span class="dot" id="pageDot"></span><span id="pageState">Checking this tab…</span></div>
+  </div>
 
   <div class="profile-bar">
     <label for="profileSelect">Evaluating as</label>

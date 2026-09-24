@@ -216,10 +216,77 @@ async function loadSettings() {
     typeof lmStudio.enableThinking === "boolean" ? lmStudio.enableThinking : JOB_FIT_DEFAULTS.lmStudio.enableThinking;
 
   renderPresetCheckboxes();
+  watchSettingsFields();
   store = await JOB_FIT_PROFILES.load();
   renderProfileSelect();
   restoreOpenSections(stored.uiOpenSections);
   fillFormFromProfile(activeProfile());
+}
+
+// Chrome destroys the popup document the moment it loses focus, and nothing
+// here was written until you pressed Save — so editing your CV and then
+// clicking anything outside the popup lost the edit silently.
+//
+// Debounced rather than written on every keystroke, and short enough that the
+// most you can lose is the last fraction of a second of typing. A blur flush
+// is not enough on its own: the teardown does not wait for an async storage
+// write to finish.
+let autoSaveTimer = null;
+
+function scheduleAutoSave() {
+  captureForm();
+  clearTimeout(autoSaveTimer);
+  autoSaveTimer = setTimeout(() => {
+    persistSettings().then(() => setStatus("Saved automatically."));
+  }, 400);
+}
+
+function flushAutoSave() {
+  clearTimeout(autoSaveTimer);
+  captureForm();
+  return persistSettings();
+}
+
+async function persistSettings() {
+  await chrome.storage.local.set({
+    lmStudio: {
+      url: els.lmStudioUrl.value.trim() || JOB_FIT_DEFAULTS.lmStudio.url,
+      model: els.lmStudioModel.value.trim(),
+      timeoutSeconds:
+        els.lmStudioTimeout.value === "" ? JOB_FIT_DEFAULTS.lmStudio.timeoutSeconds : Number(els.lmStudioTimeout.value),
+      reasoningEffort: els.lmStudioReasoningEffort.value,
+      enableThinking: els.lmStudioEnableThinking.checked,
+    },
+  });
+  await JOB_FIT_PROFILES.save(store);
+}
+
+// Every field that belongs to a profile or to the LM Studio settings. The
+// profile selector, the rename box and the summary output are deliberately
+// excluded — they are not settings.
+function watchSettingsFields() {
+  const fields = [
+    els.profile, els.lmStudioUrl, els.lmStudioModel, els.lmStudioTimeout,
+    els.lmStudioReasoningEffort, els.lmStudioEnableThinking,
+    els.hardRejectsPhrases, els.hardRejectsPatterns,
+    els.softWarningsPhrases, els.softWarningsPatterns,
+    els.domainFlagsPhrases, els.domainFlagsPatterns,
+    ...SALARY_CURRENCIES.flatMap((cur) => {
+      const { min, max } = salaryFieldsFor(cur);
+      return [min, max];
+    }),
+  ].filter(Boolean);
+
+  fields.forEach((field) => {
+    field.addEventListener("input", scheduleAutoSave);
+    field.addEventListener("change", flushAutoSave);
+  });
+
+  // Preset checkboxes are rebuilt on every render, so delegate to the container.
+  KEYWORD_KINDS.forEach((kind) => {
+    const host = els[`${kind}Presets`];
+    if (host) host.addEventListener("change", flushAutoSave);
+  });
 }
 
 async function saveSettings() {
@@ -236,6 +303,13 @@ async function saveSettings() {
   });
   await JOB_FIT_PROFILES.save(store);
   setStatus(`Saved "${activeProfile().name}".`);
+}
+
+// Last line of defence. Not relied on — an async write started here may not
+// finish before the document is torn down — but it costs nothing and catches
+// an edit made inside the debounce window.
+function flushOnHide() {
+  if (document.visibilityState === "hidden") flushAutoSave();
 }
 
 // Switching auto-saves the outgoing profile rather than warning about unsaved
@@ -400,6 +474,123 @@ function persistOpenSections() {
     if (el) state[id] = el.open;
   });
   chrome.storage.local.set({ uiOpenSections: state });
+}
+
+// --- readiness -------------------------------------------------------------
+
+function setReady(dotId, textId, state, text, title) {
+  const dot = document.getElementById(dotId);
+  dot.className = `dot ${state}`;
+  const label = document.getElementById(textId);
+  label.textContent = text;
+  label.title = title || "";
+}
+
+// The configured endpoint is the chat-completions URL; POSTing to it would run
+// a generation. /v1/models is the cheap GET that answers "is it up", and its
+// response also says which models are actually loaded.
+function modelsUrlFrom(chatUrl) {
+  try {
+    const url = new URL(chatUrl);
+    url.search = "";
+    url.hash = "";
+    url.pathname = /\/chat\/completions\/?$/.test(url.pathname)
+      ? url.pathname.replace(/\/chat\/completions\/?$/, "/models")
+      : "/v1/models";
+    return url.toString();
+  } catch (err) {
+    return null;
+  }
+}
+
+async function checkModel() {
+  const stored = await chrome.storage.local.get("lmStudio");
+  const settings = stored.lmStudio || JOB_FIT_DEFAULTS.lmStudio;
+  const wanted = (settings.model || "").trim();
+  const url = modelsUrlFrom(settings.url || JOB_FIT_DEFAULTS.lmStudio.url);
+  if (!url) {
+    setReady("modelDot", "modelState", "bad", "The endpoint isn't a valid URL.");
+    return;
+  }
+
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), 2500);
+  let payload;
+  try {
+    const response = await fetch(url, { signal: controller.signal });
+    if (!response.ok) throw new Error(`HTTP ${response.status}`);
+    payload = await response.json();
+  } catch (err) {
+    setReady("modelDot", "modelState", "bad", "LM Studio isn't reachable — start it and reopen this popup.", url);
+    return;
+  } finally {
+    clearTimeout(timer);
+  }
+
+  const loaded = ((payload && payload.data) || []).map((m) => m.id).filter(Boolean);
+
+  if (!wanted) {
+    setReady("modelDot", "modelState", "ok", `Connected — using ${loaded[0] || "whatever is loaded"}`, loaded.join("\n"));
+    return;
+  }
+  // A model name that isn't loaded is the cause of the HTTP error that pauses
+  // the whole queue — worth catching here rather than after you've queued ten.
+  if (loaded.length && !loaded.includes(wanted)) {
+    setReady("modelDot", "modelState", "warn", `"${wanted}" isn't loaded in LM Studio.`, `Loaded:\n${loaded.join("\n")}`);
+    return;
+  }
+  setReady("modelDot", "modelState", "ok", `Connected — ${wanted}`);
+}
+
+// Deliberately a cheap selector probe rather than running the extractors: it
+// only has to say whether this page is worth clicking Evaluate on.
+function probePage() {
+  const hasEmbeddedBoard = Array.from(document.querySelectorAll("iframe[src]")).some((frame) => {
+    try {
+      const url = new URL(frame.src, location.href);
+      return url.hostname.endsWith("greenhouse.io") && url.pathname.includes("/embed/");
+    } catch (err) {
+      return false;
+    }
+  });
+  return {
+    host: location.hostname,
+    linkedin: Boolean(document.querySelector('[data-testid="expandable-text-box"]')),
+    greenhouse: Boolean(document.querySelector(".job__description, .application-description")),
+    embedded: hasEmbeddedBoard,
+  };
+}
+
+async function checkPage() {
+  const [tab] = await chrome.tabs.query({ active: true, currentWindow: true });
+  if (!tab?.id) {
+    setReady("pageDot", "pageState", "warn", "No active tab.");
+    return;
+  }
+  let probe;
+  try {
+    const results = await chrome.scripting.executeScript({ target: { tabId: tab.id }, func: probePage });
+    probe = results && results[0] && results[0].result;
+  } catch (err) {
+    setReady("pageDot", "pageState", "bad", "Chrome won't let the extension read this page.");
+    return;
+  }
+  if (!probe) {
+    setReady("pageDot", "pageState", "warn", "Couldn't read this tab.");
+    return;
+  }
+
+  if (probe.linkedin) setReady("pageDot", "pageState", "ok", "LinkedIn posting detected.");
+  else if (probe.greenhouse) setReady("pageDot", "pageState", "ok", "Greenhouse posting detected.");
+  else if (probe.embedded) setReady("pageDot", "pageState", "ok", "Embedded Greenhouse board detected.");
+  else
+    setReady(
+      "pageDot",
+      "pageState",
+      "warn",
+      "No known posting on this page — Evaluate will still try.",
+      probe.host
+    );
 }
 
 async function renderQueueStatus() {
@@ -863,5 +1054,10 @@ document.getElementById("viewHistory").addEventListener("click", () => {
 
 // restoreLastSummary() reads the active profile, so it has to wait for the
 // store to be in memory.
+document.addEventListener("visibilitychange", flushOnHide);
+window.addEventListener("pagehide", flushAutoSave);
+
 loadSettings().then(restoreLastSummary);
 renderQueueStatus();
+checkModel();
+checkPage();

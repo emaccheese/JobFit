@@ -95,6 +95,7 @@ function visibleRecords() {
   return sortRecords(
     records.filter((r) => {
       if (els.hideRejects.checked && r.hardReject) return false;
+      if (groupFilter && !FILTERS[groupFilter].match(r)) return false;
       if (status !== "all" && r.status !== status) return false;
       if (!query) return true;
       // Notes are searched too — a recruiter's name or "asked about OpenCL" is
@@ -210,8 +211,37 @@ function profileDisplayName(record) {
   return (live && live.name) || record.profileName || "unknown";
 }
 
+// One line, not two. Once you've applied, "applied 3d ago" is the fact that
+// matters; the absolute date is reference and moves to the tooltip.
+function buildWhen(record) {
+  const when = el("div", "when");
+  const activity = JOB_FIT_EVALSTORE.activityTs(record);
+  if (record.appliedAt) {
+    when.textContent = `applied ${daysSince(record.appliedAt)}d ago`;
+    when.title = `Applied ${formatDate(record.appliedAt)} · evaluated ${formatDate(activity)}`;
+  } else {
+    const days = daysSince(activity);
+    when.textContent = days === 0 ? "today" : `${days}d ago`;
+    when.title = `Evaluated ${formatDate(activity)}`;
+  }
+  return when;
+}
+
+function statusGroupOf(record) {
+  const entry = Object.entries(STATUS_GROUPS).find(([, group]) => group.match(record));
+  return entry ? entry[0] : "none";
+}
+
 function renderJob(record) {
   const card = el("div", "job");
+  // Closed rows fade rather than disappear: still findable, no longer competing
+  // with the ones that need something from you.
+  const statusClass = { none: "", waiting: "st-applied", active: "st-interviewing", closed: "st-closed" }[
+    statusGroupOf(record)
+  ];
+  if (record.status === "offer") card.classList.add("st-offer");
+  else if (record.status === "ghosted") card.classList.add("st-ghosted");
+  else if (statusClass) card.classList.add(statusClass);
 
   const head = el("div", "job-head");
   head.appendChild(el("span", "chev", "▶"));
@@ -223,18 +253,17 @@ function renderJob(record) {
   const strong = el("strong", null, record.title || "(untitled posting)");
   if (record.hardReject) strong.appendChild(el("span", "badge", "hard reject"));
   else if (record.score == null) strong.appendChild(el("span", "badge badge-muted", "summary only"));
+  // Shown on every qualifying row, not only when the filter is on, so the
+  // actionable jobs stand out while scanning the ordinary list.
+  const reason = attentionReason(record);
+  if (reason) strong.appendChild(el("span", "badge badge-attention", reason));
   titleWrap.appendChild(strong);
   titleWrap.appendChild(
     el("span", null, [record.company, record.location].filter(Boolean).join(" · ") || record.url)
   );
   head.appendChild(titleWrap);
 
-  const when = el("div", "when");
-  when.appendChild(el("div", null, formatDate(JOB_FIT_EVALSTORE.activityTs(record))));
-  if (record.appliedAt) {
-    when.appendChild(el("div", null, `applied ${daysSince(record.appliedAt)}d ago`));
-  }
-  head.appendChild(when);
+  head.appendChild(buildWhen(record));
 
   head.appendChild(
     buildStatusSelect(record, async (value) => {
@@ -356,6 +385,63 @@ function renderJob(record) {
 // ---------------------------------------------------------------------------
 // Queue panel
 // ---------------------------------------------------------------------------
+
+// Days of silence after applying before a job is worth chasing. Two weeks is
+// the point past which most processes have either moved or gone quiet for good;
+// the row states the actual number so the rule is never magic.
+const SILENCE_DAYS = 14;
+
+// "Needs attention" is the page answering what to do next. Each rule carries
+// its own wording, because a list of jobs with no stated reason is just another
+// filter — the reason is the useful part.
+//
+// Ordered: the first match wins, most decisive first. Hard rejects are excluded
+// throughout — they are disqualified, not pending.
+const ATTENTION_RULES = [
+  {
+    test: (r) => r.status === "offer",
+    label: () => "offer — decide",
+  },
+  {
+    test: (r) => r.status === "interviewing",
+    label: () => "interview scheduled",
+  },
+  {
+    // Deliberately reuses the banner's green threshold: if the tool calls it a
+    // strong match, and you haven't acted, that is the thing to act on.
+    test: (r) => (!r.status || r.status === "not_applied") && r.score != null && r.score >= 75,
+    label: (r) => `strong match (${r.score}) — not applied`,
+  },
+  {
+    // Only "applied": ghosted means you have already decided it went quiet.
+    test: (r) => r.status === "applied" && r.appliedAt && daysSince(r.appliedAt) >= SILENCE_DAYS,
+    label: (r) => `no reply in ${daysSince(r.appliedAt)} days`,
+  },
+];
+
+function attentionReason(record) {
+  if (record.hardReject) return null;
+  const rule = ATTENTION_RULES.find((r) => r.test(record));
+  return rule ? rule.label(record) : null;
+}
+
+// The buckets a search actually moves through. Finer-grained filtering stays
+// on the Status dropdown; these answer "what should I do next?".
+const STATUS_GROUPS = {
+  none: { label: "Not applied", match: (r) => !r.status || r.status === "not_applied" },
+  waiting: { label: "Waiting", match: (r) => r.status === "applied" },
+  active: { label: "In play", match: (r) => r.status === "interviewing" || r.status === "offer" },
+  closed: {
+    label: "Closed",
+    match: (r) => r.status === "rejected" || r.status === "ghosted" || r.status === "withdrawn",
+  },
+};
+
+const FILTERS = Object.assign({ attention: { label: "Needs attention", match: (r) => Boolean(attentionReason(r)) } }, STATUS_GROUPS);
+
+// Chips and the Status dropdown are mutually exclusive — using one clears the
+// other, so the list is never filtered by two controls at once.
+let groupFilter = null;
 
 const QUEUE_STATE_LABEL = {
   pending: "waiting",
@@ -529,6 +615,7 @@ function watchForChanges() {
 }
 
 function render() {
+  renderFunnel();
   const visible = visibleRecords();
   els.list.innerHTML = "";
 
@@ -546,12 +633,47 @@ function render() {
     visible.forEach((record) => els.list.appendChild(renderJob(record)));
   }
 
-  const applied = records.filter((r) => r.status && r.status !== "not_applied").length;
-  const evaluated = records.filter((r) => r.score != null).length;
   const profileName = (store.profiles.find((p) => p.id === viewProfileId) || {}).name || "";
   els.subtitle.textContent =
-    `${profileName} — ${records.length} tracked · ${evaluated} evaluated · ${applied} applied to` +
-    (visible.length !== records.length ? ` · showing ${visible.length}` : "");
+    visible.length === records.length ? profileName : `${profileName} — showing ${visible.length} of ${records.length}`;
+}
+
+function renderFunnel() {
+  const host = document.getElementById("funnel");
+  host.innerHTML = "";
+
+  const attention = records.filter(FILTERS.attention.match).length;
+  const chips = [
+    // First, and only when there is something in it: an empty "needs attention"
+    // is the best possible state and should not occupy the eye.
+    ...(attention ? [{ key: "attention", label: "Needs attention", count: attention, urgent: true }] : []),
+    { key: null, label: "All", count: records.length },
+    ...Object.entries(STATUS_GROUPS).map(([key, group]) => ({
+      key,
+      label: group.label,
+      count: records.filter(group.match).length,
+    })),
+  ];
+
+  chips.forEach((chip) => {
+    const { key, label, count } = chip;
+    // A bucket you have nothing in is noise, unless it's the one you're in.
+    if (key && !count && groupFilter !== key) return;
+    const btn = document.createElement("button");
+    btn.type = "button";
+    if (chip.urgent) btn.className = "urgent";
+    btn.setAttribute("aria-pressed", String(groupFilter === key));
+    const n = document.createElement("strong");
+    n.textContent = String(count);
+    btn.appendChild(n);
+    btn.appendChild(document.createTextNode(label));
+    btn.addEventListener("click", () => {
+      groupFilter = groupFilter === key ? null : key;
+      els.statusFilter.value = "all";
+      render();
+    });
+    host.appendChild(btn);
+  });
 }
 
 function csvCell(value) {
@@ -828,6 +950,7 @@ async function requeueStale(btn) {
 async function loadProfile(profileId) {
   viewProfileId = profileId;
   openKeys.clear();
+  groupFilter = null;
   records = await JOB_FIT_EVALSTORE.list(profileId);
   render();
   await refreshQueue();
@@ -851,15 +974,30 @@ async function init() {
   renderProfileOptions();
 
   els.profileSelect.addEventListener("change", () => loadProfile(els.profileSelect.value));
-  [els.sortSelect, els.statusFilter, els.hideRejects].forEach((node) =>
-    node.addEventListener("change", render)
-  );
+  [els.sortSelect, els.hideRejects].forEach((node) => node.addEventListener("change", render));
+  els.statusFilter.addEventListener("change", () => {
+    groupFilter = null; // the dropdown and the chips never filter at once
+    render();
+  });
   els.search.addEventListener("input", render);
-  document.getElementById("exportCsv").addEventListener("click", exportCsv);
-  document.getElementById("exportData").addEventListener("click", exportData);
-  document.getElementById("importData").addEventListener("click", () =>
-    document.getElementById("importFile").click()
-  );
+  const dataMenu = document.getElementById("dataMenu");
+  const closeDataMenu = () => dataMenu.removeAttribute("open");
+  document.addEventListener("click", (e) => {
+    if (dataMenu.open && !dataMenu.contains(e.target)) closeDataMenu();
+  });
+
+  document.getElementById("exportCsv").addEventListener("click", () => {
+    closeDataMenu();
+    exportCsv();
+  });
+  document.getElementById("exportData").addEventListener("click", () => {
+    closeDataMenu();
+    exportData();
+  });
+  document.getElementById("importData").addEventListener("click", () => {
+    closeDataMenu();
+    document.getElementById("importFile").click();
+  });
   document.getElementById("importFile").addEventListener("change", async (e) => {
     const file = e.target.files && e.target.files[0];
     e.target.value = ""; // so picking the same file twice still fires
@@ -875,7 +1013,38 @@ async function init() {
   });
 
   watchForChanges();
+
+  // Opened from a banner's "Tracked jobs" button: land on the right profile and
+  // on the right job, rather than at the top of a long list.
+  const params = new URLSearchParams(location.search);
+  const wantedProfile = params.get("profile");
+  const wantedJob = params.get("job");
+  if (wantedProfile && store.profiles.some((p) => p.id === wantedProfile)) {
+    els.profileSelect.value = wantedProfile;
+  }
+
   await loadProfile(els.profileSelect.value);
+  if (wantedJob) revealJob(wantedJob);
+}
+
+function revealJob(jobKey) {
+  if (!records.some((r) => r.jobKey === jobKey)) return;
+  openKeys.add(jobKey);
+  // Clear any filter that would hide the job we were asked to show.
+  groupFilter = null;
+  els.statusFilter.value = "all";
+  els.search.value = "";
+  els.hideRejects.checked = false;
+  render();
+
+  const cards = Array.from(document.querySelectorAll(".job"));
+  const visible = visibleRecords();
+  const index = visible.findIndex((r) => r.jobKey === jobKey);
+  const card = index === -1 ? null : cards[index];
+  if (!card) return;
+  card.scrollIntoView({ block: "center", behavior: "smooth" });
+  card.classList.add("flash");
+  setTimeout(() => card.classList.remove("flash"), 1600);
 }
 
 init();

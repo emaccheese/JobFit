@@ -33,6 +33,23 @@
   white-space: nowrap;
 }
 
+/* The same number should look the same here as on the tracked-jobs page: a
+   coloured badge, not plain text sharing weight with the verdict. */
+#job-fit-banner .jf-score {
+  flex: 0 0 auto;
+  min-width: 34px;
+  padding: 3px 8px;
+  border-radius: 5px;
+  font-weight: 700;
+  font-size: 15px;
+  text-align: center;
+  color: #fff;
+  background: #5f6b7a;
+}
+#job-fit-banner .jf-score.green { background: #1e8e3e; }
+#job-fit-banner .jf-score.amber { background: #b7791f; }
+#job-fit-banner .jf-score.red { background: #c0392b; }
+
 #job-fit-banner .jf-summary {
   overflow: hidden;
   text-overflow: ellipsis;
