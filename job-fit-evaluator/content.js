@@ -366,8 +366,9 @@
     }).catch(() => {});
   }
 
-  function renderResult(record, { cached, profileName, onReevaluate, saveError }) {
+  function renderResult(record, { cached, profileName, onReevaluate, saveError, staleNote }) {
     const warnings = [];
+    if (staleNote) warnings.push(staleNote);
     if (saveError) warnings.push(`Result shown but NOT saved to history: ${saveError}`);
     if (record.evaluation && record.evaluation.input_truncated) {
       warnings.push(
@@ -522,28 +523,34 @@
 
     const cached = ignoreCache ? null : await JOB_FIT_EVALSTORE.get(activeProfile.id, jobKey);
     if (cached) {
-      // A cached result is only valid for the profile AND the model that
-      // produced it. Profile: if the CV, keyword lists or salary expectations
-      // changed, re-run rather than showing a score those edits would change.
-      // Model: scores from different models aren't comparable, and the history
-      // page ranks by score — a cached number from a model you've since
-      // swapped out would sit in that ranking pretending to belong.
+      // A saved result is shown even when a different model or an older
+      // profile produced it — re-scoring is the user's call, made with the
+      // banner's Re-evaluate button, never something opening a page does on
+      // its own. The banner says why the score may be out of date.
+      //
+      // The exception is a hard reject under a changed profile: that verdict
+      // came from the profile's own keyword lists, and re-checking it is a
+      // keyword scan, not a model call.
       const profileChanged = cached.profileFingerprint !== fingerprint;
-      const modelChanged = (cached.model || "") !== currentModel;
+      const modelChanged = !cached.hardReject && (cached.model || "") !== currentModel;
 
-      if (!profileChanged && !modelChanged) {
+      if (!(cached.hardReject && profileChanged)) {
+        const reasons = [
+          modelChanged &&
+            `scored by ${cached.model || "a different model"}; the current model is ${currentModel || "not set"}`,
+          profileChanged && "your profile has changed since",
+        ].filter(Boolean);
         renderResult(cached, {
           cached: true,
           profileName: activeProfile.name,
           onReevaluate: () => start({ ignoreCache: true }),
+          staleNote: reasons.length
+            ? `This saved score may be out of date — ${reasons.join(", and ")}. Re-evaluate to score it again; this result is kept as a previous score.`
+            : null,
         });
         return;
       }
-      console.log(
-        `[Job Fit Evaluator] cached result is stale (${profileChanged ? "profile" : ""}${
-          profileChanged && modelChanged ? " and " : ""
-        }${modelChanged ? "model" : ""} changed since) — re-evaluating`
-      );
+      console.log("[Job Fit Evaluator] saved hard reject predates a profile change — re-checking");
     }
 
     const baseRecord = {
