@@ -34,12 +34,40 @@ var JOB_FIT_EVALSTORE = (function () {
     return stored[key] || null;
   }
 
+  // How many earlier results a record keeps. Enough to compare a few models on
+  // the same job without every re-evaluation growing the record without bound.
+  const MAX_PREVIOUS = 5;
+
+  // The part of a record that one evaluation produced — what re-evaluating
+  // replaces, and so what has to be set aside to keep it.
+  function evaluationSnapshot(record) {
+    return {
+      model: record.model || "",
+      profileFingerprint: record.profileFingerprint || null,
+      score: record.score,
+      verdict: record.verdict,
+      evaluation: record.evaluation || null,
+      hardReject: record.hardReject || null,
+      durationMs: record.durationMs || null,
+      evaluatedAt: record.lastEvaluatedAt,
+    };
+  }
+
   // Writes an evaluation result, preserving the fields the user owns — status,
   // notes, when they applied, when the job was first seen. Re-evaluating a
   // posting must never reset the fact that you already applied to it.
+  //
+  // The result being replaced moves to `previous` (newest first) rather than
+  // being lost, so scores from an earlier model or profile stay comparable.
+  // A summarize-only record has no lastEvaluatedAt and nothing to keep.
   async function saveEvaluation(record) {
     const existing = await get(record.profileId, record.jobKey);
     const now = Date.now();
+    const previous = (existing && existing.previous) || [];
+    const kept =
+      existing && existing.lastEvaluatedAt
+        ? [evaluationSnapshot(existing), ...previous].slice(0, MAX_PREVIOUS)
+        : previous;
     const merged = {
       status: "not_applied",
       statusChangedAt: null,
@@ -49,6 +77,7 @@ var JOB_FIT_EVALSTORE = (function () {
       firstSeenAt: now,
       ...(existing || {}),
       ...record,
+      previous: kept,
       lastEvaluatedAt: now,
     };
     await chrome.storage.local.set({ [recordKey(record.profileId, record.jobKey)]: merged });
