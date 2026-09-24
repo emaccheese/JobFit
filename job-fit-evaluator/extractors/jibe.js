@@ -1,0 +1,52 @@
+(() => {
+  // Jibe (iCIMS) career sites — careers.keysight.com and many others on their
+  // own domains. The markup is the platform's, not the company's, so it's
+  // recognised by the <descriptions-app> component rather than by hostname.
+  const MIN_WORDS = 100;
+
+  // The DOM never names the company except in the logo and page title; the
+  // JSON-LD block Jibe emits does.
+  function companyFromJsonLd() {
+    for (const script of document.querySelectorAll('script[type="application/ld+json"]')) {
+      try {
+        const org = JSON.parse(script.textContent).hiringOrganization;
+        const name = org && (typeof org === "string" ? org : org.name);
+        if (name) return String(name).trim();
+      } catch (err) {
+        /* malformed block — try the next */
+      }
+    }
+    return null;
+  }
+
+  function extractJibe() {
+    if (!document.querySelector("descriptions-app")) return null;
+    const descEl = document.querySelector("#description-body");
+    if (!descEl) return null;
+
+    const text = window.__jobFit.textFrom(descEl);
+    if (text.split(/\s+/).filter(Boolean).length < MIN_WORDS) return null;
+
+    const titleEl = document.querySelector('h1[itemprop="title"]');
+    const locationEl = document.querySelector("#header-locations .job-data-span");
+
+    return {
+      title: titleEl ? titleEl.innerText.trim() : null,
+      company: companyFromJsonLd(),
+      location: locationEl ? locationEl.innerText.trim() : null,
+      text,
+    };
+  }
+
+  // Jibe's path is /<context>/jobs/<req id>; the ?lang= param would otherwise
+  // make the same job two history records.
+  function jibeJobId() {
+    if (!document.querySelector("descriptions-app")) return null;
+    const m = location.pathname.match(/\/jobs\/(\d+)\/?$/);
+    return m ? m[1] : null;
+  }
+
+  window.__jobFit = window.__jobFit || {};
+  window.__jobFit.jibe = extractJibe;
+  window.__jobFit.jibeJobId = jibeJobId;
+})();

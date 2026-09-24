@@ -1,4 +1,6 @@
 (() => {
+  const MIN_WORDS = 200;
+
   function isVisible(el) {
     const style = window.getComputedStyle(el);
     if (style.display === "none" || style.visibility === "hidden") return false;
@@ -11,8 +13,13 @@
     return rect.width * rect.height;
   }
 
+  // A visible cookie banner is a role="dialog" too; taking it as the root
+  // left a few dozen words and no posting. Only a dialog long enough to be
+  // one counts.
   function findRoot() {
-    const dialogs = Array.from(document.querySelectorAll('[role="dialog"], dialog')).filter(isVisible);
+    const dialogs = Array.from(document.querySelectorAll('[role="dialog"], dialog'))
+      .filter(isVisible)
+      .filter((d) => window.__jobFit.textFrom(d).split(/\s+/).length >= MIN_WORDS);
     if (dialogs.length > 0) {
       dialogs.sort((a, b) => area(b) - area(a));
       return dialogs[0];
@@ -30,7 +37,7 @@
     // skipping (forms included, so the PII guarantee holds) while walking
     // the live DOM, where block boundaries are preserved.
     const text = window.__jobFit.textFrom(root);
-    if (text.split(/\s+/).length < 200) return null;
+    if (text.split(/\s+/).length < MIN_WORDS) return null;
 
     return {
       title: document.title || null,

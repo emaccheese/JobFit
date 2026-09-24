@@ -122,7 +122,8 @@
         (address && (address.addressLocality || address.addressRegion || address.addressCountry)) ||
           node.jobLocationType
       ),
-      salary: Boolean(salaryValue && (salaryValue.minValue != null || salaryValue.maxValue != null)),
+      // Jibe emits a 0–0 placeholder even when the posting states a range.
+      salary: Boolean(salaryValue && (salaryValue.minValue > 0 || salaryValue.maxValue > 0)),
       description: Boolean(node.description),
     };
   }
@@ -169,6 +170,11 @@
     if (!result && host.includes("linkedin.com") && window.__jobFit && window.__jobFit.linkedin) {
       result = window.__jobFit.linkedin();
       if (result) extractorName = "linkedin";
+    }
+
+    if (!result && window.__jobFit && window.__jobFit.jibe) {
+      result = window.__jobFit.jibe();
+      if (result) extractorName = "jibe";
     }
 
     if (!result && window.__jobFit && window.__jobFit.generic) {

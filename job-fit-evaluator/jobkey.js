@@ -86,6 +86,9 @@ var JOB_FIT_JOBKEY = (function () {
       if (id) return `greenhouse:${id}`;
     }
 
+    const jibeId = window.__jobFit && window.__jobFit.jibeJobId && window.__jobFit.jibeJobId();
+    if (jibeId) return `jibe:${host.replace(/^www\./, "")}:${jibeId}`;
+
     // Last resort for a page whose URL identifies a *list*, not a job — the
     // Greenhouse portal's /jobs/search is the same href for every posting you
     // open in its dialog, so normalizing the URL there would file every job
