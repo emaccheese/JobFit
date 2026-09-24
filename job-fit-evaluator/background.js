@@ -543,6 +543,24 @@ async function recordDuration(durationMs) {
   }
 }
 
+// Kept to a fixed window so a long search doesn't accumulate unbounded
+// diagnostics — enough to judge a pattern, not a permanent log.
+const PROBE_KEEP = 200;
+
+async function recordProbe(probe) {
+  if (!probe || !probe.host) return;
+  try {
+    const stored = await chrome.storage.local.get("jsonLdProbe");
+    const samples = ((stored.jsonLdProbe && stored.jsonLdProbe.samples) || []).concat({
+      ts: Date.now(),
+      ...probe,
+    });
+    await chrome.storage.local.set({ jsonLdProbe: { samples: samples.slice(-PROBE_KEEP) } });
+  } catch (err) {
+    /* diagnostics are not worth failing anything over */
+  }
+}
+
 async function runQueuedEvaluation(item) {
   const snapshot = item.profileSnapshot || {};
   const result = await evaluateWithLmStudio({
@@ -655,6 +673,10 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
       sendResponse(result);
       if (result.ok) kick();
     });
+    return true;
+  }
+  if (message?.type === "JOB_FIT_PROBE") {
+    recordProbe(message.probe).then(() => sendResponse({ ok: true }));
     return true;
   }
   if (message?.type === "JOB_FIT_OPEN_HISTORY") {

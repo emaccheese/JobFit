@@ -349,6 +349,27 @@ chrome.storage.local and is never committed.)
 
 ---
 
+## JSON-LD probe
+
+Most job boards are supposed to emit `schema.org/JobPosting` for Google Jobs
+indexing, which would give title, company, location and **salary** as typed
+fields — salary especially, since the model currently reads those numbers out
+of prose and they feed `compareSalary`. Getting them structurally would take
+the model out of one more job it is unreliable at.
+
+The premise turned out not to hold where it matters most: Greenhouse emits
+**none at all**, on either a board page or an embed. So rather than build on an
+assumption, `probeJsonLd()` measures. It runs at extraction time, changes
+nothing, and records per page: the host, the extractor used, whether a
+`JobPosting` block was present, and — the number that actually decides this —
+**which fields it would have added that the extractor missed**. Salary always
+counts as an addition, because no extractor reads it.
+
+Samples are capped at 200 and reported from the tracked-jobs Data menu, broken
+down by host. If the long tail of career sites shows a high "adds" column it is
+worth building; if it looks like Greenhouse, better generic extraction is the
+cheaper path.
+
 ## Extraction
 
 Each extractor exports `extract(document) → { title, company, location, text } | null`.

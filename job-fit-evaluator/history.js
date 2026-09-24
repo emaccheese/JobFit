@@ -740,6 +740,7 @@ const BACKUP_VERSION = 1;
 function showBackupStatus(text, isError = false) {
   const box = document.getElementById("backupStatus");
   box.textContent = text;
+  // Explicitly reset: the probe report leaves a monospace neutral style here.
   box.className = `backup-status${isError ? " error" : ""}`;
   box.hidden = false;
 }
@@ -950,6 +951,56 @@ async function requeueStale(btn) {
   refreshQueue();
 }
 
+// Reports what the probe saw, so the decision to build JSON-LD extraction (or
+// not) comes from real browsing rather than an assumption. The number that
+// matters is the last column: not whether JSON-LD was present, but whether it
+// held something the extractor had missed.
+async function showProbeReport() {
+  const stored = await chrome.storage.local.get("jsonLdProbe");
+  const samples = (stored.jsonLdProbe && stored.jsonLdProbe.samples) || [];
+  const box = document.getElementById("backupStatus");
+  box.className = "backup-status neutral";
+  box.hidden = false;
+
+  if (!samples.length) {
+    box.textContent = "No pages sampled yet. Evaluate a few postings and check back.";
+    return;
+  }
+
+  const byHost = new Map();
+  samples.forEach((s) => {
+    const row = byHost.get(s.host) || { seen: 0, found: 0, adds: 0 };
+    row.seen++;
+    if (s.found) row.found++;
+    if ((s.wouldAdd || []).length) row.adds++;
+    byHost.set(s.host, row);
+  });
+
+  const found = samples.filter((s) => s.found).length;
+  const helped = samples.filter((s) => (s.wouldAdd || []).length).length;
+  const fieldCounts = {};
+  samples.forEach((s) => (s.wouldAdd || []).forEach((f) => (fieldCounts[f] = (fieldCounts[f] || 0) + 1)));
+
+  const pct = (n) => `${Math.round((n / samples.length) * 100)}%`;
+  const lines = [
+    `${samples.length} pages sampled`,
+    `JSON-LD JobPosting found on ${found} (${pct(found)})`,
+    `Would have added something on ${helped} (${pct(helped)})`,
+    Object.keys(fieldCounts).length
+      ? `  fields: ${Object.entries(fieldCounts).map(([f, n]) => `${f} ×${n}`).join(", ")}`
+      : "  fields: none",
+    "",
+    "host                                  seen  found  adds",
+  ];
+  [...byHost.entries()]
+    .sort((a, b) => b[1].seen - a[1].seen)
+    .forEach(([host, row]) => {
+      lines.push(`${host.slice(0, 36).padEnd(36)}  ${String(row.seen).padStart(4)}  ${String(row.found).padStart(5)}  ${String(row.adds).padStart(4)}`);
+    });
+
+  box.textContent = lines.join("\n");
+}
+
 async function loadProfile(profileId) {
   viewProfileId = profileId;
   openKeys.clear();
@@ -996,6 +1047,10 @@ async function init() {
   document.getElementById("exportData").addEventListener("click", () => {
     closeDataMenu();
     exportData();
+  });
+  document.getElementById("probeReport").addEventListener("click", () => {
+    closeDataMenu();
+    showProbeReport();
   });
   document.getElementById("importData").addEventListener("click", () => {
     closeDataMenu();

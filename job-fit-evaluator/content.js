@@ -71,6 +71,87 @@
     return `"${cleanMatch(hardReject.matchedText)}" — ${hardReject.label}`;
   }
 
+  // --- JSON-LD probe -------------------------------------------------------
+  //
+  // Measures only. Changes nothing about extraction, and exists to answer one
+  // question from real browsing rather than assumption: on the sites you
+  // actually visit, would schema.org/JobPosting have told us anything the
+  // extractor missed? Greenhouse emits none at all, so the premise needed
+  // testing before any of it was built on.
+
+  function asArray(value) {
+    if (value == null) return [];
+    return Array.isArray(value) ? value : [value];
+  }
+
+  function isJobPosting(node) {
+    return node && typeof node === "object" && asArray(node["@type"]).some((t) => String(t).includes("JobPosting"));
+  }
+
+  // A page may carry several blocks, each of which may be a bare object, an
+  // array, or a @graph wrapper.
+  function findJobPostingNodes() {
+    const nodes = [];
+    document.querySelectorAll('script[type="application/ld+json"]').forEach((script) => {
+      let parsed;
+      try {
+        parsed = JSON.parse(script.textContent);
+      } catch (err) {
+        return;
+      }
+      asArray(parsed).forEach((entry) => {
+        if (!entry || typeof entry !== "object") return;
+        asArray(entry["@graph"]).concat([entry]).forEach((node) => {
+          if (isJobPosting(node)) nodes.push(node);
+        });
+      });
+    });
+    return nodes;
+  }
+
+  function jsonLdFields(node) {
+    const org = node.hiringOrganization;
+    const location = asArray(node.jobLocation)[0];
+    const address = location && location.address;
+    const salary = node.baseSalary;
+    const salaryValue = salary && salary.value;
+    return {
+      title: Boolean(node.title),
+      company: Boolean(org && (typeof org === "string" ? org : org.name)),
+      location: Boolean(
+        (address && (address.addressLocality || address.addressRegion || address.addressCountry)) ||
+          node.jobLocationType
+      ),
+      salary: Boolean(salaryValue && (salaryValue.minValue != null || salaryValue.maxValue != null)),
+      description: Boolean(node.description),
+    };
+  }
+
+  function probeJsonLd(result, extractorName) {
+    try {
+      const nodes = findJobPostingNodes();
+      const fields = nodes.length ? jsonLdFields(nodes[0]) : null;
+      // The extractor never reads salary — the model does — so JSON-LD salary
+      // is always an addition, and is counted separately from the fields the
+      // extractor merely failed to find.
+      const domHad = {
+        title: Boolean(result && result.title),
+        company: Boolean(result && result.company),
+        location: Boolean(result && result.location),
+      };
+      const wouldAdd = fields
+        ? ["title", "company", "location"].filter((k) => fields[k] && !domHad[k]).concat(fields.salary ? ["salary"] : [])
+        : [];
+
+      sendMessageWithRetry({
+        type: "JOB_FIT_PROBE",
+        probe: { host: location.hostname, extractor: extractorName, found: nodes.length > 0, fields, domHad, wouldAdd },
+      }).catch(() => {});
+    } catch (err) {
+      /* a measurement must never affect the thing it measures */
+    }
+  }
+
   function dispatchExtraction() {
     const host = location.hostname;
     let result = null;
@@ -404,6 +485,8 @@
       });
       return;
     }
+
+    probeJsonLd(result, extractorName);
 
     const jobKey = JOB_FIT_JOBKEY.keyFor(result);
     console.log(

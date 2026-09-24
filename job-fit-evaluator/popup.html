@@ -11,6 +11,11 @@
   textarea, input[type="text"], input[type="number"], select { width: 100%; box-sizing: border-box; font-family: inherit; font-size: 12px; padding: 6px; border: 1px solid #ccc; border-radius: 4px; }
   textarea { resize: vertical; }
   .row { display: flex; gap: 8px; }
+  /* A class that sets `display` beats the user agent's [hidden] rule, so
+     anything hidden via the attribute has to opt back out. Without this the
+     profile name input was visible the moment Manage profiles was expanded,
+     rather than only after New / Rename / Duplicate. */
+  [hidden] { display: none !important; }
   .row > * { flex: 1; min-width: 0; }
   .row .currency-label { flex: 0 0 36px; align-self: center; font-weight: 600; text-align: right; }
   button { font: inherit; padding: 6px 12px; border-radius: 4px; border: 1px solid #ccc; background: #f5f5f5; cursor: pointer; }

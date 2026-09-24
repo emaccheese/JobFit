@@ -79,6 +79,13 @@
     background: #e6f4ec; color: var(--green); border: 1px solid #cfe6d9; white-space: pre-line;
   }
   .backup-status.error { background: #fdeceb; color: var(--red); border-color: #f0cfcc; }
+  .backup-status.neutral {
+    background: var(--card); color: var(--text); border-color: var(--line);
+    font-family: ui-monospace, Menlo, monospace; font-size: 12px;
+    /* pre, not pre-line: the report is a table held together by spaces, and
+       pre-line collapses runs of them. */
+    white-space: pre; overflow-x: auto;
+  }
 
   .queue { background: var(--card); border: 1px solid var(--line); border-radius: 8px; padding: 8px 12px; margin-bottom: 12px; }
   .queue-head { display: flex; align-items: center; justify-content: space-between; gap: 10px; margin-bottom: 4px; }
@@ -110,6 +117,10 @@
     border-radius: 8px; padding: 8px 12px; margin-bottom: 12px; font-size: 13px;
   }
   .stale button { flex: 0 0 auto; }
+  /* A class that sets `display` beats the user agent's [hidden] rule. Applied
+     blanket rather than per-class so the next hidden element can't reintroduce
+     it — the stale notice was drawing an empty coloured strip while "hidden". */
+  [hidden] { display: none !important; }
 
   .job {
     background: var(--card); border: 1px solid var(--line); border-left: 3px solid transparent;
@@ -217,6 +228,7 @@
           <button id="exportCsv" type="button">Export CSV</button>
           <button id="exportData" type="button">Back up all data</button>
           <button id="importData" type="button">Restore from backup…</button>
+          <button id="probeReport" type="button">Extraction coverage</button>
           <input id="importFile" type="file" accept="application/json,.json" hidden>
           <p class="hint">A backup holds profiles, LM Studio settings and every tracked job — everything the CSV leaves out. Uninstalling the extension erases all of it.</p>
         </div>
