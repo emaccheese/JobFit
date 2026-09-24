@@ -90,6 +90,22 @@
       .trim();
   }
 
+  // hiringOrganization from the page's schema.org JobPosting, for ATS pages
+  // whose markup never names the company in text.
+  function jsonLdCompany() {
+    for (const script of document.querySelectorAll('script[type="application/ld+json"]')) {
+      try {
+        const org = JSON.parse(script.textContent).hiringOrganization;
+        const name = org && (typeof org === "string" ? org : org.name);
+        if (name) return String(name).trim();
+      } catch (err) {
+        /* malformed block — try the next */
+      }
+    }
+    return null;
+  }
+
   window.__jobFit = window.__jobFit || {};
   window.__jobFit.textFrom = textFrom;
+  window.__jobFit.jsonLdCompany = jsonLdCompany;
 })();
