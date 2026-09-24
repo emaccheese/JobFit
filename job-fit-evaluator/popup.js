@@ -593,6 +593,31 @@ async function checkPage() {
     );
 }
 
+function humanDuration(ms) {
+  const seconds = Math.round(ms / 1000);
+  if (seconds < 60) return `${seconds}s`;
+  return `${Math.floor(seconds / 60)}m${String(seconds % 60).padStart(2, "0")}s`;
+}
+
+// Shown directly under the timeout field, because that is the setting it
+// informs: the number you need to choose a timeout, next to the box you type it
+// into.
+async function renderTimingHint() {
+  const hint = document.getElementById("timingHint");
+  const stored = await chrome.storage.local.get("evalStats");
+  const durations = (stored.evalStats && stored.evalStats.durations) || [];
+  if (!durations.length) {
+    hint.textContent = "Tune this to your model's speed — timings appear here once you've run a few evaluations.";
+    return;
+  }
+  const sorted = [...durations].sort((a, b) => a - b);
+  const median = sorted[Math.floor(sorted.length / 2)];
+  const slowest = sorted[sorted.length - 1];
+  hint.textContent =
+    `Last ${durations.length} evaluation${durations.length === 1 ? "" : "s"}: ` +
+    `median ${humanDuration(median)}, slowest ${humanDuration(slowest)}.`;
+}
+
 async function renderQueueStatus() {
   const box = document.getElementById("queueStatus");
   let snapshot;
@@ -1061,3 +1086,4 @@ loadSettings().then(restoreLastSummary);
 renderQueueStatus();
 checkModel();
 checkPage();
+renderTimingHint();

@@ -729,6 +729,22 @@ Two independent conditions now, because neither alone was sufficient:
 The same substring flaw was in `injectJobFrames`, which is why the content
 script was then injected into the gapi frame; it filters on hostname too.
 
+**A fixed `seed` makes scores reproducible.** Without one the same posting
+scored differently on each run, so adjacent positions in a list sorted by score
+were partly sampling noise — which undermines the page's default view. The seed
+is sent with every request; `temperature` deliberately stays at 0.2, since a
+seed makes sampling reproducible without forcing greedy decoding. One
+consequence worth knowing: re-evaluating a posting whose profile, model and
+text are all unchanged now returns exactly the same answer. That is the point,
+but it does mean **Re-evaluate** is no longer a way to draw a second sample.
+
+**Evaluation duration is recorded.** `callLmStudio` reports elapsed ms, which is
+stored on the record and appended to a short rolling list under its own
+`evalStats` key — separate so the popup can read it without pulling every
+stored posting. The popup shows the median and slowest of the last 20 directly
+beneath the timeout field, because that is the setting the number informs.
+Median, not mean: one stuck generation should not skew the advice.
+
 **A score is only valid for the profile AND the model that produced it.** The
 staleness check originally covered the profile alone, so swapping models left
 cached scores presented as current — and the page ranks by score, so a list

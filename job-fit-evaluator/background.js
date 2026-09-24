@@ -211,7 +211,10 @@ async function callLmStudio(systemPrompt, userPrompt) {
     stored.lmStudio && typeof stored.lmStudio.enableThinking === "boolean"
       ? stored.lmStudio.enableThinking
       : defaults.enableThinking;
+  const seed =
+    stored.lmStudio && typeof stored.lmStudio.seed === "number" ? stored.lmStudio.seed : defaults.seed;
 
+  const startedAt = Date.now();
   const controller = new AbortController();
   const timeoutId = setTimeout(() => controller.abort(), timeoutMs);
   const stopKeepAlive = keepAlive();
@@ -232,6 +235,10 @@ async function callLmStudio(systemPrompt, userPrompt) {
           { role: "user", content: `${userPrompt}\n\n/no_think` },
         ],
         temperature: 0.2,
+        // Reproducibility, not determinism-at-any-cost: the same posting and
+        // profile give the same score twice, while temperature stays where it
+        // produces better output than greedy decoding.
+        ...(typeof seed === "number" ? { seed } : {}),
         max_tokens: 16000,
         frequency_penalty: 0.3,
         presence_penalty: 0.3,
@@ -306,7 +313,7 @@ async function callLmStudio(systemPrompt, userPrompt) {
   try {
     // The model is reported back so it can be stored on the record: scores from
     // different models are not comparable, and the history page sorts by score.
-    return { ok: true, data: extractJson(raw), model: model || "" };
+    return { ok: true, data: extractJson(raw), model: model || "", durationMs: Date.now() - startedAt };
   } catch (err) {
     return { ok: false, failure: "parse", error: "Could not parse JSON from the model's response.", raw };
   }
@@ -517,6 +524,25 @@ async function notifyTab(item, record) {
   }
 }
 
+// A short rolling record of how long evaluations actually take, kept as its own
+// small key so the popup can read it without pulling every stored posting.
+// Median rather than mean: one stuck generation shouldn't skew the advice the
+// timeout setting is given.
+const EVAL_STATS_KEEP = 20;
+
+async function recordDuration(durationMs) {
+  if (!durationMs) return;
+  try {
+    const stored = await chrome.storage.local.get("evalStats");
+    const durations = ((stored.evalStats && stored.evalStats.durations) || []).concat(durationMs);
+    await chrome.storage.local.set({
+      evalStats: { durations: durations.slice(-EVAL_STATS_KEEP) },
+    });
+  } catch (err) {
+    /* statistics are not worth failing an evaluation over */
+  }
+}
+
 async function runQueuedEvaluation(item) {
   const snapshot = item.profileSnapshot || {};
   const result = await evaluateWithLmStudio({
@@ -543,6 +569,7 @@ async function runQueuedEvaluation(item) {
       extractor: item.extractor,
       profileFingerprint: snapshot.fingerprint,
       model: result.model || "",
+      durationMs: result.durationMs || null,
       hardReject: null,
       evaluation: result.data,
       score: result.data.score,
@@ -554,6 +581,7 @@ async function runQueuedEvaluation(item) {
     return { ok: false, failure: "storage", error: `Scored, but could not be saved: ${err.message}` };
   }
 
+  await recordDuration(result.durationMs);
   await notifyTab(item, record);
   return { ok: true };
 }

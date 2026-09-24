@@ -308,6 +308,9 @@ function renderJob(record) {
     if (record.hardReject) headline.appendChild(el("span", "badge", "hard reject"));
     body.appendChild(headline);
     if (e.one_line) body.appendChild(el("div", null, e.one_line));
+    if (record.durationMs) {
+      body.appendChild(el("div", "meta-line", `Scored in ${Math.round(record.durationMs / 1000)}s${record.model ? ` by ${record.model}` : ""}`));
+    }
     tagList(body, "Matches", e.matches, "tag-green");
     tagList(body, "Gaps", e.gaps, "tag-amber");
     tagList(body, "Required gaps", e.required_gaps, "tag-red");

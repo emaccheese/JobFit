@@ -57,6 +57,12 @@ Target: the roles, seniority and locations you actually want.`,
     timeoutSeconds: 300,
     reasoningEffort: "low",
     enableThinking: false,
+    // Fixed so the same posting scores the same twice. Without it the list is
+    // ranked partly by sampling noise: re-running a batch reshuffled adjacent
+    // positions even though nothing about the posting or the profile changed.
+    // Temperature stays above zero — the seed makes sampling reproducible
+    // without forcing greedy decoding.
+    seed: 7,
   },
   expectedSalary: {
     USD: { min: null, max: null },
