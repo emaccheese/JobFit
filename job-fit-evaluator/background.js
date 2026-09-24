@@ -39,7 +39,7 @@ CRITICAL — matches and gaps must be derived from what THIS POSTING actually st
 - Don't list something as a match if you've also listed a closely related required skill as a gap (e.g. don't claim "deep learning architecture experience" as a match while listing PyTorch/TensorFlow as gaps — those are the tools that experience would require).
 - Never list the candidate's own stated specialization or strengths as a reason against fit (e.g. "specialized imaging focus" is not a weakness) unless the posting explicitly says that specialization is a mismatch. Only genuinely unmet posting requirements belong in gaps/one_line's reasoning.
 
-CRITICAL — classify every gap before placing it: for each item in "gaps", explicitly check whether the posting lists it under a Required/Must-have section or a Preferred/Nice-to-have section (headings vary: "Requirements" vs "Nice to have", "must have" vs "bonus points", etc.). Only items the posting itself marks as required belong in "required_gaps". An item under Preferred/Nice-to-have must NEVER appear in required_gaps, even if it seems important to you.
+CRITICAL — classify every gap before placing it: for each item in "gaps", explicitly check whether the posting lists it under a Required/Must-have section or a Preferred/Nice-to-have section (headings vary: "Requirements" vs "Nice to have", "must have" vs "bonus points", etc.). Only items the posting itself marks as required belong in "required_gaps". An item under Preferred/Nice-to-have must NEVER appear in required_gaps, even if it seems important to you. The one exception is a DETECTED DOMAIN-FLAG TERM whose work the responsibilities require — see scoring guidance.
 
 CRITICAL — salary numbers only, no verdict: extract/estimate the numeric min/max/currency fields as accurately as you can. Do not compare them to the candidate's expectation yourself — that comparison is computed separately from your numbers, so just report what the posting states and your market estimate.
 
@@ -49,7 +49,7 @@ Scoring guidance:
 - A required language the candidate lacks (e.g. C#) caps the score at 60.
 - "distributed systems" as a requirement caps at 45.
 - Domain match (image/video/color/GPU/embedded) adds up to +15.
-- If any DETECTED DOMAIN-FLAG TERMS (listed below, if present) are stated as required and the candidate profile doesn't substantively cover them, cap the score at 50 and list them in required_gaps.
+- A DETECTED DOMAIN-FLAG TERM (listed below, if present) is effectively required when the posting marks it required OR when the responsibilities describe the hire doing that work themselves — regardless of where, or whether, it appears in the qualifications. Listing it only as preferred doesn't make it optional if the day-to-day job is that work. Working alongside a team that does it, or using its output, is not doing it. If any effectively required term isn't substantively covered by the candidate profile, cap the score at 50 and list it in required_gaps.
 - Salary is informational only — do not let it influence the score or verdict either way.`;
 
 function formatExpectedSalary(expectedSalary) {
