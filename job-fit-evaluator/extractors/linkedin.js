@@ -16,6 +16,14 @@
   const NOT_A_TITLE =
     /^(on-?site|remote|hybrid|full-?time|part-?time|contract|temporary|internship|volunteer|easy apply|apply|save|saved|promoted|actively hiring|be an early applicant|entry level|associate|mid-senior level|director|executive|\d+\+? applicants?|view job|see job)$/i;
 
+  // Pay pills ("$200K/yr - $220K/yr") also link to the job and are longer than
+  // the other pills, so the longest-label fallback picked them as the title.
+  const PAY = /[$€£¥₹]|\/\s*(yr|year|hr|hour|mo|month)\b/i;
+
+  function notATitle(text) {
+    return NOT_A_TITLE.test(text) || PAY.test(text);
+  }
+
   function inHeading(anchor) {
     return Boolean(anchor.closest("h1, h2, h3") || anchor.querySelector("h1, h2, h3"));
   }
@@ -25,13 +33,16 @@
   // first in the DOM, which is how a posting ended up titled "On-site" or
   // "Remote". Worse, findHeaderContainer walks up FROM this anchor, so the
   // wrong pick poisoned the company and location too.
-  function findTitleAnchor() {
+  function jobAnchors() {
     const jobId = currentJobId();
-    if (!jobId) return null;
+    if (!jobId) return [];
+    return Array.from(document.querySelectorAll(`a[href*="/jobs/view/${jobId}"]`));
+  }
 
-    const candidates = Array.from(document.querySelectorAll(`a[href*="/jobs/view/${jobId}"]`))
+  function findTitleAnchor() {
+    const candidates = jobAnchors()
       .map((anchor) => ({ anchor, text: (anchor.innerText || "").trim() }))
-      .filter(({ text }) => text && !NOT_A_TITLE.test(text));
+      .filter(({ text }) => text && !notATitle(text));
 
     if (!candidates.length) return null;
 
@@ -57,6 +68,23 @@
     return null;
   }
 
+  // Some layouts render the title as plain text, with only the pills linking to
+  // the job. The header is still reachable from a pill, and the title is its
+  // first text block that isn't the company, a pill, a button or the
+  // "location · posted · applicants" line.
+  function titleFromHeader(header) {
+    const company = header.querySelector('a[href*="/company/"]');
+    const companyName = company ? company.innerText.trim() : "";
+    const blocks = header.querySelectorAll("h1, h2, h3, p");
+    for (const block of blocks) {
+      if (block.closest("a, button")) continue;
+      const text = (block.innerText || "").trim();
+      if (!text || text === companyName || text.includes("·") || notATitle(text)) continue;
+      return text;
+    }
+    return null;
+  }
+
   function extractLinkedIn() {
     const descEl = document.querySelector('[data-testid="expandable-text-box"]');
     if (!descEl) return null;
@@ -68,7 +96,10 @@
     if (text.split(/\s+/).length < 100) return null;
 
     const titleAnchor = findTitleAnchor();
-    const header = titleAnchor ? findHeaderContainer(titleAnchor) : null;
+    const seed = titleAnchor || jobAnchors()[0];
+    const header = seed ? findHeaderContainer(seed) : null;
+    const title =
+      (titleAnchor && titleAnchor.innerText.trim()) || (header && titleFromHeader(header)) || null;
 
     let company = null;
     let jobLocation = null;
@@ -86,7 +117,7 @@
     }
 
     return {
-      title: titleAnchor ? titleAnchor.innerText.trim() || null : null,
+      title,
       company,
       location: jobLocation,
       text,
