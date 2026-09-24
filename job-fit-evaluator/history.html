@@ -117,6 +117,19 @@
     border-radius: 8px; padding: 8px 12px; margin-bottom: 12px; font-size: 13px;
   }
   .stale button { flex: 0 0 auto; }
+  /* Sticky so the action stays in reach while ticking rows further down. */
+  .selection-bar {
+    position: sticky; top: 0; z-index: 4;
+    display: flex; align-items: center; gap: 10px;
+    background: var(--card); border: 1px solid var(--line); border-radius: 8px;
+    padding: 8px 12px; margin-bottom: 12px; font-size: 13px;
+    box-shadow: 0 4px 12px rgba(0,0,0,.06);
+  }
+  .selection-bar span { margin-right: auto; font-weight: 600; }
+  .selection-bar button.primary { background: var(--accent); border-color: var(--accent); color: #fff; }
+  .select-box { flex: 0 0 auto; margin: 0; cursor: pointer; }
+  .select-box:disabled { cursor: default; opacity: .35; }
+  .badge.badge-stale { text-transform: none; letter-spacing: 0; font-weight: 600; }
   /* A class that sets `display` beats the user agent's [hidden] rule. Applied
      blanket rather than per-class so the next hidden element can't reintroduce
      it — the stale notice was drawing an empty coloured strip while "hidden". */
@@ -238,6 +251,8 @@
     <div id="backupStatus" class="backup-status" hidden></div>
 
     <div id="staleNotice" class="stale" hidden></div>
+
+    <div id="selectionBar" class="selection-bar" hidden></div>
 
     <div id="queuePanel" class="queue" hidden>
       <div class="queue-head">

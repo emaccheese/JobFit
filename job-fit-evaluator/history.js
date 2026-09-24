@@ -15,6 +15,13 @@ const openKeys = new Set();
 // own writes too, and those are already reflected in memory, so echoing them
 // back would re-render for nothing.
 const selfWrites = new Set();
+// Jobs ticked for re-evaluation, by jobKey. Outside the DOM for the same
+// reason as openKeys: a re-render must not drop the selection.
+const selectedKeys = new Set();
+// The model and profile version new scores would be produced under. Read
+// once per load (and on a model/profile change) so each row can say whether
+// its score is out of date without an async lookup per render.
+let current = { model: "", fingerprint: null };
 
 const els = {
   subtitle: document.getElementById("subtitle"),
@@ -24,6 +31,7 @@ const els = {
   search: document.getElementById("search"),
   hideRejects: document.getElementById("hideRejects"),
   list: document.getElementById("list"),
+  selectionBar: document.getElementById("selectionBar"),
 };
 
 function scoreClass(score) {
@@ -294,6 +302,7 @@ function renderJob(record) {
 
   const head = el("div", "job-head");
   head.appendChild(el("span", "chev", "▶"));
+  head.appendChild(buildSelectBox(record));
 
   const score = el("div", `score ${record.hardReject ? "red" : scoreClass(record.score)}`, String(record.score ?? "—"));
   head.appendChild(score);
@@ -306,6 +315,8 @@ function renderJob(record) {
   // actionable jobs stand out while scanning the ordinary list.
   const reason = attentionReason(record);
   if (reason) strong.appendChild(el("span", "badge badge-attention", reason));
+  const outOfDate = staleReason(record);
+  if (outOfDate) strong.appendChild(el("span", "badge badge-muted badge-stale", outOfDate));
   titleWrap.appendChild(strong);
   titleWrap.appendChild(
     el("span", null, [record.company, record.location].filter(Boolean).join(" · ") || record.url)
@@ -642,6 +653,11 @@ function watchForChanges() {
       renderProfileOptions();
     }
 
+    // Swapping the model or editing the CV changes which scores are out of date.
+    if (changes.profiles || changes.lmStudio) {
+      loadCurrentScoring().then(safeRender);
+    }
+
     const prefix = `ev:${viewProfileId}:`;
     let touched = false;
 
@@ -670,6 +686,11 @@ function watchForChanges() {
 
 function render() {
   renderFunnel();
+  for (const key of selectedKeys) {
+    if (!records.some((r) => r.jobKey === key && canReevaluate(r))) selectedKeys.delete(key);
+  }
+  renderSelectionBar();
+  renderStaleNotice();
   const visible = visibleRecords();
   els.list.innerHTML = "";
 
@@ -904,44 +925,48 @@ async function importData(file) {
   await loadProfile(els.profileSelect.value);
 }
 
-// A record is stale when the profile it was scored under has changed, or when
-// it was scored by a different model. Both matter because the page ranks by
-// score: a list mixing scores from an old CV or a swapped-out model is a
-// ranking that looks authoritative and isn't.
-async function findStaleRecords() {
+async function loadCurrentScoring() {
   const profile = store.profiles.find((p) => p.id === viewProfileId);
-  if (!profile) return { stale: [], reason: null };
-
-  const fingerprint = JOB_FIT_PROFILES.fingerprint(profile);
   const settings = await chrome.storage.local.get("lmStudio");
-  const model = (settings.lmStudio && settings.lmStudio.model) || "";
-
-  let profileChanged = 0;
-  let modelChanged = 0;
-  const stale = records.filter((r) => {
-    // Only jobs that were actually scored and still have their posting text —
-    // without the text there is nothing to re-send.
-    if (r.score == null || !r.text || r.hardReject) return false;
-    const byProfile = r.profileFingerprint !== fingerprint;
-    const byModel = (r.model || "") !== model;
-    if (byProfile) profileChanged++;
-    if (byModel) modelChanged++;
-    return byProfile || byModel;
-  });
-
-  const reasons = [];
-  if (profileChanged) reasons.push("the profile has changed");
-  if (modelChanged) reasons.push("a different model is configured");
-  return { stale, reason: reasons.join(" and "), profile, fingerprint };
+  current = {
+    model: (settings.lmStudio && settings.lmStudio.model) || "",
+    fingerprint: profile ? JOB_FIT_PROFILES.fingerprint(profile) : null,
+  };
 }
 
-async function renderStaleNotice() {
+// Only jobs that were scored and still have their posting text can be
+// re-scored from here — without the text there is nothing to re-send. Hard
+// rejects come from the keyword scan, which the model never overrides.
+function canReevaluate(record) {
+  return Boolean(record.text) && !record.hardReject;
+}
+
+// Why a score is out of date, or null. A score is stale when the profile it
+// was scored under has changed, or when a different model produced it. Both
+// matter because the page ranks by score: a list mixing scores from an old CV
+// or a swapped-out model is a ranking that looks authoritative and isn't.
+function staleReason(record) {
+  if (record.score == null || !canReevaluate(record) || !current.fingerprint) return null;
+  const byModel = (record.model || "") !== current.model;
+  const byProfile = record.profileFingerprint !== current.fingerprint;
+  if (byModel) return record.model ? `scored by ${record.model}` : "scored by another model";
+  if (byProfile) return "older profile";
+  return null;
+}
+
+function renderStaleNotice() {
   const box = document.getElementById("staleNotice");
-  const { stale, reason } = await findStaleRecords();
+  const stale = records.filter((r) => staleReason(r));
   if (!stale.length) {
     box.hidden = true;
     return;
   }
+  const byModel = stale.some((r) => (r.model || "") !== current.model);
+  const byProfile = stale.some((r) => r.profileFingerprint !== current.fingerprint);
+  const reason = [byProfile && "the profile has changed", byModel && "a different model is configured"]
+    .filter(Boolean)
+    .join(" and ");
+
   box.hidden = false;
   box.innerHTML = "";
   const count = stale.length;
@@ -950,12 +975,57 @@ async function renderStaleNotice() {
       "span",
       null,
       `${count} job${count === 1 ? "" : "s"} ${count === 1 ? "is" : "are"} out of date — ${reason}. ` +
-        `${count === 1 ? "Its score isn't" : "Their scores aren't"} comparable with the rest of this list.`
+        `${count === 1 ? "Its score isn't" : "Their scores aren't"} comparable with the rest of this list. ` +
+        "Tick the ones worth re-scoring, or select them all."
     )
   );
-  const btn = el("button", null, `Re-queue ${stale.length}`);
-  btn.addEventListener("click", () => requeueStale(btn));
+  // Selects rather than queues, so you still choose what actually runs.
+  const btn = el("button", null, `Select all ${count}`);
+  btn.addEventListener("click", () => {
+    stale.forEach((r) => selectedKeys.add(r.jobKey));
+    render();
+  });
   box.appendChild(btn);
+}
+
+function buildSelectBox(record) {
+  const box = document.createElement("input");
+  box.type = "checkbox";
+  box.className = "select-box";
+  box.title = "Select for re-evaluation";
+  if (!canReevaluate(record)) {
+    // Kept in the row, disabled, so the columns still line up.
+    box.disabled = true;
+    box.title = record.hardReject ? "Hard rejects aren't re-scored" : "No stored posting text";
+    return box;
+  }
+  box.checked = selectedKeys.has(record.jobKey);
+  // The row header toggles the card open; ticking a box shouldn't.
+  box.addEventListener("click", (event) => event.stopPropagation());
+  box.addEventListener("change", () => {
+    if (box.checked) selectedKeys.add(record.jobKey);
+    else selectedKeys.delete(record.jobKey);
+    renderSelectionBar();
+  });
+  return box;
+}
+
+function renderSelectionBar() {
+  const bar = els.selectionBar;
+  const count = selectedKeys.size;
+  bar.hidden = count === 0;
+  if (!count) return;
+  bar.innerHTML = "";
+  bar.appendChild(el("span", null, `${count} selected`));
+  const run = el("button", "primary", `Re-evaluate ${count}`);
+  run.addEventListener("click", () => requeueSelected(run));
+  bar.appendChild(run);
+  const clear = el("button", null, "Clear selection");
+  clear.addEventListener("click", () => {
+    selectedKeys.clear();
+    render();
+  });
+  bar.appendChild(clear);
 }
 
 // A queue item that re-scores a stored job under the given profile. The
@@ -978,33 +1048,39 @@ function evaluateItem(record, profile, fingerprint) {
   };
 }
 
-// Re-runs stale jobs through the normal queue. The posting text is already on
-// the record, so this needs no tab and no page visit.
-async function requeueStale(btn) {
+// Queues the ticked jobs with the current model and profile. Each one that
+// gets in is unticked; any the queue had no room for stay ticked, so running
+// it again once some finish picks up exactly where it stopped.
+async function requeueSelected(btn) {
+  const profile = store.profiles.find((p) => p.id === viewProfileId);
+  if (!profile) return;
   btn.disabled = true;
   btn.textContent = "Queueing…";
 
-  const { stale, profile, fingerprint } = await findStaleRecords();
+  const fingerprint = JOB_FIT_PROFILES.fingerprint(profile);
+  const chosen = records.filter((r) => selectedKeys.has(r.jobKey) && canReevaluate(r));
   let queued = 0;
-  let rejected = 0;
+  let full = false;
 
-  for (const record of stale) {
+  for (const record of chosen) {
     const response = await queueMessage({
       type: "JOB_FIT_ENQUEUE",
       item: evaluateItem(record, profile, fingerprint),
     });
-    if (response && response.ok && !response.duplicate) queued++;
-    // The queue caps at 10; the rest stay stale and can be re-queued next time.
-    else if (response && response.full) { rejected = stale.length - queued; break; }
+    if (response && response.full) { full = true; break; }
+    if (response && response.ok) {
+      if (!response.duplicate) queued++;
+      selectedKeys.delete(record.jobKey);
+    }
   }
 
-  btn.disabled = false;
-  btn.textContent = `Re-queue ${stale.length}`;
+  const left = selectedKeys.size;
   showBackupStatus(
-    rejected
-      ? `Queued ${queued}. The queue is full, so ${rejected} still need re-scoring — come back once these finish.`
-      : `Queued ${queued} job${queued === 1 ? "" : "s"} for re-scoring.`
+    full
+      ? `Queued ${queued}. The queue is full, so ${left} ${left === 1 ? "is" : "are"} still selected — run it again once some finish.`
+      : `Queued ${queued} job${queued === 1 ? "" : "s"} for re-scoring. Each one's current result is kept as a previous score.`
   );
+  render();
   refreshQueue();
 }
 
@@ -1061,11 +1137,12 @@ async function showProbeReport() {
 async function loadProfile(profileId) {
   viewProfileId = profileId;
   openKeys.clear();
+  selectedKeys.clear();
+  await loadCurrentScoring();
   groupFilter = null;
   records = await JOB_FIT_EVALSTORE.list(profileId);
   render();
   await refreshQueue();
-  await renderStaleNotice();
 }
 
 async function init() {
