@@ -1,0 +1,474 @@
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Set up JobFit</title>
+<style>
+  :root {
+    --bg: #f7f8fa; --card: #ffffff; --line: #e2e5ea; --text: #1d2330;
+    --muted: #616b7c; --accent: #3574d6; --accent-soft: #eaf1fb;
+    --green: #1f8a4c; --amber: #b7791f; --red: #c0392b;
+  }
+  * { box-sizing: border-box; }
+  [hidden] { display: none !important; }
+  body {
+    margin: 0; background: var(--bg); color: var(--text);
+    font: 14px/1.5 -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+  }
+  a { color: var(--accent); }
+  button {
+    font: inherit; padding: 7px 14px; border: 1px solid #ccd2da; border-radius: 6px;
+    background: #fff; color: inherit; cursor: pointer;
+  }
+  button:hover:not(:disabled) { background: #f0f2f5; }
+  button:disabled { opacity: .5; cursor: not-allowed; }
+  button.primary { background: var(--accent); border-color: var(--accent); color: #fff; font-weight: 600; }
+  button.primary:hover:not(:disabled) { background: #2a63bd; }
+  button.link { border: none; background: none; padding: 0; color: var(--accent); text-decoration: underline; }
+  button.link:hover:not(:disabled) { background: none; }
+  input[type="text"], input[type="number"], textarea, select {
+    font: inherit; width: 100%; padding: 8px 10px; border: 1px solid #ccd2da; border-radius: 6px;
+    background: #fff; color: inherit;
+  }
+  input:focus, textarea:focus, select:focus, button:focus-visible { outline: 2px solid #a9c4ef; outline-offset: 1px; }
+  textarea { resize: vertical; }
+  label.field { display: block; margin-bottom: 14px; }
+  label.field > span, .field-label { display: block; font-weight: 600; margin-bottom: 5px; }
+  .hint { font-size: 12.5px; color: var(--muted); margin-top: 5px; }
+
+  /* --- layout -------------------------------------------------------------- */
+  .shell { display: flex; min-height: 100vh; max-width: 1080px; margin: 0 auto; }
+  .rail { flex: 0 0 240px; padding: 32px 20px; }
+  .brand { font-weight: 700; font-size: 16px; margin-bottom: 4px; }
+  .brand-sub { font-size: 12.5px; color: var(--muted); margin-bottom: 22px; }
+  .rail ol { list-style: none; margin: 0; padding: 0; }
+  .rail li button {
+    display: flex; align-items: center; gap: 10px; width: 100%; text-align: left;
+    border: none; background: none; padding: 7px 8px; border-radius: 6px; color: var(--muted);
+  }
+  .rail li button:hover:not(:disabled) { background: #eef1f5; }
+  .rail li button:disabled { opacity: 1; cursor: default; }
+  .rail .num {
+    flex: 0 0 22px; height: 22px; border-radius: 50%; border: 1.5px solid #c9ced6;
+    display: grid; place-items: center; font-size: 11.5px; font-weight: 600; background: #fff;
+  }
+  .rail li.done .num { background: var(--green); border-color: var(--green); color: #fff; }
+  .rail li.current button { background: var(--accent-soft); color: var(--text); font-weight: 600; }
+  .rail li.current .num { border-color: var(--accent); color: var(--accent); }
+  .rail li.locked button { color: #a3aab5; }
+
+  main { flex: 1; min-width: 0; padding: 32px 24px 120px; }
+  .card { background: var(--card); border: 1px solid var(--line); border-radius: 10px; padding: 26px 28px; max-width: 700px; }
+  .step h1 { font-size: 21px; margin: 0 0 6px; }
+  .step .lede { color: var(--muted); margin: 0 0 22px; }
+  .mobile-progress { display: none; }
+
+  .nav {
+    position: fixed; left: 0; right: 0; bottom: 0; background: rgba(255,255,255,.96);
+    border-top: 1px solid var(--line); backdrop-filter: blur(4px);
+  }
+  .nav-inner { max-width: 1080px; margin: 0 auto; padding: 12px 24px 12px 264px; display: flex; align-items: center; gap: 12px; }
+  .nav .spacer { flex: 1; }
+  .save-state { font-size: 12.5px; color: var(--muted); }
+  .save-state.error { color: var(--red); }
+
+  @media (max-width: 760px) {
+    .rail { display: none; }
+    main { padding: 16px 16px 120px; }
+    .card { padding: 20px 18px; }
+    .nav-inner { padding: 10px 16px; }
+    .mobile-progress { display: block; margin-bottom: 12px; font-size: 12.5px; color: var(--muted); }
+    .mobile-progress .bar { height: 4px; background: var(--line); border-radius: 2px; margin-top: 6px; overflow: hidden; }
+    .mobile-progress .bar > div { height: 100%; background: var(--accent); transition: width .2s; }
+  }
+
+  /* --- shared pieces ------------------------------------------------------- */
+  .callout { border-radius: 8px; padding: 11px 13px; font-size: 13px; margin: 12px 0; }
+  .callout.info { background: var(--accent-soft); border: 1px solid #cfdcf0; }
+  .callout.ok { background: #e8f5ed; border: 1px solid #bfe0cb; }
+  .callout.warn { background: #fdf3e2; border: 1px solid #e8cfa0; }
+  .callout.bad { background: #fbeceb; border: 1px solid #efc4bf; }
+  .callout ol { margin: 6px 0 0; padding-left: 20px; }
+  .row { display: flex; gap: 10px; align-items: center; flex-wrap: wrap; }
+  .row > .grow { flex: 1; min-width: 180px; }
+  details.advanced { margin-top: 18px; border-top: 1px solid var(--line); padding-top: 12px; }
+  details.advanced summary { cursor: pointer; font-size: 13px; font-weight: 600; color: var(--muted); }
+  details.advanced[open] summary { margin-bottom: 12px; }
+  .busy { display: flex; align-items: center; gap: 10px; font-size: 13px; color: var(--muted); margin-top: 10px; }
+  .spinner { width: 14px; height: 14px; border: 2px solid #cfd6e0; border-top-color: var(--accent); border-radius: 50%; animation: spin .8s linear infinite; }
+  @keyframes spin { to { transform: rotate(360deg); } }
+  .error-text { color: var(--red); font-size: 13px; margin-top: 8px; }
+
+  /* model list */
+  .model-list { display: flex; flex-direction: column; gap: 6px; margin: 10px 0 4px; }
+  .model-list label {
+    display: flex; align-items: center; gap: 10px; border: 1px solid var(--line); border-radius: 6px;
+    padding: 8px 10px; cursor: pointer; font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 12.5px;
+  }
+  .model-list label:has(input:checked) { border-color: var(--accent); background: var(--accent-soft); }
+  .compact-model { display: flex; align-items: center; gap: 10px; }
+  .dot { width: 9px; height: 9px; border-radius: 50%; background: var(--green); flex: 0 0 auto; }
+
+  /* choice pills for the work-authorisation questions */
+  .question { margin-bottom: 18px; }
+  .choices { display: flex; flex-wrap: wrap; gap: 8px; }
+  .choices label {
+    border: 1px solid #ccd2da; border-radius: 999px; padding: 6px 14px; cursor: pointer; background: #fff; font-size: 13.5px;
+  }
+  .choices label { position: relative; }
+  .choices input { position: absolute; opacity: 0; pointer-events: none; }
+  .choices label:has(input:checked) { background: var(--accent); border-color: var(--accent); color: #fff; }
+  .choices label:has(input:focus-visible) { outline: 2px solid #a9c4ef; outline-offset: 1px; }
+
+  /* tabs */
+  .tabs { display: inline-flex; border: 1px solid #ccd2da; border-radius: 8px; padding: 3px; gap: 3px; margin-bottom: 14px; background: #f3f5f8; }
+  .tabs button { border: none; background: none; padding: 6px 14px; border-radius: 6px; font-size: 13.5px; }
+  .tabs button[aria-selected="true"] { background: #fff; box-shadow: 0 1px 2px rgba(0,0,0,.08); font-weight: 600; }
+  .meter { display: flex; flex-wrap: wrap; gap: 6px 14px; font-size: 12.5px; margin-top: 8px; color: var(--muted); }
+  .meter .count.over { color: var(--amber); font-weight: 600; }
+  .meter .count.way-over { color: var(--red); font-weight: 600; }
+  .meter .sec::before { content: "○ "; }
+  .meter .sec.has { color: var(--green); }
+  .meter .sec.has::before { content: "✓ "; }
+
+  /* salary */
+  .salary-row { display: grid; grid-template-columns: 48px 1fr 1fr; gap: 10px; align-items: center; margin-bottom: 8px; }
+  .salary-row .cur { font-weight: 600; }
+  .markets { display: flex; gap: 16px; margin-bottom: 14px; }
+  .markets label { display: flex; align-items: center; gap: 6px; cursor: pointer; }
+
+  /* presets */
+  .preset {
+    display: flex; gap: 12px; align-items: flex-start; border: 1px solid var(--line); border-radius: 8px;
+    padding: 10px 12px; margin-bottom: 8px; cursor: pointer;
+  }
+  .preset:has(input:checked) { border-color: #b9cdee; background: #f6f9fe; }
+  .preset input { margin-top: 3px; }
+  .preset .title { font-weight: 600; }
+  .preset .example { font-size: 12.5px; color: var(--muted); font-style: italic; }
+  .preset:not(:has(input:checked)) .why { display: none; }
+  .preset .why { display: inline-block; font-size: 11.5px; background: var(--accent-soft); color: #2a5aa8; border-radius: 999px; padding: 1px 8px; margin-top: 4px; font-style: normal; }
+
+  /* chips */
+  .chips { display: flex; flex-wrap: wrap; gap: 6px; border: 1px solid #ccd2da; border-radius: 6px; padding: 6px; background: #fff; min-height: 44px; align-items: center; }
+  .chips input { border: none; flex: 1; min-width: 140px; padding: 4px 6px; outline: none; }
+  .chip { display: inline-flex; align-items: center; gap: 4px; background: var(--accent-soft); border: 1px solid #cfdcf0; border-radius: 999px; padding: 2px 4px 2px 10px; font-size: 13px; }
+  .chip button { border: none; background: none; padding: 0 5px; font-size: 15px; line-height: 1; color: var(--muted); }
+  .chip.suggested { background: #fff; border-style: dashed; padding-right: 10px; cursor: pointer; }
+  .chip.suggested:hover { border-color: var(--accent); }
+  .suggestions { margin-top: 12px; }
+  .suggestions .chips-plain { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 6px; }
+
+  /* review */
+  .review-card { border: 1px solid var(--line); border-radius: 8px; padding: 12px 14px; margin-bottom: 10px; }
+  .review-card header { display: flex; justify-content: space-between; align-items: baseline; gap: 10px; }
+  .review-card h3 { font-size: 14px; margin: 0; }
+  .review-card .body { font-size: 13px; color: var(--muted); margin-top: 4px; white-space: pre-line; }
+  .review-card.missing { border-color: #e8cfa0; background: #fffaf1; }
+  .test-box { margin-top: 22px; border-top: 1px solid var(--line); padding-top: 18px; }
+  .test-result { margin-top: 14px; border: 1px solid var(--line); border-radius: 8px; padding: 14px; }
+  .score-line { display: flex; align-items: baseline; gap: 12px; }
+  .score-line .score { font-size: 30px; font-weight: 700; }
+  .verdict { text-transform: uppercase; font-size: 12px; font-weight: 700; letter-spacing: .05em; padding: 2px 8px; border-radius: 4px; }
+  .verdict.apply { background: #e8f5ed; color: var(--green); }
+  .verdict.borderline { background: #fdf3e2; color: var(--amber); }
+  .verdict.skip, .verdict.reject { background: #fbeceb; color: var(--red); }
+  .test-result ul { margin: 4px 0 10px; padding-left: 20px; font-size: 13px; }
+  .test-result h4 { margin: 10px 0 0; font-size: 12px; text-transform: uppercase; letter-spacing: .04em; color: var(--muted); }
+
+  /* done */
+  .done-card { text-align: center; padding: 40px 28px; }
+  .done-card .big { font-size: 42px; }
+  .done-card ol { text-align: left; display: inline-block; margin: 10px auto 20px; }
+</style>
+</head>
+<body>
+  <div class="shell">
+    <aside class="rail">
+      <div class="brand">JobFit setup</div>
+      <div class="brand-sub" id="railSub"></div>
+      <ol id="rail"></ol>
+    </aside>
+
+    <main>
+      <div class="mobile-progress" id="mobileProgress"><span id="mobileLabel"></span><div class="bar"><div id="mobileBar"></div></div></div>
+
+      <div class="callout bad" id="fatal" hidden></div>
+
+      <div class="card" id="card">
+
+        <!-- 0. Welcome -->
+        <section class="step" data-step="welcome" hidden>
+          <h1>Welcome to JobFit</h1>
+          <p class="lede">JobFit reads a job posting and tells you how well it fits you, with a score, what you match, what you're missing, and whether the pay is in your range.</p>
+          <div class="callout info">
+            <strong>Everything stays on this computer.</strong> Postings are scored by a model running locally in LM Studio. Nothing is sent to any server.
+          </div>
+          <p>Setup takes about five minutes. You'll need:</p>
+          <ul>
+            <li><strong>LM Studio</strong>, running with a model loaded (the next step checks this for you)</li>
+            <li><strong>Your CV or LinkedIn profile</strong>, as text to paste</li>
+          </ul>
+          <p class="hint">Moving from another computer? <button type="button" class="link" id="openRestore">Restore a backup instead</button> (Tracked jobs → Data).</p>
+        </section>
+
+        <!-- 1. Local model -->
+        <section class="step" data-step="model" hidden>
+          <h1>Connect your local model</h1>
+          <p class="lede">JobFit sends each posting to LM Studio on this machine. This setting is shared by every profile.</p>
+
+          <div id="modelCompact" class="callout ok" hidden>
+            <div class="compact-model">
+              <span class="dot"></span>
+              <span class="grow">Connected. Using <strong id="compactModelName"></strong>.</span>
+              <button type="button" class="link" id="modelChange">Change</button>
+            </div>
+          </div>
+
+          <div id="modelFull">
+            <label class="field">
+              <span>LM Studio endpoint</span>
+              <div class="row">
+                <input id="lmUrl" class="grow" type="text" spellcheck="false">
+                <button type="button" id="testConnection">Test connection</button>
+              </div>
+              <div class="hint">The default is right unless you changed LM Studio's server port.</div>
+            </label>
+
+            <div id="modelStatus"></div>
+
+            <div id="modelPicker" hidden>
+              <span class="field-label">Which model should score postings?</span>
+              <div class="model-list" id="modelList"></div>
+              <div class="hint">These are the models LM Studio has loaded right now.</div>
+            </div>
+
+            <details class="advanced" id="modelAdvanced">
+              <summary>Advanced</summary>
+              <label class="field">
+                <span>Response timeout (seconds)</span>
+                <input id="lmTimeout" type="number" min="30" step="30">
+                <div class="hint">How long to wait for one evaluation. Slower models on modest hardware can need several minutes.</div>
+              </label>
+              <label class="field">
+                <span>Reasoning effort</span>
+                <select id="lmReasoning">
+                  <option value="">(none, use the model's default)</option>
+                  <option value="low">low</option>
+                  <option value="medium">medium</option>
+                  <option value="high">high</option>
+                  <option value="xhigh">xhigh</option>
+                </select>
+                <div class="hint">Only for models that support it. Low is much faster and scores almost as well.</div>
+              </label>
+              <label class="row" style="gap:8px;"><input id="lmThinking" type="checkbox" style="width:auto;"> Enable model thinking/reasoning</label>
+              <div class="hint">Off by default for speed.</div>
+            </details>
+          </div>
+        </section>
+
+        <!-- 2. About you -->
+        <section class="step" data-step="about" hidden>
+          <h1>About you</h1>
+          <p class="lede">A profile is one person's settings. Your answers below decide which postings get rejected automatically. You can review that on the Hard rejects step.</p>
+
+          <label class="field">
+            <span>Profile name</span>
+            <input id="profileName" type="text" placeholder="e.g. Alex — backend roles" maxlength="60">
+            <div class="hint">Useful when you keep more than one profile (for another person, or another kind of role).</div>
+          </label>
+
+          <div class="question">
+            <span class="field-label">Are you a US citizen or permanent resident?</span>
+            <div class="choices" data-answer="citizen">
+              <label><input type="radio" name="citizen" value="yes">Yes</label>
+              <label><input type="radio" name="citizen" value="no">No</label>
+            </div>
+          </div>
+          <div class="question">
+            <span class="field-label">Will you need visa sponsorship?</span>
+            <div class="choices" data-answer="sponsorship">
+              <label><input type="radio" name="sponsorship" value="yes">Yes</label>
+              <label><input type="radio" name="sponsorship" value="depends">Depends on the country</label>
+              <label><input type="radio" name="sponsorship" value="no">No</label>
+            </div>
+          </div>
+          <div class="question">
+            <span class="field-label">Would you relocate at your own cost?</span>
+            <div class="choices" data-answer="relocate">
+              <label><input type="radio" name="relocate" value="yes">Yes</label>
+              <label><input type="radio" name="relocate" value="no">No</label>
+            </div>
+          </div>
+        </section>
+
+        <!-- 3. Candidate profile -->
+        <section class="step" data-step="profile" hidden>
+          <h1>Your candidate profile</h1>
+          <p class="lede">A short summary of your experience. Every posting is scored against it, so it needs to be specific and honest, including what you <em>haven't</em> done.</p>
+
+          <div class="tabs" role="tablist">
+            <button type="button" role="tab" id="tabCv" aria-selected="true">Paste my CV</button>
+            <button type="button" role="tab" id="tabEdit" aria-selected="false">Edit profile</button>
+          </div>
+
+          <div id="paneCv">
+            <label class="field">
+              <span>Paste your CV or LinkedIn profile</span>
+              <textarea id="cvText" rows="12" placeholder="Paste the full text. The local model condenses it into the profile format."></textarea>
+            </label>
+            <div class="row">
+              <button type="button" class="primary" id="draftProfile">Draft my profile</button>
+              <button type="button" class="link" id="skipToEdit">Or write it myself</button>
+            </div>
+            <div id="draftStatus"></div>
+          </div>
+
+          <div id="paneEdit" hidden>
+            <div class="callout info" id="draftedNote" hidden>This is the model's draft. Read it through: correct anything it got wrong, and make sure <strong>Gaps</strong> lists what you really haven't done.</div>
+            <textarea id="profileText" rows="16" spellcheck="true"></textarea>
+            <div class="meter" id="profileMeter"></div>
+            <div class="callout warn" id="gapsNudge" hidden>Add a <strong>Gaps:</strong> line. The evaluator uses it to tell a real gap from something you just didn't mention. Without it, most postings score too high.</div>
+          </div>
+        </section>
+
+        <!-- 4. Salary -->
+        <section class="step" data-step="salary" hidden>
+          <h1>Expected salary</h1>
+          <p class="lede">Shown next to each posting's pay. It doesn't set the score directly, but a posting whose ceiling is far below your floor is flagged as probably below your level.</p>
+
+          <span class="field-label">Which markets do you apply in?</span>
+          <div class="markets" id="markets">
+            <label><input type="checkbox" value="USD"> USD</label>
+            <label><input type="checkbox" value="CAD"> CAD</label>
+            <label><input type="checkbox" value="MXN"> MXN</label>
+          </div>
+
+          <div id="salaryRows"></div>
+          <div class="error-text" id="salaryError" hidden></div>
+          <div class="hint" id="salaryWarn" hidden></div>
+
+          <div class="row" style="margin-top:12px;">
+            <button type="button" id="suggestSalary">Suggest from my profile</button>
+          </div>
+          <div id="salaryStatus"></div>
+          <div class="hint" id="salaryReasoning"></div>
+        </section>
+
+        <!-- 5. Hard rejects -->
+        <section class="step" data-step="rejects" hidden>
+          <h1>Hard rejects</h1>
+          <p class="lede">A posting that says any of these is rejected immediately, without asking the model. Only tick what truly rules a job out for you.</p>
+          <div id="hardRejectsPresets"></div>
+          <label class="field" style="margin-top:14px;">
+            <span>Also reject if the posting says</span>
+            <textarea id="hardRejectsPhrases" rows="3" placeholder="One phrase per line, e.g. unpaid trial period"></textarea>
+            <div class="hint">Plain text, matched as whole words with any capitalisation.</div>
+          </label>
+          <details class="advanced">
+            <summary>Advanced: raw patterns</summary>
+            <label class="field"><span>One regular expression per line</span><textarea id="hardRejectsPatterns" rows="3" spellcheck="false"></textarea></label>
+          </details>
+        </section>
+
+        <!-- 6. Warnings -->
+        <section class="step" data-step="warnings" hidden>
+          <h1>Warnings</h1>
+          <p class="lede">These are highlighted in amber for you to judge. Unlike hard rejects, they never block an evaluation or change the score.</p>
+          <div id="softWarningsPresets"></div>
+          <label class="field" style="margin-top:14px;">
+            <span>Also flag if the posting says</span>
+            <textarea id="softWarningsPhrases" rows="3" placeholder="One phrase per line, e.g. on-call rotation"></textarea>
+          </label>
+          <details class="advanced">
+            <summary>Advanced: raw patterns</summary>
+            <label class="field"><span>One regular expression per line</span><textarea id="softWarningsPatterns" rows="3" spellcheck="false"></textarea></label>
+          </details>
+        </section>
+
+        <!-- 7. Domain flags -->
+        <section class="step" data-step="flags" hidden>
+          <h1>Domain flags</h1>
+          <p class="lede">Skills and fields you <em>don't</em> have. When a posting mentions one, it's shown straight away and the model has to check it. If the job really requires it, the score is capped at 50.</p>
+
+          <span class="field-label">Your flags</span>
+          <div class="chips" id="flagChips"><input id="flagInput" type="text" placeholder="Type a term and press Enter"></div>
+          <div class="hint">For example: machine learning, Kubernetes, React Native. "C++" and ".NET" work as written.</div>
+
+          <div class="row" style="margin-top:14px;">
+            <button type="button" id="suggestFlags">Suggest from my profile</button>
+          </div>
+          <div id="flagsStatus"></div>
+          <div class="suggestions" id="flagSuggestions" hidden>
+            <div class="row"><span class="field-label" style="margin:0;">Suggestions: click one to add it</span><button type="button" class="link" id="addAllFlags">Add all</button></div>
+            <div class="chips-plain" id="flagSuggestionChips"></div>
+          </div>
+
+          <details class="advanced">
+            <summary>Advanced: raw patterns</summary>
+            <label class="field"><span>One regular expression per line</span><textarea id="domainFlagsPatterns" rows="3" spellcheck="false"></textarea></label>
+          </details>
+        </section>
+
+        <!-- 8. Review -->
+        <section class="step" data-step="review" hidden>
+          <h1>Review</h1>
+          <p class="lede">Everything is already saved. Change anything here, or try a test evaluation before you finish.</p>
+          <div id="reviewCards"></div>
+
+          <div class="test-box">
+            <span class="field-label">Try it out</span>
+            <p class="hint" style="margin-top:0;">Scores a sample posting with your settings, exactly like a real one. Test runs aren't added to your tracked jobs.</p>
+            <details id="ownPosting">
+              <summary style="cursor:pointer; font-size:13px;">Use a real posting instead</summary>
+              <textarea id="testPosting" rows="8" style="margin-top:8px;" placeholder="Paste the full text of a job posting"></textarea>
+            </details>
+            <div class="row" style="margin-top:12px;">
+              <button type="button" id="runTest">Run a test evaluation</button>
+            </div>
+            <div class="hint" id="testBlocked" hidden></div>
+            <div id="testStatus"></div>
+            <div id="testResult"></div>
+          </div>
+        </section>
+      </div>
+
+      <div class="card done-card" id="done" hidden>
+        <div class="big">✓</div>
+        <h1 style="margin:8px 0 4px;">You're set up</h1>
+        <p class="lede" id="doneName"></p>
+        <div class="callout warn" id="doneModelWarn" hidden style="text-align:left;">
+          The local model isn't connected yet, so evaluations won't run until it is.
+          <button type="button" class="link" id="doneFixModel">Set it up now</button>
+        </div>
+        <ol>
+          <li>Open a job posting (LinkedIn, Greenhouse, Indeed, Workday and most career sites work).</li>
+          <li>Click the <strong>JobFit</strong> icon in the toolbar, then <strong>Evaluate this tab</strong>.</li>
+          <li>The score appears on the page. Every job you score is kept in <strong>Tracked jobs</strong>.</li>
+        </ol>
+        <div class="row" style="justify-content:center;">
+          <button type="button" id="doneHistory">Open tracked jobs</button>
+          <button type="button" class="primary" id="doneClose">Close this tab</button>
+        </div>
+      </div>
+    </main>
+  </div>
+
+  <div class="nav" id="nav">
+    <div class="nav-inner">
+      <button type="button" id="back">Back</button>
+      <span class="save-state" id="saveState"></span>
+      <span class="spacer"></span>
+      <button type="button" class="link" id="skip" hidden>Skip for now</button>
+      <button type="button" class="primary" id="next">Next</button>
+    </div>
+  </div>
+
+  <script src="defaults.js"></script>
+  <script src="keywords.js"></script>
+  <script src="profiles.js"></script>
+  <script src="lmstudio-ui.js"></script>
+  <script src="wizard.js"></script>
+</body>
+</html>

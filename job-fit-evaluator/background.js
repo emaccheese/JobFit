@@ -3,7 +3,7 @@
 // once already: reasoning_effort and enable_thinking were added to the popup
 // but not to this file, so neither was ever sent for anyone who hadn't
 // re-saved their settings.
-importScripts("defaults.js", "evalstore.js", "queue.js");
+importScripts("defaults.js", "keywords.js", "profiles.js", "evalstore.js", "queue.js");
 
 const SYSTEM_PROMPT = `You evaluate job postings against a candidate profile.
 Return ONLY a JSON object, no prose, no markdown fences.
@@ -198,7 +198,10 @@ function keepAlive(intervalMs = 20000) {
 // schema — so a single hardcoded timeout doesn't generalize. This is a
 // popup setting for that reason: tune it to your own observed speed rather
 // than have it silently guessed.
-async function callLmStudio(systemPrompt, userPrompt) {
+// `signal` lets a caller cancel: the setup wizard's model calls can take
+// minutes, and a Cancel button that only hid the spinner would leave LM
+// Studio busy generating an answer nobody is waiting for.
+async function callLmStudio(systemPrompt, userPrompt, { signal } = {}) {
   const stored = await chrome.storage.local.get("lmStudio");
   const defaults = JOB_FIT_DEFAULTS.lmStudio;
   const url = (stored.lmStudio && stored.lmStudio.url) || defaults.url;
@@ -219,6 +222,7 @@ async function callLmStudio(systemPrompt, userPrompt) {
   const startedAt = Date.now();
   const controller = new AbortController();
   const timeoutId = setTimeout(() => controller.abort(), timeoutMs);
+  if (signal) signal.addEventListener("abort", () => controller.abort(), { once: true });
   const stopKeepAlive = keepAlive();
   let resp;
   try {
@@ -263,6 +267,9 @@ async function callLmStudio(systemPrompt, userPrompt) {
       }),
     });
   } catch (err) {
+    if (err.name === "AbortError" && signal && signal.aborted) {
+      return { ok: false, failure: "cancelled", error: "Cancelled." };
+    }
     if (err.name === "AbortError") {
       return {
         ok: false,
@@ -433,9 +440,9 @@ function applyScoreCaps(data, { domainFlags, seniorityFlag }) {
 // independent read could land on a different profile if the user switched in
 // between, scoring a posting against one profile's keywords and another's
 // salary expectations.
-async function evaluateWithLmStudio({ profile, postingText, domainFlags, expectedSalary }) {
+async function evaluateWithLmStudio({ profile, postingText, domainFlags, expectedSalary }, signal) {
   const { prompt, truncated } = buildUserPrompt(profile, postingText, expectedSalary, domainFlags);
-  const result = await callLmStudio(SYSTEM_PROMPT, prompt);
+  const result = await callLmStudio(SYSTEM_PROMPT, prompt, { signal });
 
   if (result.ok && result.data) {
     // Surfaced in the banner: a score produced from a partial posting is worth
@@ -465,8 +472,116 @@ Schema:
 
 Base each on the candidate's years of experience, skill level, domain, and any target location/role mentioned in the profile, adjusted for that market. These are starting points for the candidate to adjust, not precise figures.`;
 
-async function suggestSalary({ profile }) {
-  return callLmStudio(SALARY_SUGGEST_PROMPT, `CANDIDATE PROFILE:\n${profile}`);
+async function suggestSalary({ profile }, signal) {
+  return callLmStudio(SALARY_SUGGEST_PROMPT, `CANDIDATE PROFILE:\n${profile}`, { signal });
+}
+
+// Asks for one field per template section rather than the finished text, and
+// the text is assembled here. A local model asked for a multi-line string
+// inside JSON gets the escaping wrong often enough to matter, and assembling
+// it in code guarantees the section labels the evaluator relies on (Gaps:,
+// Work authorisation:, Target:) are always spelled the same way.
+const PROFILE_DRAFT_PROMPT = `You condense a candidate's CV into a short profile that a job-fit evaluator reads on every evaluation.
+Return ONLY a JSON object, no prose, no markdown fences.
+
+Schema:
+{
+  "headline": "<one line: seniority, main language/discipline, years of experience, industry>",
+  "core": "<the systems they actually built: domain, scale, the part they owned>",
+  "specialisms": "<the two or three things they are genuinely strong at, with concrete techniques or standards>",
+  "tooling": "<languages, frameworks, OS, hardware>",
+  "leadership": "<team size, scope, a result — or empty string if the CV shows none>",
+  "gaps": "<technologies and domains common in their target roles that the CV shows NO experience with, stated plainly>",
+  "work_authorisation": "<citizenship/visa status and whether sponsorship is needed>",
+  "target": "<roles, seniority and locations they want>"
+}
+
+Rules:
+- Use only facts in the CV. Never invent employers, numbers, or skills.
+- Keep the whole profile under 400 words. Prefer specifics over adjectives.
+- "gaps" matters most: an evaluator uses it to tell a real gap from a silence. Name concrete things (e.g. "Kubernetes, distributed systems, mobile"), never soft skills. If the CV is too thin to judge, name the most common requirements of the target roles it doesn't mention.
+- For "work_authorisation", use the CANDIDATE ANSWERS when given; they override anything the CV implies.`;
+
+function assembleDraftProfile(draft) {
+  const clean = (value) => (typeof value === "string" ? value.trim() : "");
+  const lines = [clean(draft.headline)];
+  [
+    ["Core", draft.core],
+    ["Specialisms", draft.specialisms],
+    ["Tooling/platform", draft.tooling],
+    ["Leadership", draft.leadership],
+    ["Gaps", draft.gaps],
+    ["Work authorisation", draft.work_authorisation],
+    ["Target", draft.target],
+  ].forEach(([label, value]) => {
+    // Gaps is kept even when empty, so the gap in the profile is visible in
+    // the editor rather than silently missing.
+    if (clean(value) || label === "Gaps") lines.push(`${label}: ${clean(value)}`);
+  });
+  return lines.filter(Boolean).join("\n");
+}
+
+async function draftProfile({ cv, answersText }, signal) {
+  const answers = answersText ? `\n\nCANDIDATE ANSWERS:\n${answersText}` : "";
+  const result = await callLmStudio(PROFILE_DRAFT_PROMPT, `CV:\n${String(cv).slice(0, 20000)}${answers}`, { signal });
+  if (!result.ok) return result;
+  return { ok: true, profile: assembleDraftProfile(result.data || {}) };
+}
+
+const DOMAIN_FLAG_SUGGEST_PROMPT = `You propose "domain flags" for a job-fit evaluator: short terms that, when they appear in a job posting, point at a skill or domain this candidate does NOT have.
+Return ONLY a JSON object, no prose, no markdown fences.
+
+Schema:
+{
+  "terms": ["<5 to 12 short terms, 1-3 words each>"]
+}
+
+Rules:
+- Start from the profile's "Gaps:" line, then add closely related terms that postings for the candidate's target roles commonly require.
+- Write each term the way postings phrase it ("machine learning", "Kubernetes", "React Native"), so it can be matched as literal text.
+- Never include anything the profile says the candidate has, and nothing generic ("communication", "teamwork", "software").`;
+
+async function suggestDomainFlags({ profile }, signal) {
+  const result = await callLmStudio(DOMAIN_FLAG_SUGGEST_PROMPT, `CANDIDATE PROFILE:\n${profile}`, { signal });
+  if (!result.ok) return result;
+  const terms = Array.isArray(result.data?.terms) ? result.data.terms : [];
+  const seen = new Set();
+  const cleaned = terms
+    .map((t) => String(t).trim())
+    .filter((t) => t && t.length <= 40 && !seen.has(t.toLowerCase()) && seen.add(t.toLowerCase()));
+  return { ok: true, terms: cleaned };
+}
+
+// The wizard's try-it run. Calls the evaluator directly instead of going
+// through the queue, so a test against a sample posting is never filed as a
+// tracked job. It still respects the one-request-at-a-time rule by refusing
+// to run while the queue is working.
+async function testEvaluate(message, signal) {
+  const snapshot = await JOB_FIT_QUEUE.snapshot();
+  if (snapshot.active > 0) {
+    return { ok: false, failure: "busy", error: `The queue is evaluating ${snapshot.active} job(s) — try again when it's done.` };
+  }
+  return evaluateWithLmStudio(
+    {
+      profile: message.profile,
+      postingText: message.postingText,
+      domainFlags: message.domainFlags,
+      expectedSalary: message.expectedSalary,
+    },
+    signal
+  );
+}
+
+// Wizard calls carry a callId so the page can cancel them. Kept in memory
+// only: if the worker restarts, the fetch it owned is gone with it anyway.
+const cancellableCalls = new Map();
+
+function runCancellable(callId, run) {
+  const controller = new AbortController();
+  if (callId) cancellableCalls.set(callId, controller);
+  return run(controller.signal).finally(() => {
+    if (callId) cancellableCalls.delete(callId);
+  });
 }
 
 const SUMMARIZE_SYSTEM_PROMPT = `You condense a job posting into a compact brief for another AI assistant to quickly assess candidate fit. That assistant already has the candidate's full profile/CV — it only needs the posting, stripped of bloat.
@@ -666,7 +781,25 @@ chrome.alarms.onAlarm.addListener((alarm) => {
 // Resume automatically after a browser restart or an extension reload: a batch
 // left running overnight should still be running in the morning.
 chrome.runtime.onStartup.addListener(kick);
-chrome.runtime.onInstalled.addListener(kick);
+chrome.runtime.onInstalled.addListener((details) => {
+  kick();
+  if (details.reason === "install") startFirstRunSetup();
+});
+
+// A fresh install gets the setup wizard, never an update: an existing user
+// already has a working profile and shouldn't be interrupted. load() creates
+// the seed profile; it's marked unfinished so the popup keeps offering to
+// continue if the wizard tab is closed early. Domain flags are cleared because
+// the defaults are one specific person's gaps, not a new user's.
+async function startFirstRunSetup() {
+  const store = await JOB_FIT_PROFILES.load();
+  const seed = store.profiles[0];
+  seed.setupIncomplete = true;
+  seed.keywords.domainFlags = JOB_FIT_KEYWORDS.emptyConfig();
+  await JOB_FIT_PROFILES.save(store);
+  await chrome.storage.local.set({ wizardProgress: { [seed.id]: { mode: "install", step: 0, furthest: 0 } } });
+  chrome.tabs.create({ url: chrome.runtime.getURL(`wizard.html?mode=install&profile=${encodeURIComponent(seed.id)}`) });
+}
 
 chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
   if (message?.type === "JOB_FIT_ENQUEUE") {
@@ -717,8 +850,26 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
     return true;
   }
   if (message?.type === "JOB_FIT_SUGGEST_SALARY") {
-    suggestSalary(message).then(sendResponse);
+    runCancellable(message.callId, (signal) => suggestSalary(message, signal)).then(sendResponse);
     return true;
+  }
+  if (message?.type === "JOB_FIT_DRAFT_PROFILE") {
+    runCancellable(message.callId, (signal) => draftProfile(message, signal)).then(sendResponse);
+    return true;
+  }
+  if (message?.type === "JOB_FIT_SUGGEST_DOMAIN_FLAGS") {
+    runCancellable(message.callId, (signal) => suggestDomainFlags(message, signal)).then(sendResponse);
+    return true;
+  }
+  if (message?.type === "JOB_FIT_TEST_EVALUATE") {
+    runCancellable(message.callId, (signal) => testEvaluate(message, signal)).then(sendResponse);
+    return true;
+  }
+  if (message?.type === "JOB_FIT_CANCEL_CALL") {
+    const controller = cancellableCalls.get(message.callId);
+    if (controller) controller.abort();
+    sendResponse({ ok: Boolean(controller) });
+    return false;
   }
   return false;
 });

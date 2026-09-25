@@ -8,6 +8,10 @@
 // Here, word boundaries are applied by the compiler, so that class of mistake
 // can't be made.
 var JOB_FIT_KEYWORDS = (function () {
+  // `example` is display-only: a line of real posting language, shown by the
+  // setup wizard so a category reads as something recognisable rather than as
+  // its patterns.
+  //
   // Curated categories. The wording postings use varies enormously; the
   // category does not. Ticking one pulls in every pattern for it, and a
   // profile that has it ticked inherits improvements to these patterns without
@@ -17,6 +21,7 @@ var JOB_FIT_KEYWORDS = (function () {
       {
         id: "citizenship",
         label: "US citizenship or permanent residency",
+        example: "Must be a U.S. citizen or permanent resident",
         patterns: [
           "must be (a )?(u\\.?s\\.? citizen|us citizen)",
           "u\\.?s\\.? citizen(ship)? (is )?required",
@@ -27,6 +32,7 @@ var JOB_FIT_KEYWORDS = (function () {
       {
         id: "sponsorship",
         label: "No visa sponsorship available",
+        example: "We are not able to sponsor visas for this role",
         patterns: [
           "without (current or future )?sponsorship",
           "not (able|available) to sponsor",
@@ -36,26 +42,31 @@ var JOB_FIT_KEYWORDS = (function () {
       {
         id: "clearance",
         label: "An active security clearance",
+        example: "Active Secret security clearance required",
         patterns: ["security clearance"],
       },
       {
         id: "itar",
         label: "ITAR / export-controlled work",
+        example: "Requires access to ITAR-controlled information",
         patterns: ["\\bITAR\\b"],
       },
       {
         id: "locality",
         label: "Already living locally / within commuting distance",
+        example: "Local candidates only",
         patterns: ["within (a )?(reasonable )?commut(ing|e) distance", "local candidates only"],
       },
       {
         id: "relocation",
         label: "Relocating at your own cost",
+        example: "No relocation assistance is provided",
         patterns: ["not able to (offer|provide) relocation", "no relocation (assistance|support)"],
       },
       {
         id: "student",
         label: "Being a current student or a specific graduation year",
+        example: "Graduating between 2026 and 2027",
         patterns: ["graduat(ing|ion) (date )?(between|in) (20\\d\\d)", "currently pursuing a (bachelor|master)"],
       },
     ],
@@ -63,11 +74,13 @@ var JOB_FIT_KEYWORDS = (function () {
       {
         id: "exportcontrol",
         label: "Export control mentioned (often satisfiable, unlike ITAR)",
+        example: "Subject to U.S. export control regulations",
         patterns: ["export control"],
       },
       {
         id: "masters",
         label: "A master's degree is required",
+        example: "Master's degree required",
         patterns: ["master'?s degree (is )?required"],
       },
     ],

@@ -1234,6 +1234,12 @@ async function init() {
     closeDataMenu();
     showProbeReport();
   });
+  // For whichever profile this page is showing, not the popup's active one:
+  // this is where you're looking at that profile's scores.
+  document.getElementById("runWizard").addEventListener("click", () => {
+    closeDataMenu();
+    openSetupWizard({ mode: "edit", profile: els.profileSelect.value });
+  });
   document.getElementById("importData").addEventListener("click", () => {
     closeDataMenu();
     document.getElementById("importFile").click();

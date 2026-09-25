@@ -1,7 +1,8 @@
 var JOB_FIT_DEFAULTS = {
-  // Name given to the profile that migration builds out of the pre-profiles
-  // settings, so an existing install keeps its data under a sensible label.
-  seedProfileName: "Me — C++ / Imaging",
+  // Name given to the first profile: the one migration builds out of the
+  // pre-profiles settings, and the one a fresh install starts with. Neutral on
+  // purpose — on a fresh install the setup wizard asks for a real name.
+  seedProfileName: "My profile",
   // First-run template only. Your real profile is stored in
   // chrome.storage.local the moment you hit Save, so this is never anyone's
   // actual CV — replace it with your own in the popup. Keep it under ~400

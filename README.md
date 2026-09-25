@@ -62,13 +62,24 @@ computed in code, because local models are unreliable at it and fail confidently
 2. Clone this repo.
 3. Go to `chrome://extensions`, enable **Developer mode**, click **Load unpacked**,
    and select the `job-fit-evaluator/` folder.
-4. Open the extension popup and fill in:
-   - **Local model** — endpoint and model name. Start with reasoning effort `low`
-     and thinking off; see [Model notes](#model-notes).
-   - **Candidate profile** — your CV summary, under ~400 words. The shipped text is
-     a template showing the useful shape; replace it with yours.
-   - **Expected salary** — optional, per currency. **Suggest all** will estimate
-     from your profile if you'd rather start from something.
+4. The **setup wizard** opens in a new tab on first install. It walks through, in order:
+   - **Local model**: tests the connection and lists the models LM Studio has
+     loaded, so you pick one instead of typing its name.
+   - **About you**: a profile name and three work-authorization questions. Your
+     answers tick the matching hard rejects (citizenship, sponsorship, relocation).
+   - **Candidate profile**: paste your CV and the local model drafts the ~400-word
+     summary, or write it yourself from the template.
+   - **Expected salary**: per market, with a suggestion from your profile.
+   - **Hard rejects**, **Warnings** and **Domain flags**: the flags can be
+     suggested from your profile's Gaps line.
+   - **Review**: every setting on one page, plus a test evaluation of a sample
+     posting (or one you paste) that isn't saved to your tracked jobs.
+
+   Everything saves as you go. Close the tab early and the popup offers
+   **Continue setup**. To run it again later, use **Manage profiles → Run setup
+   wizard for this profile** in the popup, or **Data → Run setup wizard…** on the
+   tracked jobs page. **New** profile also opens it. Every setting stays editable
+   in the popup too.
 
 Then open a job posting and click **Evaluate this tab**.
 

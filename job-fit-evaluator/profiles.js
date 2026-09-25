@@ -34,6 +34,8 @@ var JOB_FIT_PROFILES = (function () {
         domainFlags: JOB_FIT_KEYWORDS.emptyConfig(),
       },
       expectedSalary: clone(JOB_FIT_DEFAULTS.expectedSalary),
+      setupIncomplete: false,
+      setupAnswers: {},
     };
   }
 
@@ -64,6 +66,12 @@ var JOB_FIT_PROFILES = (function () {
           : clone(JOB_FIT_DEFAULTS.keywords.domainFlags),
       },
       expectedSalary: profile.expectedSalary || clone(JOB_FIT_DEFAULTS.expectedSalary),
+      // Setup-wizard state. Carried through explicitly because this function
+      // rebuilds the profile from known keys — anything not listed here is
+      // dropped on the next load. Neither field is in fingerprint(): they
+      // don't change how a posting scores.
+      setupIncomplete: profile.setupIncomplete === true,
+      setupAnswers: profile.setupAnswers && typeof profile.setupAnswers === "object" ? profile.setupAnswers : {},
     };
   }
 

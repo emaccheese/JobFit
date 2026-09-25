@@ -1,19 +1,3 @@
-// MV3 service workers go idle after ~30s. Waking one via sendMessage can
-// lose a race the first time (message dispatched before its listener is
-// registered), throwing "Receiving end does not exist" even though a
-// manual retry would succeed immediately after. Retry transparently
-// instead of surfacing that as a real error.
-async function sendMessageWithRetry(message, retries = 2, delayMs = 250) {
-  for (let attempt = 0; attempt <= retries; attempt++) {
-    try {
-      return await chrome.runtime.sendMessage(message);
-    } catch (err) {
-      if (attempt === retries) throw err;
-      await new Promise((resolve) => setTimeout(resolve, delayMs));
-    }
-  }
-}
-
 const els = {
   profileSelect: document.getElementById("profileSelect"),
   profileNameRow: document.getElementById("profileNameRow"),
@@ -356,10 +340,7 @@ async function confirmNamePrompt() {
   if (action === "rename") {
     activeProfile().name = name;
   } else {
-    const created =
-      action === "duplicate"
-        ? Object.assign(JOB_FIT_PROFILES.clone(activeProfile()), { id: JOB_FIT_PROFILES.newId(), name })
-        : JOB_FIT_PROFILES.blankProfile(name);
+    const created = Object.assign(JOB_FIT_PROFILES.clone(activeProfile()), { id: JOB_FIT_PROFILES.newId(), name });
     store.profiles.push(created);
     store.activeProfileId = created.id;
   }
@@ -368,10 +349,7 @@ async function confirmNamePrompt() {
   renderProfileSelect();
   fillFormFromProfile(activeProfile());
   cancelNamePrompt();
-  els.profileHint.textContent =
-    action === "new"
-      ? "New profile — hard rejects carried over, domain flags left empty (they're specific to one person's gaps)."
-      : "";
+  els.profileHint.textContent = "";
   setStatus(action === "rename" ? "Renamed." : `Created "${name}".`);
 }
 
@@ -463,8 +441,19 @@ function restoreOpenSections(saved) {
 // yet (which is every profile the moment after you create it). Opening those
 // beats making someone hunt for why nothing works.
 function applyForcedSections() {
+  renderSetupBanner();
+  // An unfinished wizard profile gets the banner instead: the wizard is the
+  // better place to finish, and opening sections underneath it would compete.
+  if (activeProfile() && activeProfile().setupIncomplete) return;
   if (!els.lmStudioModel.value.trim()) document.getElementById("sec-lmstudio").open = true;
   if (!els.profile.value.trim()) document.getElementById("sec-profile").open = true;
+}
+
+function renderSetupBanner() {
+  const banner = document.getElementById("setupBanner");
+  const profile = activeProfile();
+  banner.hidden = !(profile && profile.setupIncomplete);
+  if (!banner.hidden) document.getElementById("setupBannerName").textContent = profile.name;
 }
 
 function persistOpenSections() {
@@ -486,48 +475,21 @@ function setReady(dotId, textId, state, text, title) {
   label.title = title || "";
 }
 
-// The configured endpoint is the chat-completions URL; POSTing to it would run
-// a generation. /v1/models is the cheap GET that answers "is it up", and its
-// response also says which models are actually loaded.
-function modelsUrlFrom(chatUrl) {
-  try {
-    const url = new URL(chatUrl);
-    url.search = "";
-    url.hash = "";
-    url.pathname = /\/chat\/completions\/?$/.test(url.pathname)
-      ? url.pathname.replace(/\/chat\/completions\/?$/, "/models")
-      : "/v1/models";
-    return url.toString();
-  } catch (err) {
-    return null;
-  }
-}
-
 async function checkModel() {
   const stored = await chrome.storage.local.get("lmStudio");
   const settings = stored.lmStudio || JOB_FIT_DEFAULTS.lmStudio;
   const wanted = (settings.model || "").trim();
-  const url = modelsUrlFrom(settings.url || JOB_FIT_DEFAULTS.lmStudio.url);
-  if (!url) {
+  const probe = await probeModels(settings.url || JOB_FIT_DEFAULTS.lmStudio.url);
+  if (probe.reason === "invalid-url") {
     setReady("modelDot", "modelState", "bad", "The endpoint isn't a valid URL.");
     return;
   }
-
-  const controller = new AbortController();
-  const timer = setTimeout(() => controller.abort(), 2500);
-  let payload;
-  try {
-    const response = await fetch(url, { signal: controller.signal });
-    if (!response.ok) throw new Error(`HTTP ${response.status}`);
-    payload = await response.json();
-  } catch (err) {
-    setReady("modelDot", "modelState", "bad", "LM Studio isn't reachable — start it and reopen this popup.", url);
+  if (!probe.ok) {
+    setReady("modelDot", "modelState", "bad", "LM Studio isn't reachable — start it and reopen this popup.", probe.url);
     return;
-  } finally {
-    clearTimeout(timer);
   }
 
-  const loaded = ((payload && payload.data) || []).map((m) => m.id).filter(Boolean);
+  const loaded = probe.models;
 
   if (!wanted) {
     setReady("modelDot", "modelState", "ok", `Connected — using ${loaded[0] || "whatever is loaded"}`, loaded.join("\n"));
@@ -1066,7 +1028,25 @@ async function copySummary() {
 document.getElementById("save").addEventListener("click", saveSettings);
 document.getElementById("reset").addEventListener("click", resetKeywordLists);
 els.profileSelect.addEventListener("change", (e) => switchProfile(e.target.value));
-document.getElementById("profileNew").addEventListener("click", () => askForName("new", ""));
+// New profiles go through the setup wizard: a blank profile has no CV, no
+// salary and no domain flags, and the wizard is what walks through filling them.
+// Opened as a tab because the popup destroys itself the moment focus moves.
+document.getElementById("profileNew").addEventListener("click", async () => {
+  await flushAutoSave();
+  openSetupWizard({ mode: "new" });
+  window.close();
+});
+document.getElementById("profileWizard").addEventListener("click", async () => {
+  await flushAutoSave();
+  openSetupWizard({ mode: "edit", profile: activeProfile().id });
+  window.close();
+});
+// Resumes where the wizard was left; the wizard reads its own saved progress.
+document.getElementById("setupContinue").addEventListener("click", async () => {
+  await flushAutoSave();
+  openSetupWizard({ profile: activeProfile().id, resume: "1" });
+  window.close();
+});
 document.getElementById("profileDuplicate").addEventListener("click", () =>
   askForName("duplicate", `${activeProfile().name} copy`)
 );

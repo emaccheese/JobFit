@@ -45,6 +45,9 @@ job-fit-evaluator/
 ├── jobkey.js            # canonical job identity per page
 ├── history.html         # evaluated-jobs page
 ├── history.js
+├── wizard.html          # setup wizard (first install, new profile, re-run)
+├── wizard.js
+├── lmstudio-ui.js       # shared by popup + wizard: messaging, /v1/models probe
 ├── popup.html
 ├── popup.js
 ├── extractors/
@@ -356,6 +359,49 @@ warnings only. It can't restore the candidate text once profiles exist (dropping
 one person's CV into another person's profile is nonsense), and domain flags are
 per-person by construction. It also no longer wipes the LM Studio endpoint,
 which the old "Reset defaults" did.
+
+### Setup wizard
+
+`wizard.html` walks a profile through everything it needs. It opens on a fresh
+install (`onInstalled`, `reason === "install"` only, never on update), from
+**New** in the popup, and on demand from the popup or the history page.
+
+- **A tab, not the popup.** Same reason as the history page: the popup destroys
+  itself on blur, and the CV step asks you to paste from another window.
+- **Model first.** Drafting the profile, suggesting salary and suggesting domain
+  flags all need the model, so it's checked before anything that depends on it.
+  The model list comes from `/v1/models`, which removes the "model name isn't
+  loaded" failure by construction. For a second profile the step collapses to
+  one line, because the model is global.
+- **Hard rejects are derived from answers, not ticked cold.** Each
+  work-authorization answer owns a fixed set of reject categories
+  (`ANSWER_RULES` in `wizard.js`) and only re-ticks those, so a category you
+  changed by hand survives edits to unrelated answers. Each tick shows the
+  answer that caused it.
+- **The profile draft is assembled in code.** The model returns one JSON field
+  per template section and `assembleDraftProfile()` writes the text, so the
+  labels the evaluator depends on (`Gaps:`, `Work authorisation:`, `Target:`)
+  are always present and spelled the same way. Nothing the model produces is
+  saved unseen: the draft, the salary and the flags are all review-first.
+- **Writes go straight to the real stores.** There is no draft copy to commit, so
+  closing the tab loses nothing. A `new` profile is created once it has a name.
+  `setupIncomplete` on the profile drives the popup's **Continue setup** banner,
+  and `wizardProgress[profileId]` records the step to resume at. Saves re-read
+  the store and replace only this profile, so edits made elsewhere to other
+  profiles aren't overwritten. `normalize()` carries `setupIncomplete` and
+  `setupAnswers` through explicitly; neither is in `fingerprint()`, because
+  neither changes a score.
+- **The test run bypasses the queue on purpose.** `JOB_FIT_TEST_EVALUATE` calls
+  `evaluateWithLmStudio()` directly, so a sample posting is never filed as a
+  tracked job. It refuses to run while the queue is active, which keeps LM Studio
+  at one request at a time. Layer 1 runs first in the page, exactly as on a
+  real posting.
+- **Every wizard model call is cancellable.** Calls carry a `callId`, and
+  `JOB_FIT_CANCEL_CALL` aborts the fetch through the new `signal` option on
+  `callLmStudio()`. Cancel stops LM Studio generating, not just the spinner.
+- **Fresh installs start with no domain flags.** The shipped defaults are one
+  specific person's gaps, and `startFirstRunSetup()` clears them for the seed
+  profile.
 
 The shipped default for the first profile, kept under ~400 words:
 
