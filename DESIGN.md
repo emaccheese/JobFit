@@ -774,6 +774,39 @@ dropdown are mutually exclusive — using one clears the other — so the list i
 never filtered by two controls at once. A bucket with nothing in it is hidden
 unless it is the one selected.
 
+**Order: status on top, then filters, then the list** (2026-09-25). The queue
+moved to the top, away from the list, because it's status, not something you
+use to work through the list. The filters sit directly above the list they
+control. The queue shows at most four rows in a scroll area that follows the
+newest item (on load, and whenever one is added, unless you've scrolled up to
+read something). The running item is pinned above that scroll area, because
+following the newest item would otherwise scroll the running one out of view.
+
+**Out-of-date notice is a chip, not a banner.** It was a full-width row. It's
+now an amber chip at the end of the funnel row, set apart from the status
+buckets. Clicking it filters to those jobs, and × dismisses it. The dismissal
+stores a signature (model, profile fingerprint and count), so the chip
+returns when that set changes instead of hiding news. Every row keeps its own
+"scored by …" badge, so dismissing loses nothing.
+
+**The list toolbar is always rendered, at a fixed height.** The old
+selection bar appeared only once something was ticked, so ticking the first
+box inserted a bar and pushed every row down. One sticky row now holds a
+tri-state checkbox that selects this page, the "1–20 of 143" count and the
+pager. Selecting swaps its left side to "N selected · Re-evaluate · Clear"
+and, once the page is fully ticked, "Select all N matching". The "select
+all out of date" action moved here from the old banner, shown when the
+out-of-date filter is on.
+
+**Pages.** 5 / 10 / 20 / 50 / 100 / All per page, remembered in
+`historyUi`. Filter, sort, search and profile changes go back to page 1, but
+a job leaving the list (deleted, or no longer matching) only clamps the
+page. Resizing keeps the first job you were looking at on screen. A deep
+link from a banner opens the page the job is on. Selection spans pages, and
+CSV export still covers everything matching the filters, not just the
+current page. Rendering only the current page also keeps re-renders cheap
+as the history grows.
+
 **"Needs attention"** is the page answering what to do next rather than what
 happened. Four rules, first match wins, most decisive first:
 

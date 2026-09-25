@@ -111,22 +111,57 @@
   .qscore.amber { background: #fdf3e2; color: var(--amber); }
   .qscore.red { background: #fdeceb; color: var(--red); }
 
-  .stale {
-    display: flex; align-items: center; justify-content: space-between; gap: 12px; flex-wrap: wrap;
-    background: #fdf3e2; border: 1px solid #f0dcb8; color: var(--amber);
-    border-radius: 8px; padding: 8px 12px; margin-bottom: 12px; font-size: 13px;
+  /* Queue at the top, away from the list: it's status, not something you
+     work the list with. The running job is pinned outside the scroll area so
+     auto-scrolling to the newest item can never hide what's happening now. */
+  .queue-running:empty { display: none; }
+  .queue-running .qrow { border-top: none; background: #f5f8fd; border-radius: 5px; padding: 5px 8px; margin-bottom: 4px; }
+  .queue-items { max-height: calc(4 * 34px); overflow-y: auto; padding-right: 10px; }
+  .queue-items:empty { display: none; }
+
+  /* Filters sit together; the out-of-date chip is on the same row but pushed
+     right, so it reads as a notice rather than one more status bucket. */
+  .funnel-row { display: flex; align-items: flex-start; gap: 12px; margin-bottom: 14px; }
+  .funnel-row .funnel { flex: 1; margin-bottom: 0; }
+  .funnel-aside { flex: 0 0 auto; display: flex; align-items: center; padding-left: 12px; border-left: 1px solid var(--line); }
+  .stale-chip {
+    display: inline-flex; align-items: center; border: 1px dashed #e0c48d; border-radius: 999px;
+    background: #fffaf1; color: var(--amber); font-size: 13px; overflow: hidden;
   }
-  .stale button { flex: 0 0 auto; }
-  /* Sticky so the action stays in reach while ticking rows further down. */
-  .selection-bar {
+  .stale-chip button { border: none; background: none; color: inherit; border-radius: 0; }
+  .stale-chip .stale-open { padding: 5px 4px 5px 12px; }
+  .stale-chip .stale-open strong { font-weight: 700; margin-right: 5px; }
+  .stale-chip[aria-pressed="true"] { background: var(--amber); border-style: solid; border-color: var(--amber); color: #fff; }
+  .stale-chip .stale-dismiss { padding: 5px 10px 5px 6px; font-size: 15px; line-height: 1; opacity: .7; }
+  .stale-chip .stale-dismiss:hover { opacity: 1; background: none; }
+  .stale-chip button:hover { background: none; }
+
+  /* Always rendered, fixed height: selecting a row swaps what's inside it
+     instead of inserting a bar above the list and shoving every row down. */
+  .list-toolbar {
     position: sticky; top: 0; z-index: 4;
-    display: flex; align-items: center; gap: 10px;
-    background: var(--card); border: 1px solid var(--line); border-radius: 8px;
-    padding: 8px 12px; margin-bottom: 12px; font-size: 13px;
-    box-shadow: 0 4px 12px rgba(0,0,0,.06);
+    display: flex; align-items: center; justify-content: space-between; gap: 12px;
+    min-height: 44px; background: var(--bg); padding: 6px 2px; margin-bottom: 6px;
+    border-bottom: 1px solid var(--line); font-size: 13px;
   }
-  .selection-bar span { margin-right: auto; font-weight: 600; }
-  .selection-bar button.primary { background: var(--accent); border-color: var(--accent); color: #fff; }
+  .lt-left, .lt-right { display: flex; align-items: center; gap: 10px; min-width: 0; }
+  .lt-left .count { color: var(--muted); white-space: nowrap; }
+  .lt-left .count.selected { color: var(--text); font-weight: 600; }
+  .lt-left button, .pager button { padding: 4px 10px; font-size: 13px; }
+  .lt-left button.primary { background: var(--accent); border-color: var(--accent); color: #fff; }
+  .lt-left button.link { border: none; background: none; padding: 0; color: var(--accent); }
+  .lt-left button.link:hover { text-decoration: underline; background: none; }
+  .select-all { margin: 0 2px 0 14px; cursor: pointer; }
+  .pager { display: flex; align-items: center; gap: 6px; color: var(--muted); white-space: nowrap; }
+  .pager select { padding: 3px 6px; font-size: 13px; }
+  .pager .page-of { min-width: 64px; text-align: center; }
+  .pager-bottom { display: flex; justify-content: flex-end; margin-top: 4px; }
+  .pager-bottom:empty { display: none; }
+  @media (max-width: 720px) {
+    .funnel-row { flex-direction: column; }
+    .funnel-aside { border-left: none; padding-left: 0; }
+    .pager .per-page { display: none; }
+  }
   .select-box { flex: 0 0 auto; margin: 0; cursor: pointer; }
   .select-box:disabled { cursor: default; opacity: .35; }
   .previous-list { display: flex; flex-direction: column; gap: 4px; }
@@ -213,7 +248,24 @@
   <div class="wrap">
     <h1>Tracked jobs</h1>
     <div class="sub" id="subtitle"></div>
-    <div class="funnel" id="funnel"></div>
+
+    <div id="queuePanel" class="queue" hidden>
+      <div class="queue-head">
+        <strong id="queueTitle">Queue</strong>
+        <div class="queue-actions">
+          <button id="queueResume" type="button" hidden>Resume</button>
+          <button id="queueClear" type="button">Clear finished</button>
+        </div>
+      </div>
+      <div id="queuePause" class="queue-pause" hidden></div>
+      <div id="queueRunning" class="queue-running"></div>
+      <div id="queueItems" class="queue-items"></div>
+    </div>
+
+    <div class="funnel-row">
+      <div class="funnel" id="funnel"></div>
+      <div class="funnel-aside" id="staleChip" hidden></div>
+    </div>
 
     <div class="controls">
       <label class="field">
@@ -257,23 +309,14 @@
 
     <div id="backupStatus" class="backup-status" hidden></div>
 
-    <div id="staleNotice" class="stale" hidden></div>
-
-    <div id="selectionBar" class="selection-bar" hidden></div>
-
-    <div id="queuePanel" class="queue" hidden>
-      <div class="queue-head">
-        <strong id="queueTitle">Queue</strong>
-        <div class="queue-actions">
-          <button id="queueResume" type="button" hidden>Resume</button>
-          <button id="queueClear" type="button">Clear finished</button>
-        </div>
-      </div>
-      <div id="queuePause" class="queue-pause" hidden></div>
-      <div id="queueItems"></div>
+    <div class="list-toolbar" id="listToolbar">
+      <div class="lt-left" id="toolbarLeft"></div>
+      <div class="lt-right" id="pagerTop"></div>
     </div>
 
     <div id="list"></div>
+
+    <div class="pager-bottom" id="pagerBottom"></div>
   </div>
 
   <script src="defaults.js"></script>

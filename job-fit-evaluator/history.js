@@ -31,8 +31,36 @@ const els = {
   search: document.getElementById("search"),
   hideRejects: document.getElementById("hideRejects"),
   list: document.getElementById("list"),
-  selectionBar: document.getElementById("selectionBar"),
+  toolbarLeft: document.getElementById("toolbarLeft"),
+  pagerTop: document.getElementById("pagerTop"),
+  pagerBottom: document.getElementById("pagerBottom"),
+  staleChip: document.getElementById("staleChip"),
 };
+
+// Paging. The list had grown past what reads as a list; the page size is a
+// per-viewer preference, remembered between visits.
+const PAGE_SIZES = [5, 10, 20, 50, 100, 0]; // 0 = all
+let page = 0;
+// ui.staleDismissed holds the signature of the out-of-date set that was
+// dismissed, so the chip returns when that set changes rather than staying
+// hidden for good.
+let ui = { pageSize: 20, staleDismissed: null };
+
+async function loadUi() {
+  const stored = await chrome.storage.local.get("historyUi");
+  ui = { ...ui, ...(stored.historyUi || {}) };
+  if (!PAGE_SIZES.includes(ui.pageSize)) ui.pageSize = 20;
+}
+
+function saveUi() {
+  chrome.storage.local.set({ historyUi: ui });
+}
+
+// Any change to what's being listed starts again from the first page: page 4
+// of a different filter is an arbitrary slice nobody asked for.
+function resetPage() {
+  page = 0;
+}
 
 function scoreClass(score) {
   // Null means summarized but never scored — that has to read as neutral, not
@@ -546,7 +574,13 @@ const STATUS_GROUPS = {
   },
 };
 
-const FILTERS = Object.assign({ attention: { label: "Needs attention", match: (r) => Boolean(attentionReason(r)) } }, STATUS_GROUPS);
+const FILTERS = Object.assign(
+  {
+    attention: { label: "Needs attention", match: (r) => Boolean(attentionReason(r)) },
+    stale: { label: "Out of date", match: (r) => Boolean(staleReason(r)) },
+  },
+  STATUS_GROUPS
+);
 
 // Chips and the Status dropdown are mutually exclusive — using one clears the
 // other, so the list is never filtered by two controls at once.
@@ -579,15 +613,24 @@ function renderQueue(queue) {
   const items = ((queue && queue.items) || []).filter((i) => i.profileId === viewProfileId);
   if (!items.length) {
     panel.hidden = true;
+    lastQueueCount = -1;
     return;
   }
   panel.hidden = false;
 
   const waiting = items.filter((i) => i.state === "pending").length;
-  const running = items.some((i) => i.state === "processing");
-  document.getElementById("queueTitle").textContent = running
-    ? `Queue — running, ${waiting} waiting`
-    : `Queue — ${waiting} waiting`;
+  const doneCount = items.filter((i) => i.state === "done").length;
+  const failedCount = items.filter((i) => i.state === "failed").length;
+  const running = items.find((i) => i.state === "processing");
+  document.getElementById("queueTitle").textContent = [
+    "Queue",
+    running ? "running" : null,
+    `${waiting} waiting`,
+    doneCount ? `${doneCount} done` : null,
+    failedCount ? `${failedCount} failed` : null,
+  ]
+    .filter(Boolean)
+    .join(" · ");
 
   const paused = queue.state === "paused";
   pauseEl.hidden = !paused;
@@ -596,6 +639,16 @@ function renderQueue(queue) {
     pauseEl.textContent = `Paused: ${queue.pauseReason || "the local model was unreachable"} — switching the model or endpoint in the popup resumes it automatically; for anything else, fix it and hit Resume. Nothing was lost.`;
   }
 
+  // The list runs oldest to newest, so new work lands at the bottom: follow it
+  // there on load and whenever something is added — unless you've scrolled up
+  // to read an item, which a routine refresh shouldn't yank you away from.
+  const wasAtBottom = itemsEl.scrollTop + itemsEl.clientHeight >= itemsEl.scrollHeight - 4;
+  const added = items.length > lastQueueCount;
+  const firstRender = lastQueueCount === -1;
+  lastQueueCount = items.length;
+
+  const runningEl = document.getElementById("queueRunning");
+  runningEl.innerHTML = "";
   itemsEl.innerHTML = "";
   items.forEach((item) => {
     const row = el("div", "qrow");
@@ -631,10 +684,21 @@ function renderQueue(queue) {
       row.appendChild(cancel);
     }
 
+    // Pinned above the scroll area, so following the newest item never hides
+    // the one actually running.
+    if (item === running) {
+      runningEl.appendChild(row);
+      return;
+    }
     itemsEl.appendChild(row);
     if (item.error && item.state === "failed") itemsEl.appendChild(el("div", "qerr", item.error));
   });
+
+  if (firstRender || added || wasAtBottom) itemsEl.scrollTop = itemsEl.scrollHeight;
 }
+
+// -1 until the first render, so opening the page starts at the bottom.
+let lastQueueCount = -1;
 
 async function refreshQueue() {
   const snapshot = await queueMessage({ type: "JOB_FIT_QUEUE_SNAPSHOT" });
@@ -733,11 +797,17 @@ function render() {
   for (const key of selectedKeys) {
     if (!records.some((r) => r.jobKey === key && canReevaluate(r))) selectedKeys.delete(key);
   }
-  renderSelectionBar();
-  renderStaleNotice();
+  renderStaleChip();
   const visible = visibleRecords();
-  els.list.innerHTML = "";
 
+  // Clamped rather than reset: a job leaving the list (deleted, or no longer
+  // matching after a status change) shouldn't bounce you back to page 1.
+  const size = ui.pageSize || visible.length || 1;
+  const pages = Math.max(1, Math.ceil(visible.length / size));
+  page = Math.min(page, pages - 1);
+  const shown = ui.pageSize ? visible.slice(page * size, page * size + size) : visible;
+
+  els.list.innerHTML = "";
   if (!records.length) {
     els.list.appendChild(
       el(
@@ -749,12 +819,74 @@ function render() {
   } else if (!visible.length) {
     els.list.appendChild(el("div", "empty", "No jobs match these filters."));
   } else {
-    visible.forEach((record) => els.list.appendChild(renderJob(record)));
+    shown.forEach((record) => els.list.appendChild(renderJob(record)));
   }
+
+  renderToolbar(visible, shown);
+  renderPager(els.pagerTop, visible.length, pages, { withSize: true });
+  renderPager(els.pagerBottom, visible.length, pages, { withSize: false });
 
   const profileName = (store.profiles.find((p) => p.id === viewProfileId) || {}).name || "";
   els.subtitle.textContent =
     visible.length === records.length ? profileName : `${profileName} — showing ${visible.length} of ${records.length}`;
+}
+
+function goToPage(n) {
+  page = n;
+  render();
+  // Back to the top of the list, not the top of the page: the queue and the
+  // filters above it haven't changed.
+  const toolbar = document.getElementById("listToolbar");
+  if (toolbar.getBoundingClientRect().top < 0) toolbar.scrollIntoView({ block: "start" });
+}
+
+function renderPager(host, total, pages, { withSize }) {
+  host.innerHTML = "";
+  // The bottom pager is only there to save scrolling back up; with one page
+  // there's nothing to page to.
+  if (!withSize && pages < 2) return;
+  if (!total) return;
+  const pager = el("div", "pager");
+
+  if (withSize) {
+    const label = el("label", "per-page");
+    label.appendChild(document.createTextNode("Per page "));
+    const select = document.createElement("select");
+    PAGE_SIZES.forEach((n) => {
+      const opt = document.createElement("option");
+      opt.value = String(n);
+      opt.textContent = n ? String(n) : "All";
+      select.appendChild(opt);
+    });
+    select.value = String(ui.pageSize);
+    select.addEventListener("change", () => {
+      // Keep the first job you were looking at on screen after resizing.
+      const firstShown = page * (ui.pageSize || 0);
+      ui.pageSize = Number(select.value);
+      saveUi();
+      page = ui.pageSize ? Math.floor(firstShown / ui.pageSize) : 0;
+      render();
+    });
+    label.appendChild(select);
+    pager.appendChild(label);
+  }
+
+  if (pages > 1) {
+    const prev = el("button", null, "‹");
+    prev.type = "button";
+    prev.title = "Previous page";
+    prev.disabled = page === 0;
+    prev.addEventListener("click", () => goToPage(page - 1));
+    const next = el("button", null, "›");
+    next.type = "button";
+    next.title = "Next page";
+    next.disabled = page >= pages - 1;
+    next.addEventListener("click", () => goToPage(page + 1));
+    pager.appendChild(prev);
+    pager.appendChild(el("span", "page-of", `${page + 1} / ${pages}`));
+    pager.appendChild(next);
+  }
+  host.appendChild(pager);
 }
 
 function renderFunnel() {
@@ -789,6 +921,7 @@ function renderFunnel() {
     btn.addEventListener("click", () => {
       groupFilter = groupFilter === key ? null : key;
       els.statusFilter.value = "all";
+      resetPage();
       render();
     });
     host.appendChild(btn);
@@ -998,38 +1131,55 @@ function staleReason(record) {
   return null;
 }
 
-function renderStaleNotice() {
-  const box = document.getElementById("staleNotice");
+function staleSignature(stale) {
+  return `${current.model}|${current.fingerprint}|${stale.length}`;
+}
+
+// A chip beside the filters instead of a full-width banner: the rows carry
+// their own "scored by …" badge, so this only has to say how many and offer
+// the filter. Dismissing hides it until the out-of-date set changes (another
+// model, another profile edit, or more jobs), so it never hides news.
+function renderStaleChip() {
+  const host = els.staleChip;
   const stale = records.filter((r) => staleReason(r));
-  if (!stale.length) {
-    box.hidden = true;
-    return;
-  }
+  const dismissed = ui.staleDismissed === staleSignature(stale);
+  if (!stale.length && groupFilter === "stale") groupFilter = null;
+  host.hidden = !stale.length || (dismissed && groupFilter !== "stale");
+  host.innerHTML = "";
+  if (host.hidden) return;
+
   const byModel = stale.some((r) => (r.model || "") !== current.model);
   const byProfile = stale.some((r) => r.profileFingerprint !== current.fingerprint);
-  const reason = [byProfile && "the profile has changed", byModel && "a different model is configured"]
+  const why = [byProfile && "the profile has changed", byModel && "a different model is configured"]
     .filter(Boolean)
     .join(" and ");
 
-  box.hidden = false;
-  box.innerHTML = "";
-  const count = stale.length;
-  box.appendChild(
-    el(
-      "span",
-      null,
-      `${count} job${count === 1 ? "" : "s"} ${count === 1 ? "is" : "are"} out of date — ${reason}. ` +
-        `${count === 1 ? "Its score isn't" : "Their scores aren't"} comparable with the rest of this list. ` +
-        "Tick the ones worth re-scoring, or select them all."
-    )
-  );
-  // Selects rather than queues, so you still choose what actually runs.
-  const btn = el("button", null, `Select all ${count}`);
-  btn.addEventListener("click", () => {
-    stale.forEach((r) => selectedKeys.add(r.jobKey));
+  const chip = el("div", "stale-chip");
+  chip.setAttribute("aria-pressed", String(groupFilter === "stale"));
+  const open = el("button", "stale-open");
+  open.type = "button";
+  open.title = `Scores that aren't comparable with the rest because ${why}. Click to list them.`;
+  open.appendChild(el("strong", null, String(stale.length)));
+  open.appendChild(document.createTextNode("out of date"));
+  open.addEventListener("click", () => {
+    groupFilter = groupFilter === "stale" ? null : "stale";
+    els.statusFilter.value = "all";
+    resetPage();
     render();
   });
-  box.appendChild(btn);
+  const dismiss = el("button", "stale-dismiss", "×");
+  dismiss.type = "button";
+  dismiss.title = "Dismiss — comes back if more jobs go out of date";
+  dismiss.setAttribute("aria-label", "Dismiss out-of-date notice");
+  dismiss.addEventListener("click", () => {
+    ui.staleDismissed = staleSignature(stale);
+    saveUi();
+    if (groupFilter === "stale") groupFilter = null;
+    render();
+  });
+  chip.appendChild(open);
+  chip.appendChild(dismiss);
+  host.appendChild(chip);
 }
 
 function buildSelectBox(record) {
@@ -1049,27 +1199,86 @@ function buildSelectBox(record) {
   box.addEventListener("change", () => {
     if (box.checked) selectedKeys.add(record.jobKey);
     else selectedKeys.delete(record.jobKey);
-    renderSelectionBar();
+    renderToolbar(lastVisible, lastShown);
   });
   return box;
 }
 
-function renderSelectionBar() {
-  const bar = els.selectionBar;
+// What the toolbar was last rendered with, so ticking one box can refresh it
+// without re-rendering the whole list.
+let lastVisible = [];
+let lastShown = [];
+
+function renderToolbar(visible, shown) {
+  lastVisible = visible;
+  lastShown = shown;
+  const host = els.toolbarLeft;
+  host.innerHTML = "";
+  if (!visible.length) return;
+
+  const pageSelectable = shown.filter(canReevaluate);
+  const allSelectable = visible.filter(canReevaluate);
+  const pageSelected = pageSelectable.filter((r) => selectedKeys.has(r.jobKey)).length;
+
+  // Tri-state, like a mail client: ticks this page's rows, not the whole list.
+  const all = document.createElement("input");
+  all.type = "checkbox";
+  all.className = "select-all";
+  all.title = "Select this page for re-evaluation";
+  all.disabled = !pageSelectable.length;
+  all.checked = pageSelectable.length > 0 && pageSelected === pageSelectable.length;
+  all.indeterminate = pageSelected > 0 && pageSelected < pageSelectable.length;
+  all.addEventListener("change", () => {
+    pageSelectable.forEach((r) => (all.checked ? selectedKeys.add(r.jobKey) : selectedKeys.delete(r.jobKey)));
+    render();
+  });
+  host.appendChild(all);
+
   const count = selectedKeys.size;
-  bar.hidden = count === 0;
-  if (!count) return;
-  bar.innerHTML = "";
-  bar.appendChild(el("span", null, `${count} selected`));
+  if (!count) {
+    const from = ui.pageSize ? page * ui.pageSize + 1 : 1;
+    const to = from + shown.length - 1;
+    const what = groupFilter === "stale" ? " out-of-date jobs" : "";
+    host.appendChild(
+      el("span", "count", shown.length === visible.length ? `${visible.length}${what}` : `${from}–${to} of ${visible.length}${what}`)
+    );
+    // The action the old full-width notice carried, now where the list is.
+    if (groupFilter === "stale" && allSelectable.length) {
+      const pick = el("button", null, `Select all ${allSelectable.length}`);
+      pick.type = "button";
+      pick.addEventListener("click", () => {
+        allSelectable.forEach((r) => selectedKeys.add(r.jobKey));
+        render();
+      });
+      host.appendChild(pick);
+    }
+    return;
+  }
+
+  host.appendChild(el("span", "count selected", `${count} selected`));
   const run = el("button", "primary", `Re-evaluate ${count}`);
+  run.type = "button";
   run.addEventListener("click", () => requeueSelected(run));
-  bar.appendChild(run);
-  const clear = el("button", null, "Clear selection");
+  host.appendChild(run);
+  const clear = el("button", null, "Clear");
+  clear.type = "button";
   clear.addEventListener("click", () => {
     selectedKeys.clear();
     render();
   });
-  bar.appendChild(clear);
+  host.appendChild(clear);
+
+  // Offered once this page is fully ticked and there's more beyond it.
+  const unselectedElsewhere = allSelectable.filter((r) => !selectedKeys.has(r.jobKey)).length;
+  if (pageSelected === pageSelectable.length && unselectedElsewhere) {
+    const more = el("button", "link", `Select all ${allSelectable.length} matching`);
+    more.type = "button";
+    more.addEventListener("click", () => {
+      allSelectable.forEach((r) => selectedKeys.add(r.jobKey));
+      render();
+    });
+    host.appendChild(more);
+  }
 }
 
 // A queue item that re-scores a stored job under the given profile. The
@@ -1184,6 +1393,7 @@ async function loadProfile(profileId) {
   selectedKeys.clear();
   await loadCurrentScoring();
   groupFilter = null;
+  resetPage();
   records = await JOB_FIT_EVALSTORE.list(profileId);
   render();
   await refreshQueue();
@@ -1203,15 +1413,20 @@ async function init() {
   els.statusFilter.value = "all";
 
   store = await JOB_FIT_PROFILES.load();
+  await loadUi();
   renderProfileOptions();
 
   els.profileSelect.addEventListener("change", () => loadProfile(els.profileSelect.value));
-  [els.sortSelect, els.hideRejects].forEach((node) => node.addEventListener("change", render));
+  const relist = () => {
+    resetPage();
+    render();
+  };
+  [els.sortSelect, els.hideRejects].forEach((node) => node.addEventListener("change", relist));
   els.statusFilter.addEventListener("change", () => {
     groupFilter = null; // the dropdown and the chips never filter at once
-    render();
+    relist();
   });
-  els.search.addEventListener("input", render);
+  els.search.addEventListener("input", relist);
   const dataMenu = document.getElementById("dataMenu");
   const closeDataMenu = () => dataMenu.removeAttribute("open");
   document.addEventListener("click", (e) => {
@@ -1277,12 +1492,15 @@ function revealJob(jobKey) {
   els.statusFilter.value = "all";
   els.search.value = "";
   els.hideRejects.checked = false;
+  // Open the page the job is on, then find its card on that page.
+  const visible = visibleRecords();
+  const index = visible.findIndex((r) => r.jobKey === jobKey);
+  page = ui.pageSize && index > 0 ? Math.floor(index / ui.pageSize) : 0;
   render();
 
   const cards = Array.from(document.querySelectorAll(".job"));
-  const visible = visibleRecords();
-  const index = visible.findIndex((r) => r.jobKey === jobKey);
-  const card = index === -1 ? null : cards[index];
+  const onPage = ui.pageSize ? index - page * ui.pageSize : index;
+  const card = index === -1 ? null : cards[onPage];
   if (!card) return;
   card.scrollIntoView({ block: "center", behavior: "smooth" });
   card.classList.add("flash");
