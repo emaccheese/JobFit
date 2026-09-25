@@ -70,6 +70,12 @@
 
         const tag = child.tagName.toUpperCase();
         if (SKIP_TAGS.has(tag)) continue;
+        // JobFit's own banner and details panel are appended to <body>, so any
+        // extractor walking the whole page (the generic fallback) read them as
+        // part of the posting: the previous score, verdict, matches and gaps
+        // were sent to the model with the posting text, and some models copied
+        // that score into the summary brief.
+        if (child.id && child.id.startsWith("job-fit-")) continue;
 
         if (tag === "BR") {
           out += "\n";

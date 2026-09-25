@@ -223,45 +223,104 @@ var JOB_FIT_EVALSTORE = (function () {
     return keys.length;
   }
 
-  // Renders a record's evaluation as the block appended to a copied brief.
-  // Lives here rather than in the popup because the service worker now builds
+  // Renders a record's evaluations as the block appended to a copied brief.
+  // Lives here rather than in the popup because the service worker builds
   // that text too — the summary is assembled when the queued job finishes, so
   // it survives the popup being destroyed.
-  function formatEvaluation(record, profileName) {
-    if (!record) return "";
-    const who = profileName || record.profileName || "unknown";
+  //
+  // One entry per model, newest first, with the current result leading: the
+  // brief goes to another assistant, and the reason each model gave for its
+  // score is more useful to it than the number alone. `previous` holds up to
+  // MAX_PREVIOUS earlier runs; an older run from the same model is dropped,
+  // since the newer one supersedes it.
+  function evaluationsByModel(record) {
+    const runs = [];
+    if (record.lastEvaluatedAt) runs.push(evaluationSnapshot(record));
+    (record.previous || []).forEach((run) => runs.push(run));
+    const seen = new Set();
+    return runs.filter((run) => {
+      if (!run.hardReject && !run.evaluation) return false;
+      const key = run.hardReject ? "keyword screen" : run.model || "unknown model";
+      if (seen.has(key)) return false;
+      seen.add(key);
+      return true;
+    });
+  }
 
-    if (record.hardReject) {
-      return `\n\nLOCAL MODEL EVALUATION (profile: ${who}): hard reject — the posting says "${record.hardReject.matchedText}"`;
+  function formatRun(run, { isCurrent, currentFingerprint }) {
+    const date = run.evaluatedAt ? new Date(run.evaluatedAt).toISOString().slice(0, 10) : "date unknown";
+    const staleProfile =
+      !isCurrent && run.profileFingerprint && currentFingerprint && run.profileFingerprint !== currentFingerprint
+        ? " [scored against an earlier version of this profile]"
+        : "";
+    const when = isCurrent ? "Current" : "Earlier";
+
+    if (run.hardReject) {
+      return [
+        `${when} — keyword screen (${date}): hard reject${staleProfile}`,
+        `Reason: the posting says "${run.hardReject.matchedText}"${run.hardReject.label ? ` (${run.hardReject.label})` : ""}`,
+      ].join("\n");
     }
 
-    const e = record.evaluation;
-    if (!e) return "";
-
+    const e = run.evaluation;
+    const required = (e.required_gaps || []).map(String);
+    const requiredLower = required.map((g) => g.toLowerCase());
+    const otherGaps = (e.gaps || []).map(String).filter((g) => !requiredLower.includes(g.toLowerCase()));
     return [
-      `\n\nLOCAL MODEL EVALUATION (profile: ${who}, score: ${e.score}/100, verdict: ${e.verdict})`,
-      e.one_line ? `Summary: ${e.one_line}` : null,
+      `${when} — ${run.model || "unknown model"} (${date}): ${e.score}/100, ${e.verdict}${staleProfile}`,
+      e.one_line ? `Reason: ${e.one_line}` : null,
       e.matches && e.matches.length ? `Matches: ${e.matches.join(", ")}` : null,
-      e.gaps && e.gaps.length ? `Gaps: ${e.gaps.join(", ")}` : null,
-      e.required_gaps && e.required_gaps.length ? `Required gaps: ${e.required_gaps.join(", ")}` : null,
-      e.seniority_flag ? `Seniority/comp check: ${e.seniority_flag}` : null,
+      required.length ? `Required gaps: ${required.join(", ")}` : null,
+      otherGaps.length ? `Other gaps: ${otherGaps.join(", ")}` : null,
       e.score_cap_reasons && e.score_cap_reasons.length
         ? `Score cap applied: ${e.score_cap_reasons.join(", ")}${
             e.raw_score != null ? ` (model scored ${e.raw_score}, capped to ${e.score})` : ""
           }`
         : null,
+      e.seniority_flag ? `Seniority/comp check: ${e.seniority_flag}` : null,
+    ]
+      .filter(Boolean)
+      .join("\n");
+  }
+
+  function formatEvaluation(record, profileName) {
+    if (!record) return "";
+    const who = profileName || record.profileName || "unknown";
+    const runs = evaluationsByModel(record);
+    if (!runs.length) return "";
+
+    const heading =
+      runs.length > 1
+        ? `LOCAL MODEL EVALUATIONS (profile: ${who}; ${runs.length} results, newest first)`
+        : `LOCAL MODEL EVALUATION (profile: ${who})`;
+    const entries = runs.map((run, i) =>
+      formatRun(run, { isCurrent: i === 0 && Boolean(record.lastEvaluatedAt), currentFingerprint: record.profileFingerprint })
+    );
+
+    // Posting-level findings, the same whichever model scored it — stated once,
+    // from the current result.
+    const e = record.evaluation;
+    const shared = [
       record.softWarnings && record.softWarnings.length
         ? `Warnings (worth asking about, not rejects): ${record.softWarnings.join(", ")}`
         : null,
       record.domainFlags && record.domainFlags.length
         ? `Domain flags detected (keyword scan): ${record.domainFlags.join(", ")}`
         : null,
-      e.salary
+      e && e.salary
         ? `Salary — posting: ${e.salary.posting_stated}; market estimate: ${e.salary.estimated_market_range}; vs. expectation: ${e.salary.vs_candidate_expectation}${e.salary.note ? " — " + e.salary.note : ""}`
         : null,
-    ]
-      .filter(Boolean)
-      .join("\n");
+    ].filter(Boolean);
+
+    return `\n\n${heading}\n\n${entries.join("\n\n")}${shared.length ? `\n\n${shared.join("\n")}` : ""}`;
+  }
+
+  // The whole text that gets copied: a header line, the condensed posting,
+  // then the evaluations. One builder for the popup (via the service worker)
+  // and the history page's Copy brief, so the two can't drift apart.
+  function briefText(record, profileName) {
+    const header = [record.title, record.company, record.location].filter(Boolean).join(" — ");
+    return (header ? `${header}\n\n` : "") + (record.summary || "") + formatEvaluation(record, profileName);
   }
 
   function statusLabel(value) {
@@ -286,5 +345,6 @@ var JOB_FIT_EVALSTORE = (function () {
     importRecord,
     statusLabel,
     formatEvaluation,
+    briefText,
   };
 })();

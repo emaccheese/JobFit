@@ -163,6 +163,25 @@ A second, separate editable list — **not** a return to the old soft-warning/po
 > into "C++, Kotlin, Java" in the brief would hand the same bug to whatever
 > assistant reads it.
 
+> **Structured brief, and every model's score in it** (2026-09-25): the
+> summarize prompt asked for one free-text `summary`, so each model picked its
+> own layout, and some put a score into a brief the model is never asked to
+> score. The score came from JobFit itself: the banner and Details panel are
+> appended to `<body>`, and the generic extractor walks the whole body, so the
+> previous score, verdict, matches and gaps were read as part of the posting.
+> That also meant re-evaluating on a generic-extractor site showed the model
+> its own earlier verdict. `textFrom()` now skips `#job-fit-*` elements. The
+> prompt returns fixed fields (role, seniority, location, responsibilities,
+> required, preferred, compensation, work authorization, other notes), says to
+> describe only the posting and to ignore any evaluation text in the input,
+> and `assembleSummary()` builds the text, printing "not stated" rather than
+> dropping a field. The evaluation block is still appended by code, never
+> written by the model: `JOB_FIT_EVALSTORE.briefText()` lists one entry per
+> model, newest first, the current result leading, each with its score,
+> verdict, reason (`one_line`), matches, required and other gaps, and any
+> cap. An older run from the same model is dropped, and a run scored against
+> an earlier version of the profile is labelled as such.
+
 > **"and/or", phrase-level alternatives, and domain-flag leakage** (found in
 > testing, 2026-09-24): one posting hit both gaps at once. "C++ and/or Rust"
 > filed Rust as a required gap, because "and/or" wasn't in the list of

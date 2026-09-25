@@ -3,7 +3,7 @@
 // once already: reasoning_effort and enable_thinking were added to the popup
 // but not to this file, so neither was ever sent for anyone who hadn't
 // re-saved their settings.
-importScripts("defaults.js", "keywords.js", "profiles.js", "evalstore.js", "queue.js");
+importScripts("defaults.js", "keywords.js", "profiles.js", "evalstore.js", "queue.js", "lmstudio-ui.js");
 
 const SYSTEM_PROMPT = `You evaluate job postings against a candidate profile.
 Return ONLY a JSON object, no prose, no markdown fences.
@@ -289,7 +289,11 @@ async function callLmStudio(systemPrompt, userPrompt, { signal } = {}) {
 
   if (!resp.ok) {
     const body = await resp.text().catch(() => "");
-    return { ok: false, failure: "http", error: `LM Studio returned HTTP ${resp.status}: ${body.slice(0, 300)}` };
+    // Names the model: a paused queue shows this message until it resumes, and
+    // without the name there's no way to tell whether it's about the model
+    // configured now or one you've since switched away from.
+    const which = model ? ` for model "${model}"` : "";
+    return { ok: false, failure: "http", error: `LM Studio returned HTTP ${resp.status}${which}: ${body.slice(0, 300)}` };
   }
 
   const data = await resp.json().catch(() => null);
@@ -584,17 +588,65 @@ function runCancellable(callId, run) {
   });
 }
 
-const SUMMARIZE_SYSTEM_PROMPT = `You condense a job posting into a compact brief for another AI assistant to quickly assess candidate fit. That assistant already has the candidate's full profile/CV — it only needs the posting, stripped of bloat.
+// Fixed fields rather than one free-text summary, assembled into text in
+// code. With a single "summary" string every model chose its own layout and
+// its own idea of what mattered — and some reported a score, which the model
+// is never given and was copying from JobFit's own banner text on the page.
+// Fields make the brief look the same whichever model wrote it, and an
+// explicit "not stated" is kept visible rather than silently missing.
+const SUMMARIZE_SYSTEM_PROMPT = `You condense a job posting into a structured brief for another AI assistant that will assess candidate fit. That assistant already has the candidate's full profile/CV — it only needs the posting, stripped of bloat.
 Return ONLY a JSON object, no prose, no markdown fences.
 
 Schema:
 {
-  "summary": "<condensed posting, plain text, short lines separated by \\n, under 200 words>"
+  "role": "<job title as stated>",
+  "seniority": "<level as stated (e.g. Senior, Staff, II), or 'not stated'>",
+  "location": "<city/country plus remote, hybrid or onsite, as stated, or 'not stated'>",
+  "responsibilities": ["<3 to 5 short lines: what the hire will actually do day to day>"],
+  "required": ["<each required qualification, one per item>"],
+  "preferred": ["<each preferred / nice-to-have qualification, one per item>"],
+  "compensation": "<pay exactly as stated, with currency and period, or 'not stated'>",
+  "work_authorization": "<visa, sponsorship, citizenship or clearance language exactly as stated, or 'not stated'>",
+  "other_notes": "<anything else that affects fit, such as travel, on-call, contract length or start date, or an empty string>"
 }
 
-Include only what's relevant to assessing fit: role title, company, location, seniority, required qualifications (marked required), preferred qualifications (marked preferred), salary/compensation if stated, visa/sponsorship/citizenship language if stated, remote/hybrid/onsite status.
-Keep alternatives as alternatives: a requirement worded "C++, Kotlin or Java" must stay "C++, Kotlin or Java" and never become "C++, Kotlin, Java". Flattening an "or" list into a plain list makes the role read as demanding all of them, which the assistant receiving this brief will score as gaps.
-Omit: generic company boilerplate, benefits lists, EEO/diversity statements, application instructions, legal disclaimers, generic culture statements.`;
+Rules:
+- Describe ONLY the posting. Do not score it, judge fit, or compare it to any candidate.
+- The input may contain text that is not part of the posting, such as a score, a verdict, "matches"/"gaps" lists or an evaluation from another tool. Ignore it completely.
+- An item goes in "required" only if the posting presents it as required (Requirements, Minimum qualifications, "must have"). Items under Preferred, Nice to have or Bonus go in "preferred". If the posting doesn't separate them, put them all in "required".
+- Keep alternatives as alternatives: a requirement worded "C++, Kotlin or Java" must stay "C++, Kotlin or Java" and never become "C++, Kotlin, Java", or be split into separate items. Flattening an "or" list makes the role read as demanding all of them, which the assistant receiving this brief will score as gaps.
+- Keep items short but keep the specifics: years of experience, named technologies, degree level.
+- Omit company boilerplate, benefits, EEO/diversity statements, application instructions and legal disclaimers.`;
+
+function assembleSummary(data) {
+  if (!data || typeof data !== "object") return "";
+  const text = (value) => (typeof value === "string" ? value.trim() : "");
+  const list = (value) => (Array.isArray(value) ? value.map(text).filter(Boolean) : []);
+  const stated = (value) => text(value) || "not stated";
+
+  // A model that ignored the schema and answered in the old single-field
+  // shape still produces a usable brief.
+  const hasFields = ["role", "required", "preferred", "responsibilities"].some((k) => data[k] != null);
+  if (!hasFields && text(data.summary)) return text(data.summary);
+
+  const bullets = (title, items) => (items.length ? `\n\n${title}:\n${items.map((i) => `- ${i}`).join("\n")}` : "");
+  const lines = [
+    "JOB POSTING (condensed)",
+    `Role: ${stated(data.role)}`,
+    `Seniority: ${stated(data.seniority)}`,
+    `Location: ${stated(data.location)}`,
+    `Compensation: ${stated(data.compensation)}`,
+    `Work authorization: ${stated(data.work_authorization)}`,
+  ].join("\n");
+  const notes = text(data.other_notes);
+  return (
+    lines +
+    bullets("Responsibilities", list(data.responsibilities)) +
+    bullets("Required", list(data.required)) +
+    bullets("Preferred", list(data.preferred)) +
+    (notes ? `\n\nOther notes: ${notes}` : "")
+  );
+}
 
 function buildSummarizePrompt(postingText) {
   return `JOB POSTING:\n${trimPosting(postingText).text}`;
@@ -725,7 +777,7 @@ async function runQueuedSummarize(item) {
   const result = await callLmStudio(SUMMARIZE_SYSTEM_PROMPT, buildSummarizePrompt(item.postingText));
   if (!result.ok) return result;
 
-  const summary = (result.data && result.data.summary) || "";
+  const summary = assembleSummary(result.data);
   const record = await JOB_FIT_EVALSTORE.saveSummary({
     jobKey: item.jobKey,
     profileId: item.profileId,
@@ -741,9 +793,7 @@ async function runQueuedSummarize(item) {
   // Assembled here rather than in the popup so the brief survives the popup
   // being destroyed — which, before the queue, is exactly how a finished
   // summary got lost.
-  const header = [item.title, item.company, item.location].filter(Boolean).join(" — ");
-  const combined =
-    (header ? `${header}\n\n` : "") + summary + JOB_FIT_EVALSTORE.formatEvaluation(record);
+  const combined = JOB_FIT_EVALSTORE.briefText(record);
 
   await chrome.storage.local.set({
     lastSummary: { url: item.url, ts: Date.now(), profileId: item.profileId, jobKey: item.jobKey, text: combined },
@@ -873,6 +923,35 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
   }
   return false;
 });
+
+// A paused queue is almost always waiting on a model or endpoint fix, and
+// changing either in the popup IS that fix — so resume without making the user
+// find the Resume button on another page. Debounced because the popup
+// autosaves while you type, and only resumed once the new model is one LM
+// Studio actually lists: a half-typed name would just fail and pause again.
+let settingsResumeTimer = null;
+
+chrome.storage.onChanged.addListener((changes, area) => {
+  if (area !== "local" || !changes.lmStudio) return;
+  const before = changes.lmStudio.oldValue || {};
+  const after = changes.lmStudio.newValue || {};
+  if (before.model === after.model && before.url === after.url) return;
+  clearTimeout(settingsResumeTimer);
+  settingsResumeTimer = setTimeout(resumeAfterSettingsChange, 1500);
+});
+
+async function resumeAfterSettingsChange() {
+  const snapshot = await JOB_FIT_QUEUE.snapshot();
+  if (snapshot.state !== "paused") return;
+  const stored = await chrome.storage.local.get("lmStudio");
+  const settings = stored.lmStudio || {};
+  const probe = await probeModels(settings.url || JOB_FIT_DEFAULTS.lmStudio.url);
+  if (!probe.ok) return;
+  const model = (settings.model || "").trim();
+  if (model && probe.models.length && !probe.models.includes(model)) return;
+  await JOB_FIT_QUEUE.resume();
+  kick();
+}
 
 // A worker that starts for any reason picks the queue back up.
 kick();

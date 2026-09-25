@@ -190,13 +190,9 @@ function buildBriefActions(record) {
   if (record.summary) {
     const copy = el("button", null, "Copy brief");
     copy.addEventListener("click", async () => {
-      // Same text the popup copies: header line, brief, then this profile's
-      // evaluation — built here so it stays in step with the popup's version.
-      const header = [record.title, record.company, record.location].filter(Boolean).join(" — ");
-      const text =
-        (header ? `${header}\n\n` : "") +
-        record.summary +
-        JOB_FIT_EVALSTORE.formatEvaluation(record, profileDisplayName(record));
+      // Same builder the popup's text comes from: header line, brief, then
+      // this profile's evaluations, one per model.
+      const text = JOB_FIT_EVALSTORE.briefText(record, profileDisplayName(record));
       try {
         await navigator.clipboard.writeText(text);
         note.textContent = "Copied — ready to paste into your other assistant.";
@@ -597,7 +593,7 @@ function renderQueue(queue) {
   pauseEl.hidden = !paused;
   resumeBtn.hidden = !paused;
   if (paused) {
-    pauseEl.textContent = `Paused: ${queue.pauseReason || "the local model was unreachable"} — fix it, then hit Resume. Nothing was lost.`;
+    pauseEl.textContent = `Paused: ${queue.pauseReason || "the local model was unreachable"} — switching the model or endpoint in the popup resumes it automatically; for anything else, fix it and hit Resume. Nothing was lost.`;
   }
 
   itemsEl.innerHTML = "";
