@@ -155,6 +155,12 @@
   .pager { display: flex; align-items: center; gap: 6px; color: var(--muted); white-space: nowrap; }
   .pager select { padding: 3px 6px; font-size: 13px; }
   .pager .page-of { min-width: 64px; text-align: center; }
+  .queue-pill {
+    padding: 3px 10px; font-size: 12px; border-radius: 999px;
+    background: #eaf1fb; border-color: #cfdcf0; color: var(--accent); white-space: nowrap;
+  }
+  .queue-pill.paused { background: #fdf3e2; border-color: #e8cfa0; color: var(--amber); font-weight: 600; }
+  .brief-note button { margin-left: 6px; padding: 2px 8px; font-size: 12px; }
   .pager-bottom { display: flex; justify-content: flex-end; margin-top: 4px; }
   .pager-bottom:empty { display: none; }
   @media (max-width: 720px) {
@@ -201,7 +207,15 @@
   }
   .score.green { background: var(--green); } .score.amber { background: var(--amber); } .score.red { background: var(--red); }
   .job-title { flex: 1; min-width: 0; }
-  .job-title strong { display: block; font-size: 14px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .job-title strong { display: flex; align-items: center; min-width: 0; font-size: 14px; white-space: nowrap; }
+  .job-title .title-text { min-width: 0; overflow: hidden; text-overflow: ellipsis; }
+  .job-title strong > :not(.title-text) { flex: 0 0 auto; }
+  .copy-name {
+    vertical-align: middle; margin-left: 6px; padding: 0 5px; font-size: 10px; font-weight: 400; line-height: 16px;
+    color: var(--muted); background: transparent; border: 1px solid var(--line); border-radius: 3px;
+  }
+  .copy-name:hover { color: var(--accent); border-color: #b9cdee; background: #f6f9fe; }
+  .copy-name.done { color: var(--green); border-color: #cfe6d9; }
   .job-title > span { display: block; font-size: 12px; color: var(--muted); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
   .badge.badge-muted { background: #eef1f5; color: var(--muted); }
   .badge.badge-attention { background: #fdf3e2; color: var(--amber); text-transform: none; letter-spacing: 0; font-weight: 600; }
@@ -311,7 +325,10 @@
 
     <div class="list-toolbar" id="listToolbar">
       <div class="lt-left" id="toolbarLeft"></div>
-      <div class="lt-right" id="pagerTop"></div>
+      <div class="lt-right">
+        <button type="button" id="queuePill" class="queue-pill" hidden></button>
+        <div id="pagerTop"></div>
+      </div>
     </div>
 
     <div id="list"></div>

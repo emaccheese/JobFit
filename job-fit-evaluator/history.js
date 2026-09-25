@@ -178,6 +178,13 @@ function buildBriefActions(record) {
   }
 
   const summarize = el("button", null, record.summary ? "Re-summarize" : "Summarize this job");
+  summarize.className = "summarize-btn";
+  summarize.dataset.label = record.summary ? "Re-summarize" : "Summarize this job";
+  // Status comes from the queue itself (see renderBriefStatus), refreshed on
+  // every queue change — not from the enqueue reply, which only says the job
+  // was accepted, not that anything is running.
+  note.dataset.jobKey = record.jobKey;
+  wrap.dataset.jobKey = record.jobKey;
   summarize.addEventListener("click", async () => {
     summarize.disabled = true;
     summarize.textContent = "Queueing…";
@@ -206,12 +213,7 @@ function buildBriefActions(record) {
       return;
     }
 
-    summarize.textContent = response.duplicate ? "Already queued" : "Queued";
-    note.textContent =
-      response.position > 1
-        ? `Running after the job in progress — the brief appears here on its own.`
-        : "Running now — the brief appears here on its own.";
-    refreshQueue();
+    await refreshQueue();
   });
   wrap.appendChild(summarize);
 
@@ -233,7 +235,87 @@ function buildBriefActions(record) {
   }
 
   wrap.appendChild(note);
+  renderBriefStatus(wrap);
   return wrap;
+}
+
+// The latest summarize item for this job in the queue, if it's still live or
+// failed — the thing whose state the brief area should describe.
+function briefQueueItem(jobKey) {
+  const items = ((latestQueue && latestQueue.items) || []).filter(
+    (i) => i.kind === "summarize" && i.jobKey === jobKey && i.profileId === viewProfileId
+  );
+  const item = items[items.length - 1];
+  return item && ["pending", "processing", "failed"].includes(item.state) ? item : null;
+}
+
+function renderBriefStatus(wrap) {
+  const note = wrap.querySelector(".brief-note");
+  const button = wrap.querySelector(".summarize-btn");
+  if (!note || !button) return;
+  const item = briefQueueItem(wrap.dataset.jobKey);
+  const busy = item && item.state !== "failed";
+  button.disabled = Boolean(busy);
+  button.textContent = !item ? button.dataset.label : item.state === "processing" ? "Summarizing…" : item.state === "pending" ? "Queued" : button.dataset.label;
+  if (!item) {
+    // Leave a transient message (e.g. "Copied") alone; clear only our own.
+    if (note.dataset.queueStatus) {
+      note.textContent = "";
+      delete note.dataset.queueStatus;
+    }
+    return;
+  }
+
+  note.dataset.queueStatus = "1";
+  note.textContent = "";
+  const items = latestQueue.items;
+  if (item.state === "processing") {
+    note.textContent = "Summarizing now — the brief appears here when it's done.";
+  } else if (item.state === "failed") {
+    note.textContent = `Couldn't summarize: ${item.error || "unknown error"} `;
+    const retry = el("button", null, "Retry");
+    retry.addEventListener("click", async () => {
+      await queueMessage({ type: "JOB_FIT_QUEUE_RETRY", id: item.id });
+      refreshQueue();
+    });
+    note.appendChild(retry);
+  } else if (latestQueue.state === "paused") {
+    // The case that used to say "Running now" while nothing ran.
+    note.textContent = `Queued, but the queue is paused: ${latestQueue.pauseReason || "the local model was unreachable"} `;
+    const resume = el("button", null, "Resume queue");
+    resume.addEventListener("click", async () => {
+      await queueMessage({ type: "JOB_FIT_QUEUE_RESUME" });
+      refreshQueue();
+    });
+    note.appendChild(resume);
+  } else {
+    const ahead = items.filter((i) => i.state === "processing").length +
+      items.slice(0, items.indexOf(item)).filter((i) => i.state === "pending").length;
+    note.textContent = ahead
+      ? `Queued — waiting for ${ahead} job${ahead === 1 ? "" : "s"} ahead of it. The brief appears here on its own.`
+      : "Queued — starting now. The brief appears here on its own.";
+  }
+}
+
+function refreshBriefStatuses() {
+  document.querySelectorAll(".brief-actions[data-job-key]").forEach(renderBriefStatus);
+}
+
+// The queue lives at the top of the page, which is off-screen while you work
+// further down the list. This pill in the sticky toolbar keeps its state in
+// view — above all a pause, which otherwise nothing near the list would show.
+function renderQueuePill() {
+  const pill = document.getElementById("queuePill");
+  const items = ((latestQueue && latestQueue.items) || []).filter((i) => i.profileId === viewProfileId);
+  const waiting = items.filter((i) => i.state === "pending").length;
+  const running = items.some((i) => i.state === "processing");
+  const paused = latestQueue && latestQueue.state === "paused" && (waiting || running);
+  pill.hidden = !(paused || running || waiting);
+  if (pill.hidden) return;
+  pill.className = `queue-pill${paused ? " paused" : ""}`;
+  pill.textContent = paused
+    ? `Queue paused · ${waiting} waiting`
+    : [running ? "Queue running" : "Queue", waiting ? `${waiting} waiting` : null].filter(Boolean).join(" · ");
 }
 
 // The model's reasoning for one evaluation. Shared by the current result and
@@ -377,6 +459,32 @@ function statusGroupOf(record) {
   return entry ? entry[0] : "none";
 }
 
+// For pasting the job into a tracker, an email or a search box: position
+// first, then company, in one click.
+function buildCopyNameButton(record) {
+  const btn = el("button", "copy-name", "copy");
+  btn.type = "button";
+  const text = [record.title, record.company].filter(Boolean).join(" — ");
+  btn.title = text ? `Copy "${text}"` : "Nothing to copy";
+  btn.disabled = !text;
+  btn.addEventListener("click", async (event) => {
+    // The row header toggles the card; copying shouldn't.
+    event.stopPropagation();
+    try {
+      await navigator.clipboard.writeText(text);
+      btn.textContent = "copied";
+    } catch (err) {
+      btn.textContent = "failed";
+    }
+    btn.classList.add("done");
+    setTimeout(() => {
+      btn.textContent = "copy";
+      btn.classList.remove("done");
+    }, 1500);
+  });
+  return btn;
+}
+
 function renderJob(record) {
   const card = el("div", "job");
   // Closed rows fade rather than disappear: still findable, no longer competing
@@ -396,7 +504,11 @@ function renderJob(record) {
   head.appendChild(score);
 
   const titleWrap = el("div", "job-title");
-  const strong = el("strong", null, record.title || "(untitled posting)");
+  const strong = el("strong");
+  // Only the title text truncates; the copy button and badges after it stay
+  // visible however long the title is.
+  strong.appendChild(el("span", "title-text", record.title || "(untitled posting)"));
+  strong.appendChild(buildCopyNameButton(record));
   if (record.hardReject) strong.appendChild(el("span", "badge", "hard reject"));
   else if (record.score == null) strong.appendChild(el("span", "badge badge-muted", "summary only"));
   // Shown on every qualifying row, not only when the filter is on, so the
@@ -468,7 +580,17 @@ function renderJob(record) {
   appendPreviousResults(body, record);
 
   body.appendChild(el("h3", null, "Condensed brief"));
-  if (record.summary) body.appendChild(el("div", "desc", record.summary));
+  // Shown exactly as it's copied — the posting AND every model's score and
+  // reasoning. Showing only record.summary made the evaluations look missing
+  // from the brief, when they were being appended at copy time.
+  if (record.summary) {
+    body.appendChild(el("div", "desc", JOB_FIT_EVALSTORE.briefText(record, profileDisplayName(record))));
+    if (!record.lastEvaluatedAt && !(record.previous || []).length) {
+      body.appendChild(
+        el("div", "meta-line", "No score yet under this profile — evaluate the job and its score and reasoning are added to the brief.")
+      );
+    }
+  }
   body.appendChild(buildBriefActions(record));
 
   body.appendChild(el("h3", null, "Full posting as extracted"));
@@ -602,7 +724,13 @@ async function queueMessage(message) {
   }
 }
 
+// The last queue snapshot seen, for the brief status and the toolbar pill.
+let latestQueue = null;
+
 function renderQueue(queue) {
+  latestQueue = queue || null;
+  renderQueuePill();
+  refreshBriefStatuses();
   const panel = document.getElementById("queuePanel");
   const itemsEl = document.getElementById("queueItems");
   const pauseEl = document.getElementById("queuePause");
@@ -1460,6 +1588,9 @@ async function init() {
     e.target.value = ""; // so picking the same file twice still fires
     if (file) await importData(file);
   });
+  document.getElementById("queuePill").addEventListener("click", () =>
+    document.getElementById("queuePanel").scrollIntoView({ behavior: "smooth", block: "start" })
+  );
   document.getElementById("queueResume").addEventListener("click", async () => {
     await queueMessage({ type: "JOB_FIT_QUEUE_RESUME" });
     refreshQueue();
