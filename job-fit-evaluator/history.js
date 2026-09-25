@@ -125,7 +125,29 @@ function sortRecords(list, mode) {
   return [...list].sort(by[mode] || by["score-desc"]);
 }
 
+// Possible cross-site duplicates for the records on screen, by jobKey.
+// Recomputed at the start of every render, so a delete, a "not a duplicate"
+// or a newly tracked job is reflected straight away.
+let dupGroups = new Map();
+
+function dupGroupKey(r) {
+  return `${JOB_FIT_EVALSTORE.normalizeTitle(r.title)}|${JOB_FIT_EVALSTORE.normalizeCompany(r.company)}`;
+}
+
 function visibleRecords() {
+  const list = filteredRecords();
+  // Listing duplicates is for comparing them, so each set sits together,
+  // in the chosen sort order within the set.
+  if (groupFilter !== "duplicates") return list;
+  const order = new Map();
+  list.forEach((r, i) => {
+    const key = dupGroupKey(r);
+    if (!order.has(key)) order.set(key, i);
+  });
+  return [...list].sort((a, b) => order.get(dupGroupKey(a)) - order.get(dupGroupKey(b)));
+}
+
+function filteredRecords() {
   const query = els.search.value.trim().toLowerCase();
   const status = els.statusFilter.value;
   return sortRecords(
@@ -485,6 +507,95 @@ function buildCopyNameButton(record) {
   return btn;
 }
 
+function duplicateSummary(d) {
+  const score = d.hardReject ? "hard reject" : d.score != null ? String(d.score) : "no score";
+  const when = formatDate(JOB_FIT_EVALSTORE.activityTs(d));
+  return `${JOB_FIT_EVALSTORE.siteLabel(d)} — ${score}, ${when}, ${JOB_FIT_EVALSTORE.statusLabel(d.status || "not_applied")}`;
+}
+
+// Flag, never merge: which copy to keep is the user's call, because only they
+// know which one holds the status and notes that matter.
+function buildDuplicateSection(record, dups) {
+  const box = el("div", "dup-box");
+  box.appendChild(el("h3", null, "Possible duplicate"));
+  box.appendChild(
+    el(
+      "div",
+      "meta-line",
+      `The same posting seems to be tracked from another site too (this one: ${JOB_FIT_EVALSTORE.siteLabel(record)}). ` +
+        "Keep the copy with your status and notes, and remove the other with “Delete this entry”."
+    )
+  );
+  dups.forEach((d) => {
+    const row = el("div", "dup-row");
+    row.appendChild(el("span", "dup-what", duplicateSummary(d)));
+    if (d.notes) row.appendChild(el("span", "dup-notes", `“${d.notes.slice(0, 60)}${d.notes.length > 60 ? "…" : ""}”`));
+    const show = el("button", null, "Show it");
+    show.type = "button";
+    show.addEventListener("click", () => revealJob(d.jobKey));
+    const notDup = el("button", null, "Not a duplicate");
+    notDup.type = "button";
+    notDup.title = "These are different openings — stop flagging this pair";
+    notDup.addEventListener("click", async () => {
+      notDup.disabled = true;
+      // Recorded on both sides, so deleting either one can't resurrect the flag
+      // through the other.
+      for (const [a, b] of [[record, d], [d, record]]) {
+        const list = Array.from(new Set([...(a.notDuplicateOf || []), b.jobKey]));
+        markSelfWrite(a.jobKey);
+        const saved = await JOB_FIT_EVALSTORE.update(viewProfileId, a.jobKey, { notDuplicateOf: list });
+        const index = records.findIndex((r) => r.jobKey === a.jobKey);
+        if (saved && index !== -1) records[index] = saved;
+      }
+      render();
+    });
+    row.appendChild(show);
+    row.appendChild(notDup);
+    box.appendChild(row);
+  });
+  return box;
+}
+
+function renderDupChip() {
+  const host = document.getElementById("dupChip");
+  host.innerHTML = "";
+  // Counts extra copies, not flagged rows: one job tracked twice is "1
+  // possible duplicate", not 2. Connected sets, so three copies of one job
+  // count as 2 and two unrelated pairs as 2.
+  const seen = new Set();
+  let affected = 0;
+  dupGroups.forEach((_, key) => {
+    if (seen.has(key)) return;
+    const stack = [key];
+    let size = 0;
+    while (stack.length) {
+      const k = stack.pop();
+      if (seen.has(k)) continue;
+      seen.add(k);
+      size++;
+      (dupGroups.get(k) || []).forEach((d) => stack.push(d.jobKey));
+    }
+    affected += size - 1;
+  });
+  host.hidden = !affected;
+  if (!affected) return;
+  const chip = el("div", "stale-chip dup-chip");
+  chip.setAttribute("aria-pressed", String(groupFilter === "duplicates"));
+  const open = el("button", "stale-open");
+  open.type = "button";
+  open.title = "Jobs that look like the same posting tracked from two sites. Click to list them side by side.";
+  open.appendChild(el("strong", null, String(affected)));
+  open.appendChild(document.createTextNode(`possible duplicate${affected === 1 ? "" : "s"}`));
+  open.addEventListener("click", () => {
+    groupFilter = groupFilter === "duplicates" ? null : "duplicates";
+    els.statusFilter.value = "all";
+    resetPage();
+    render();
+  });
+  chip.appendChild(open);
+  host.appendChild(chip);
+}
+
 function renderJob(record) {
   const card = el("div", "job");
   // Closed rows fade rather than disappear: still findable, no longer competing
@@ -517,6 +628,12 @@ function renderJob(record) {
   if (reason) strong.appendChild(el("span", "badge badge-attention", reason));
   const outOfDate = staleReason(record);
   if (outOfDate) strong.appendChild(el("span", "badge badge-muted badge-stale", outOfDate));
+  const dups = dupGroups.get(record.jobKey);
+  if (dups) {
+    const badge = el("span", "badge badge-dup", "possible duplicate");
+    badge.title = dups.map((d) => `Also tracked from ${duplicateSummary(d)}`).join("\n");
+    strong.appendChild(badge);
+  }
   titleWrap.appendChild(strong);
   titleWrap.appendChild(
     el("span", null, [record.company, record.location].filter(Boolean).join(" · ") || record.url)
@@ -546,6 +663,8 @@ function renderJob(record) {
   card.appendChild(head);
 
   const body = el("div", "job-body");
+
+  if (dups) body.appendChild(buildDuplicateSection(record, dups));
 
   body.appendChild(el("h3", null, "Link"));
   const link = document.createElement("a");
@@ -700,6 +819,7 @@ const FILTERS = Object.assign(
   {
     attention: { label: "Needs attention", match: (r) => Boolean(attentionReason(r)) },
     stale: { label: "Out of date", match: (r) => Boolean(staleReason(r)) },
+    duplicates: { label: "Possible duplicates", match: (r) => dupGroups.has(r.jobKey) },
   },
   STATUS_GROUPS
 );
@@ -921,6 +1041,9 @@ function watchForChanges() {
 }
 
 function render() {
+  dupGroups = JOB_FIT_EVALSTORE.duplicateGroups(records);
+  if (groupFilter === "duplicates" && !dupGroups.size) groupFilter = null;
+  renderDupChip();
   renderFunnel();
   for (const key of selectedKeys) {
     if (!records.some((r) => r.jobKey === key && canReevaluate(r))) selectedKeys.delete(key);
@@ -1366,7 +1489,9 @@ function renderToolbar(visible, shown) {
   if (!count) {
     const from = ui.pageSize ? page * ui.pageSize + 1 : 1;
     const to = from + shown.length - 1;
-    const what = groupFilter === "stale" ? " out-of-date jobs" : "";
+    const noun =
+      groupFilter === "stale" ? "out-of-date job" : groupFilter === "duplicates" ? "possible duplicate job" : "job";
+    const what = ` ${noun}${visible.length === 1 ? "" : "s"}`;
     host.appendChild(
       el("span", "count", shown.length === visible.length ? `${visible.length}${what}` : `${from}–${to} of ${visible.length}${what}`)
     );

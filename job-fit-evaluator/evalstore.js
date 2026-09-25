@@ -323,6 +323,131 @@ var JOB_FIT_EVALSTORE = (function () {
     return (header ? `${header}\n\n` : "") + (record.summary || "") + formatEvaluation(record, profileName);
   }
 
+  // --- cross-site duplicates ---------------------------------------------
+  //
+  // The same posting reached through two sites gets two keys — LinkedIn's
+  // job id and the company's Greenhouse id have nothing in common — so it is
+  // filed twice. Keys can't fix that; only the content can. These are only
+  // ever used to FLAG a possible duplicate, never to merge: two real openings
+  // can share a title at one company, and a wrong merge would be invisible.
+
+  function normalizeTitle(title) {
+    // + # . survive so "C++" never collapses into "C", nor ".NET" into "NET".
+    return String(title || "")
+      .toLowerCase()
+      .replace(/[^\p{L}\p{N}+#.\s]/gu, " ")
+      .replace(/\s+/g, " ")
+      .trim();
+  }
+
+  function normalizeCompany(company) {
+    return normalizeTitle(company)
+      .replace(/\.(?=\s|$)/g, "")
+      .replace(/\s+(inc|llc|ltd|corp|corporation|co|gmbh|limited)$/, "")
+      .trim();
+  }
+
+  function normalizeCity(location) {
+    return normalizeTitle(String(location || "").split(",")[0]);
+  }
+
+  // How much of the shorter posting appears in the longer one, by runs of
+  // three words. Containment rather than Jaccard: LinkedIn wraps the same
+  // description in extra page text, which a symmetric measure would count
+  // against it.
+  function shingles(text) {
+    const words = normalizeTitle(String(text || "").slice(0, 4000)).split(" ").filter(Boolean);
+    const set = new Set();
+    for (let i = 0; i + 2 < words.length; i++) set.add(`${words[i]} ${words[i + 1]} ${words[i + 2]}`);
+    return set;
+  }
+
+  function containment(a, b) {
+    if (!a.size || !b.size) return 0;
+    const [small, large] = a.size <= b.size ? [a, b] : [b, a];
+    let shared = 0;
+    small.forEach((s) => {
+      if (large.has(s)) shared++;
+    });
+    return shared / small.size;
+  }
+
+  const DUPLICATE_TEXT_THRESHOLD = 0.6;
+
+  function isDismissedPair(a, b) {
+    return (a.notDuplicateOf || []).includes(b.jobKey) || (b.notDuplicateOf || []).includes(a.jobKey);
+  }
+
+  // Map<jobKey, [other records]> over one profile's records. Title+company is
+  // the cheap bucket; the text check inside each bucket is what tells the
+  // same posting from two openings that happen to share a title.
+  function duplicateGroups(records) {
+    const buckets = new Map();
+    (records || []).forEach((r) => {
+      const title = normalizeTitle(r.title);
+      if (!title) return;
+      const key = `${title}|${normalizeCompany(r.company)}`;
+      if (!buckets.has(key)) buckets.set(key, []);
+      buckets.get(key).push(r);
+    });
+
+    const result = new Map();
+    const shingleCache = new Map();
+    const shinglesOf = (r) => {
+      if (!shingleCache.has(r.jobKey)) shingleCache.set(r.jobKey, shingles(r.text));
+      return shingleCache.get(r.jobKey);
+    };
+    const add = (a, b) => {
+      if (!result.has(a.jobKey)) result.set(a.jobKey, []);
+      result.get(a.jobKey).push(b);
+    };
+
+    buckets.forEach((group) => {
+      for (let i = 0; i < group.length; i++) {
+        for (let j = i + 1; j < group.length; j++) {
+          const a = group[i];
+          const b = group[j];
+          if (a.jobKey === b.jobKey || isDismissedPair(a, b)) continue;
+          const same =
+            a.text && b.text
+              ? containment(shinglesOf(a), shinglesOf(b)) >= DUPLICATE_TEXT_THRESHOLD
+              : normalizeCity(a.location) === normalizeCity(b.location);
+          if (!same) continue;
+          add(a, b);
+          add(b, a);
+        }
+      }
+    });
+    return result;
+  }
+
+  function findDuplicatesOf(record, records) {
+    const others = (records || []).filter((r) => r.jobKey !== record.jobKey);
+    return duplicateGroups([record, ...others]).get(record.jobKey) || [];
+  }
+
+  // Which site a record came from, for "also tracked from LinkedIn".
+  const SITE_LABELS = {
+    linkedin: "LinkedIn",
+    greenhouse: "Greenhouse",
+    indeed: "Indeed",
+    workday: "Workday",
+    jibe: "company career site",
+    content: "Greenhouse portal",
+  };
+
+  function siteLabel(record) {
+    const key = String(record.jobKey || "");
+    const prefix = key.split(":")[0];
+    if (SITE_LABELS[prefix]) return SITE_LABELS[prefix];
+    if (prefix === "url") return key.slice(4).split("/")[0] || "another site";
+    try {
+      return new URL(record.url).hostname.replace(/^www\./, "");
+    } catch (err) {
+      return "another site";
+    }
+  }
+
   function statusLabel(value) {
     const found = STATUSES.find((s) => s.value === value);
     return found ? found.label : value;
@@ -346,5 +471,10 @@ var JOB_FIT_EVALSTORE = (function () {
     statusLabel,
     formatEvaluation,
     briefText,
+    duplicateGroups,
+    findDuplicatesOf,
+    siteLabel,
+    normalizeTitle,
+    normalizeCompany,
   };
 })();

@@ -123,7 +123,16 @@
      right, so it reads as a notice rather than one more status bucket. */
   .funnel-row { display: flex; align-items: flex-start; gap: 12px; margin-bottom: 14px; }
   .funnel-row .funnel { flex: 1; margin-bottom: 0; }
-  .funnel-aside { flex: 0 0 auto; display: flex; align-items: center; padding-left: 12px; border-left: 1px solid var(--line); }
+  .funnel-aside { flex: 0 0 auto; display: flex; align-items: center; gap: 8px; padding-left: 12px; border-left: 1px solid var(--line); }
+  .funnel-aside:not(:has(> :not([hidden]))) { display: none; }
+  .dup-chip .stale-open { padding-right: 12px; }
+  .badge.badge-dup { background: #fff; color: var(--amber); border: 1px solid #e8cfa0; text-transform: none; letter-spacing: 0; font-weight: 600; }
+  .dup-box { border: 1px solid #e8cfa0; background: #fffaf1; border-radius: 6px; padding: 10px 12px; margin-bottom: 14px; }
+  .dup-box h3 { margin-top: 0; color: var(--amber); }
+  .dup-row { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; margin-top: 8px; font-size: 13px; }
+  .dup-row .dup-what { font-weight: 600; }
+  .dup-row .dup-notes { color: var(--muted); font-style: italic; }
+  .dup-row button { padding: 3px 9px; font-size: 12px; }
   .stale-chip {
     display: inline-flex; align-items: center; border: 1px dashed #e0c48d; border-radius: 999px;
     background: #fffaf1; color: var(--amber); font-size: 13px; overflow: hidden;
@@ -278,7 +287,10 @@
 
     <div class="funnel-row">
       <div class="funnel" id="funnel"></div>
-      <div class="funnel-aside" id="staleChip" hidden></div>
+      <div class="funnel-aside">
+        <div id="dupChip" hidden></div>
+        <div id="staleChip" hidden></div>
+      </div>
     </div>
 
     <div class="controls">

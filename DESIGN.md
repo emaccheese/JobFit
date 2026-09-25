@@ -691,6 +691,39 @@ fire — the feature would look implemented and do nothing.
    `gclid`, …). Unrecognized params are *kept* — plenty of ATS put the job id in
    one.
 
+### Cross-site duplicates — flagged, never merged
+
+Keys are per site, so the same posting reached from two sites is two records.
+The case that prompted this: Nuro's "Software Engineer, Onboard Platform" was
+filed once as `linkedin:4426196077` and once as `greenhouse:nuro:7998328`,
+with two scores, two statuses and two sets of notes. No shared ID exists, so
+no key rule can catch it. Only the content can.
+
+`JOB_FIT_EVALSTORE.duplicateGroups()` treats two records under one profile as
+possible duplicates when:
+- their title and company match after normalizing (lowercase, punctuation
+  except `+ # .` dropped so C++ ≠ C, company legal suffixes like
+  inc/llc/ltd stripped), **and**
+- their posting text is near-identical: at least 0.6 containment of word
+  3-shingles over the first 4,000 characters.
+
+Containment is used rather than Jaccard because LinkedIn wraps the same
+description in extra page text. Location is ignored ("Mountain View, CA" vs
+"Mountain View, California (HQ)"). Only when a record has no text does the
+city decide instead.
+
+It **flags and never merges**. Two real openings can share a title at one
+company, and a wrong merge would silently fuse their statuses and notes,
+while a wrong flag costs one click. Tracked jobs shows:
+- a "possible duplicate" badge on each copy
+- a section in the card naming the other copy (site, score, status, notes),
+  with **Show it** and **Not a duplicate**
+- an "N possible duplicates" filter chip that lists each set side by side
+
+**Not a duplicate** writes `notDuplicateOf` onto both records, so the pair
+stays silenced even after re-scoring. The job-page banner also warns when a
+posting matches one already tracked from another site.
+
 ### Records
 
 A record can come from **Evaluate**, from **Summarize**, or from both, and the

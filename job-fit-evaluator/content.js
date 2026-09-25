@@ -366,8 +366,40 @@
     }).catch(() => {});
   }
 
-  function renderResult(record, { cached, profileName, onReevaluate, saveError, staleNote }) {
+  // The job this banner is currently showing, so a late duplicate check can't
+  // paint its warning onto a different job's banner.
+  let bannerJobKey = null;
+
+  // Same posting, tracked from another site under this profile? Flag only —
+  // the two records are left alone; Tracked jobs is where you pick one.
+  async function duplicateNoteFor(record) {
+    if (!record.jobKey || !record.profileId) return null;
+    try {
+      const others = await JOB_FIT_EVALSTORE.list(record.profileId);
+      const dups = JOB_FIT_EVALSTORE.findDuplicatesOf(record, others);
+      if (!dups.length) return null;
+      const d = dups[0];
+      const score = d.hardReject ? "hard reject" : d.score != null ? d.score : "no score";
+      const when = new Date(JOB_FIT_EVALSTORE.activityTs(d)).toLocaleDateString(undefined, { month: "short", day: "numeric" });
+      const status = d.status && d.status !== "not_applied" ? `, ${JOB_FIT_EVALSTORE.statusLabel(d.status).toLowerCase()}` : "";
+      return `Looks like a job you already track from ${JOB_FIT_EVALSTORE.siteLabel(d)} (${score}, ${when}${status}). Check Tracked jobs before applying twice.`;
+    } catch (err) {
+      return null;
+    }
+  }
+
+  function renderResult(record, options) {
+    const { cached, profileName, onReevaluate, saveError, staleNote, duplicateNote } = options;
+    bannerJobKey = record.jobKey;
+    // Checked after the banner is up rather than before, so a slow storage
+    // read never delays the result; redrawn with the note if there is one.
+    if (duplicateNote === undefined) {
+      duplicateNoteFor(record).then((note) => {
+        if (note && bannerJobKey === record.jobKey) renderResult(record, { ...options, duplicateNote: note });
+      });
+    }
     const warnings = [];
+    if (duplicateNote) warnings.push(duplicateNote);
     if (staleNote) warnings.push(staleNote);
     if (saveError) warnings.push(`Result shown but NOT saved to history: ${saveError}`);
     if (record.evaluation && record.evaluation.input_truncated) {
