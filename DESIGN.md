@@ -160,6 +160,23 @@ A second, separate editable list — **not** a return to the old soft-warning/po
 > into "C++, Kotlin, Java" in the brief would hand the same bug to whatever
 > assistant reads it.
 
+> **"and/or", phrase-level alternatives, and domain-flag leakage** (found in
+> testing, 2026-09-24): one posting hit both gaps at once. "C++ and/or Rust"
+> filed Rust as a required gap, because "and/or" wasn't in the list of
+> alternative markers. "Low-latency, high-throughput backend services or
+> multi-threaded/concurrent data engines" credited the concurrent-engines side
+> as a match and *still* filed the other side as a required gap, because the
+> only example the prompt gave was a list of single languages. Both "Rust"
+> and "low-latency" were also domain flags, and the old wording ("list it in
+> required_gaps" if uncovered) read as permission to promote a flag straight
+> into required_gaps, which is what the earlier KLA run did with "machine
+> learning" taken from the job title. The prompt now names "and/or", gives a
+> phrase-level example, forbids gapping any alternative once another one from
+> the same requirement is a match, and states that domain flags are
+> informational: a flag only becomes a required gap when the posting's own
+> wording makes it one, never because it appears in the title or on one side
+> of an "or".
+
 > **Posting truncation** (found in audit, 2026-09-19): the posting was cut to
 > the first 6,000 characters before being sent. Postings put company
 > boilerplate first and qualifications, compensation and visa language LAST, so
