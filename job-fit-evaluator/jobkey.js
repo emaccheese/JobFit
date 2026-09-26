@@ -97,6 +97,12 @@ var JOB_FIT_JOBKEY = (function () {
     const jibeId =window.__jobFit && window.__jobFit.jibeJobId && window.__jobFit.jibeJobId();
     if (jibeId) return `jibe:${host.replace(/^www\./, "")}:${jibeId}`;
 
+    // The search page's address also carries query, start, location and sort
+    // filters, so the same job opened from two searches would otherwise be two
+    // records. Keyed by host too: pids are only unique within one company's site.
+    const eightfoldId = window.__jobFit && window.__jobFit.eightfoldJobId && window.__jobFit.eightfoldJobId();
+    if (eightfoldId) return `eightfold:${host.replace(/^www\./, "")}:${eightfoldId}`;
+
     // Last resort for a page whose URL identifies a *list*, not a job — the
     // Greenhouse portal's /jobs/search is the same href for every posting you
     // open in its dialog, so normalizing the URL there would file every job

@@ -156,6 +156,10 @@ posting evaluated for two people is two records.
 |---|---|
 | LinkedIn | Both `/jobs/view/…` and the search-results layout |
 | Greenhouse | Classic job boards, the `my.greenhouse.io` candidate portal, and boards embedded in a company's own career site via iframe |
+| Indeed | Job pages and the search-results side panel |
+| Workday | `*.myworkdayjobs.com` postings, including the search panel |
+| Jibe (iCIMS) | Company career sites built on Jibe, e.g. careers.keysight.com |
+| Eightfold | Company career sites built on Eightfold, e.g. careers.qualcomm.com, including the search page where the selected job opens beside the results list |
 | Anything else | Generic extractor — finds the largest visible content block |
 
 Site-specific extractors give better titles, companies and locations. The generic

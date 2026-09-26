@@ -187,6 +187,13 @@
       if (result) extractorName = "jibe";
     }
 
+    // No host check, like Jibe: Eightfold runs companies' career sites on
+    // their own domains. It returns null at once without Eightfold's app root.
+    if (!result && window.__jobFit && window.__jobFit.eightfold) {
+      result = window.__jobFit.eightfold();
+      if (result) extractorName = "eightfold";
+    }
+
     if (!result && window.__jobFit && window.__jobFit.generic) {
       result = window.__jobFit.generic();
       extractorName = "generic";
