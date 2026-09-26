@@ -137,6 +137,23 @@ var JOB_FIT_PROVIDER = (function () {
     return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
   }
 
+  // Today's OpenAI tokens (input + output), as recorded in usageByDay.
+  function openAiTokensOnDay(usageByDay, day = dayKey()) {
+    const t = ((usageByDay || {})[day] || {}).openai;
+    return t ? t.input + t.output : 0;
+  }
+
+  // What counts against the daily budget: today's tokens since the last
+  // manual reset (stored as `openaiBudgetReset: { day, tokens }`), or all of
+  // today's if there was none today. A reset records a starting point rather
+  // than deleting usage, so the day's and month's totals stay true.
+  function budgetTokensUsed(usageByDay, reset) {
+    const today = dayKey();
+    const used = openAiTokensOnDay(usageByDay, today);
+    const baseline = reset && reset.day === today ? Number(reset.tokens) || 0 : 0;
+    return Math.max(0, used - baseline);
+  }
+
   // /v1/models lists every model on the account — embeddings, speech, image,
   // moderation — and only chat models can score a posting.
   function isOpenAiChatModel(id) {
@@ -160,6 +177,8 @@ var JOB_FIT_PROVIDER = (function () {
     effectiveReasoningEffort,
     clampOutputTokens,
     dayKey,
+    openAiTokensOnDay,
+    budgetTokensUsed,
     costPer100,
     formatDollars,
     tierForModel,

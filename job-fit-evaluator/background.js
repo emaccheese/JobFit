@@ -365,11 +365,11 @@ function recordUsage(provider, usage) {
   return usageWrite;
 }
 
+// Counted since the popup's "Reset" if one was pressed today (see
+// JOB_FIT_PROVIDER.budgetTokensUsed).
 async function openAiTokensToday() {
-  const stored = await chrome.storage.local.get("usageByDay");
-  const day = (stored.usageByDay || {})[JOB_FIT_PROVIDER.dayKey()] || {};
-  const t = day.openai;
-  return t ? t.input + t.output : 0;
+  const stored = await chrome.storage.local.get(["usageByDay", "openaiBudgetReset"]);
+  return JOB_FIT_PROVIDER.budgetTokensUsed(stored.usageByDay, stored.openaiBudgetReset);
 }
 
 // One POST with a timeout, a caller's cancel signal and the service-worker
@@ -503,7 +503,7 @@ async function callLmStudio(systemPrompt, userPrompt, { signal, bulk = false } =
         return {
           ok: false,
           failure: "budget",
-          error: `Today's OpenAI budget is used up (${used.toLocaleString()} of ${settings.dailyTokenBudget.toLocaleString()} tokens). Raise it in the popup under Model to continue now, or press Resume tomorrow.`,
+          error: `Today's OpenAI budget is used up (${used.toLocaleString()} of ${settings.dailyTokenBudget.toLocaleString()} tokens). Reset or raise it in the popup under Model to continue now, or press Resume tomorrow.`,
         };
       }
     }
