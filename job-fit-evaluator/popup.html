@@ -166,9 +166,23 @@
   </section>
 
   <section>
-    <label for="openAiModel">Model</label>
-    <input id="openAiModel" type="text" list="openAiModelList" spellcheck="false" placeholder="pick from the list once the key is set">
-    <datalist id="openAiModelList"></datalist>
+    <label for="openAiTier">Model</label>
+    <select id="openAiTier"></select>
+    <div class="hint" id="openAiTierHint"></div>
+    <div id="openAiCustomRow" hidden style="margin-top:6px;">
+      <input id="openAiModel" type="text" list="openAiModelList" spellcheck="false" placeholder="any chat model on your key, e.g. gpt-5.6-terra">
+      <datalist id="openAiModelList"></datalist>
+    </div>
+  </section>
+
+  <section>
+    <label for="openAiFlex">Flex processing (half price, slower)</label>
+    <select id="openAiFlex">
+      <option value="bulk">For bulk re-evaluations only</option>
+      <option value="always">Always</option>
+      <option value="never">Never</option>
+    </select>
+    <div class="hint">Bulk re-evaluations from Tracked jobs aren't watched while they run, so they're a good fit. When Flex has no capacity, that job runs at the standard price instead.</div>
   </section>
 
   <section id="openAiReasoningSection" hidden>

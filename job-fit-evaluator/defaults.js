@@ -69,14 +69,30 @@ Target: the roles, seniority and locations you actually want.`,
   // model is preselected: the list comes from the account's own /v1/models.
   openai: {
     apiKey: "",
-    model: "",
+    // The Balanced tier. Scoring is a judgment task — required vs preferred,
+    // "or" lists, domain flags — and the cheapest tier saves cents at the cost
+    // of misreads. See openaiTiers below.
+    model: "gpt-6-sol",
     reasoningEffort: "low",
     // Per-request ceiling. A scoring answer is well under 1k tokens; the rest
     // is headroom for reasoning.
     maxOutputTokens: 4000,
-    // Input + output tokens per local day; 0 = no limit.
-    dailyTokenBudget: 0,
+    // Input + output tokens per local day; 0 = no limit. About 80 evaluations:
+    // a safety net for a service billed per request.
+    dailyTokenBudget: 200000,
+    // Flex processing (half price, slower): "bulk" = only for re-evaluations
+    // queued from Tracked jobs, where nobody is waiting on the result.
+    flex: "bulk",
   },
+  // The model choices offered first, instead of a raw list of model ids. The
+  // one place to update when OpenAI releases new models. Prices are per 1M
+  // tokens (input, output) from OpenAI's pricing page, September 2026 —
+  // shown only as an estimate, never used for billing decisions.
+  openaiTiers: [
+    { id: "economy", label: "Economy", model: "gpt-6-luna", blurb: "Cheapest. Good for screening lots of postings.", price: { standard: [0.1, 0.5], flex: [0.05, 0.25] } },
+    { id: "balanced", label: "Balanced", model: "gpt-6-sol", blurb: "Reliable scoring at a low cost.", price: { standard: [2, 10], flex: [1, 5] } },
+    { id: "best", label: "Best", model: "gpt-6-astra", blurb: "Most capable. For the postings you're serious about.", price: { standard: [10, 50], flex: [5, 25] } },
+  ],
   expectedSalary: {
     USD: { min: null, max: null },
     CAD: { min: null, max: null },

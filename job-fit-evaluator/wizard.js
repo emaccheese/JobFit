@@ -152,7 +152,8 @@ function activeModelSettings() {
 }
 
 function activeModel() {
-  return (activeModelSettings().model || "").trim();
+  const model = activeModelSettings().model || (state.provider === "openai" ? JOB_FIT_DEFAULTS.openai.model : "");
+  return (model || "").trim();
 }
 
 function resolvedSettings() {
@@ -339,7 +340,7 @@ function renderModelStatus(probe) {
 
   host.appendChild(callout("ok", openai ? "Connected to OpenAI." : "Connected to LM Studio."));
   $("modelPickerHint").textContent = openai
-    ? "Chat models available on this API key. Smaller \"mini\" models are cheaper and usually score well."
+    ? "Costs assume a typical posting; bulk re-evaluations use Flex at about half that. You can change this any time in the popup."
     : "These are the models LM Studio has loaded right now.";
   const list = $("modelList");
   list.innerHTML = "";
@@ -349,25 +350,65 @@ function renderModelStatus(probe) {
   }
   // Preselected, not saved: it's written when you leave this step, so merely
   // opening the wizard never changes the model other profiles are using.
-  // For OpenAI the first model alphabetically is often an expensive one;
-  // a "mini" model is the cheaper default and scores postings well.
-  const fallback = (openai && probe.models.find((m) => /-mini$/.test(m))) || probe.models[0];
+  // For OpenAI: the default tier if the key has it, else the first tier it
+  // has, else the first model — never whatever happens to sort first, which
+  // is often an expensive one.
+  const tiers = openai ? (JOB_FIT_DEFAULTS.openaiTiers || []) : [];
+  const tierModels = tiers.map((t) => t.model).filter((m) => probe.models.includes(m));
+  const fallback = tierModels.includes(JOB_FIT_DEFAULTS.openai.model)
+    ? JOB_FIT_DEFAULTS.openai.model
+    : tierModels[0] || probe.models[0];
   const chosen = probe.models.includes(wanted) ? wanted : fallback;
   if (chosen !== wanted) {
     activeModelSettings().model = chosen;
     state.modelDirty = true;
   }
-  probe.models.forEach((id) => {
+
+  const addRow = (host, id, labelNode, disabled) => {
     const row = el("label");
     const radio = el("input");
     radio.type = "radio";
     radio.name = "lmModel";
     radio.value = id;
     radio.checked = id === chosen;
+    radio.disabled = Boolean(disabled);
     row.appendChild(radio);
-    row.appendChild(document.createTextNode(id));
-    list.appendChild(row);
-  });
+    row.appendChild(labelNode);
+    if (disabled) row.style.opacity = ".5";
+    host.appendChild(row);
+  };
+
+  if (openai) {
+    // Three tiers, each with a rough cost, instead of a raw list of ids.
+    tiers.forEach((tier) => {
+      const onKey = probe.models.includes(tier.model);
+      const text = el("span", "tier-text");
+      text.appendChild(el("strong", null, `${tier.label}${tier.model === JOB_FIT_DEFAULTS.openai.model ? " (recommended)" : ""}`));
+      text.appendChild(el("span", "tier-model", tier.model));
+      text.appendChild(
+        el(
+          "span",
+          "tier-blurb",
+          onKey
+            ? `${tier.blurb} ≈ ${JOB_FIT_PROVIDER.formatDollars(JOB_FIT_PROVIDER.costPer100(tier))} per 100 jobs.`
+            : "Not available on this API key."
+        )
+      );
+      addRow(list, tier.model, text, !onKey);
+    });
+    const others = probe.models.filter((m) => !tiers.some((t) => t.model === m));
+    if (others.length) {
+      const more = el("details", "other-models");
+      more.open = !tiers.some((t) => t.model === chosen);
+      more.appendChild(el("summary", null, `Other models on this key (${others.length})`));
+      const inner = el("div", "model-list");
+      others.forEach((id) => addRow(inner, id, document.createTextNode(id)));
+      more.appendChild(inner);
+      list.appendChild(more);
+    }
+  } else {
+    probe.models.forEach((id) => addRow(list, id, document.createTextNode(id)));
+  }
   $("modelPicker").hidden = false;
   state.modelOk = true;
   if (openai) renderOaReasoning();
@@ -403,7 +444,7 @@ function showProviderFields() {
 // take none. The saved preference in state.oa is left alone, so picking a
 // different model and back restores it.
 function renderOaReasoning() {
-  const model = state.oa.model || "";
+  const model = state.oa.model || JOB_FIT_DEFAULTS.openai.model || "";
   const allowed = JOB_FIT_PROVIDER.reasoningEffortsFor(model);
   $("oaReasoningField").hidden = !allowed.length;
   const select = $("oaReasoning");
@@ -421,6 +462,7 @@ function fillModel() {
   $("oaKey").value = state.oa.apiKey || "";
   $("oaMaxOutput").value = JOB_FIT_PROVIDER.clampOutputTokens(state.oa.maxOutputTokens);
   $("oaBudget").value = Number(state.oa.dailyTokenBudget) || "";
+  $("oaFlex").value = ["bulk", "always", "never"].includes(state.oa.flex) ? state.oa.flex : "bulk";
   $("lmUrl").value = state.lm.url || JOB_FIT_DEFAULTS.lmStudio.url;
   $("lmTimeout").value = state.lm.timeoutSeconds || JOB_FIT_DEFAULTS.lmStudio.timeoutSeconds;
   $("lmReasoning").value = state.lm.reasoningEffort ?? "";
@@ -438,6 +480,7 @@ function collectModel() {
   if (!$("oaReasoningField").hidden) state.oa.reasoningEffort = $("oaReasoning").value;
   state.oa.maxOutputTokens = JOB_FIT_PROVIDER.clampOutputTokens($("oaMaxOutput").value);
   state.oa.dailyTokenBudget = Math.max(0, Number($("oaBudget").value) || 0);
+  state.oa.flex = $("oaFlex").value;
   const picked = document.querySelector('input[name="lmModel"]:checked');
   if (picked) activeModelSettings().model = picked.value;
   if (JSON.stringify(state.lm) !== before || JSON.stringify(state.oa) !== beforeOa) state.modelDirty = true;

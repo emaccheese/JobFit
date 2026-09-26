@@ -31,6 +31,19 @@ A Chrome/Edge extension that reads a job posting on the current tab, applies det
     - **`max_output_tokens`** comes from a user setting (default 4,000, clamped to 500–64,000) rather than a hard-coded 16,000.
     - **Usage** from each reply (`usage.input_tokens`/`output_tokens`, including reasoning and cached tokens, or chat-completions' `prompt_tokens`/`completion_tokens`) is stored on the record and summed per local day and provider in `usageByDay` (62 days kept). A reply that fails to parse still counts, because it was still billed.
     - **The daily budget** is checked before each OpenAI request. When it's spent, the request fails as `budget`, which pauses the queue like a connection error; raising the budget resumes it. It's measured in tokens, not dollars, because prices differ per model and change. The popup turns the budget into a number of requests at the month's average.
+  - **Tiers, not raw model ids** (`JOB_FIT_DEFAULTS.openaiTiers`): Economy gpt-6-luna, **Balanced gpt-6-sol (default)**, Best gpt-6-astra, plus Custom (any chat model on the key).
+    - Balanced is the default because scoring is a judgment task: required vs preferred, "or" lists, domain flags. At about $1 per 100 evaluations, a stronger model is worth more than the savings of the cheapest.
+    - Each tier shows a rough cost per 100 jobs (1,800 input + 700 output tokens at the listed September 2026 prices). This is display only and never used for any decision.
+    - A tier the key's `/v1/models` doesn't list is greyed out.
+    - New models are a one-line change in `defaults.js`.
+  - **Self-correcting parameters.** The name-based guesses (`isOpenAiReasoningModel`, `reasoningEffortsFor`, which now cover gpt-6 and later) are only a first try. When OpenAI rejects `temperature`, a `reasoning.effort` level, or `service_tier` as unsupported (a 400 naming it), the request is retried without it, and the model's quirk is saved in `openaiModelCaps`, so later calls get it right first time.
+    - A rejected effort level rounds **up** to the next level, never down, so a rejection can't quietly lower quality.
+    - Each setting is adjusted at most once per request, so a model can't cause a retry loop.
+  - **Flex processing** (`service_tier: "flex"`, half price, slower). The default is **bulk**: only re-evaluations queued from Tracked jobs (`item.bulk`) use it, because nobody is watching them run. "Evaluate this tab" stays on Standard.
+    - When Flex has no capacity, OpenAI returns `429 Resource Unavailable`, isn't billed, and the job retries on Standard, OpenAI's recommended fallback. A real rate limit (`rate_limit_exceeded`) is **not** retried.
+    - Flex requests get at least a 15-minute timeout. The queue's item lease grows to match, or a slow Flex job would be reclaimed and run twice.
+    - The tier that actually served a request (`service_tier` in the reply) is recorded in its usage, with `flexFallback` when it fell back.
+  - **Defaults:** 200,000-token daily budget (about 80 evaluations), reasoning effort low, max output 4,000, Flex for bulk only. An empty model field falls back to the default tier rather than failing as "no model".
   - **The privacy tradeoff is stated where you choose:** the wizard's provider cards and the popup's notice both say postings, the profile and salary expectations are sent to OpenAI and billed to your key.
 
 ---

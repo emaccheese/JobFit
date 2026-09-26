@@ -26,7 +26,11 @@ but not a requirement.
 
 **Or use the OpenAI API.** If you'd rather not run a model locally, set the provider
 to **OpenAI API** (in the setup wizard, or the popup under **Model**), paste your API
-key and pick a model from the list your key has access to. The tradeoff is explicit:
+key and pick a tier: **Economy** (gpt-6-luna, about $0.05 per 100 postings),
+**Balanced** (gpt-6-sol, about $1 per 100, the default) or **Best** (gpt-6-astra,
+about $5 per 100), or any other chat model your key has. Bulk re-evaluations from
+Tracked jobs use OpenAI's Flex processing at about half price, and a daily token
+budget (200k by default) pauses the queue before a runaway batch gets expensive. The tradeoff is explicit:
 every evaluated posting, your candidate profile and your salary expectations are sent
 to OpenAI, and each request is billed to your key. The key stays in this browser's
 extension storage and is never written to a backup file. Switching back to LM Studio

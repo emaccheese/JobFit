@@ -107,6 +107,11 @@
     padding: 8px 10px; cursor: pointer; font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 12.5px;
   }
   .model-list label:has(input:checked) { border-color: var(--accent); background: var(--accent-soft); }
+  .model-list label .tier-text { display: flex; flex-direction: column; gap: 1px; font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif; font-size: 13.5px; }
+  .model-list label .tier-model { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 12px; color: var(--muted); }
+  .model-list label .tier-blurb { font-size: 12.5px; color: var(--muted); }
+  .other-models { margin-top: 4px; }
+  .other-models summary { cursor: pointer; font-size: 13px; color: var(--muted); padding: 4px 0; }
   .compact-model { display: flex; align-items: center; gap: 10px; }
   .dot { width: 9px; height: 9px; border-radius: 50%; background: var(--green); flex: 0 0 auto; }
 
@@ -292,6 +297,15 @@
                   <span>Max output tokens per request</span>
                   <input id="oaMaxOutput" type="number" min="500" max="64000" step="500">
                   <div class="hint">A ceiling on what one request can cost, reasoning included. Too low and answers get cut off.</div>
+                </label>
+                <label class="field">
+                  <span>Flex processing (half price, slower)</span>
+                  <select id="oaFlex">
+                    <option value="bulk">For bulk re-evaluations only</option>
+                    <option value="always">Always</option>
+                    <option value="never">Never</option>
+                  </select>
+                  <div class="hint">When Flex has no capacity, that job runs at the standard price instead.</div>
                 </label>
                 <label class="field">
                   <span>Daily token budget</span>

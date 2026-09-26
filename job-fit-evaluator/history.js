@@ -1595,7 +1595,9 @@ async function requeueSelected(btn) {
   for (const record of chosen) {
     const response = await queueMessage({
       type: "JOB_FIT_ENQUEUE",
-      item: evaluateItem(record, profile, fingerprint),
+      // Bulk: nobody is waiting on these, so they may use OpenAI's Flex
+      // processing (half price, slower) — see the popup's Flex setting.
+      item: { ...evaluateItem(record, profile, fingerprint), bulk: true },
     });
     if (response && response.full) { full = true; break; }
     if (response && response.ok) {

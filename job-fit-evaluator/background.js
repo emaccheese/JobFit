@@ -249,9 +249,12 @@ function lmStudioRequestBody(systemPrompt, userPrompt, settings) {
 //   a CV and salary expectations.
 // - Reasoning models (o-series, gpt-5) take reasoning.effort and only the
 //   default temperature; the others take temperature.
-function openAiRequestBody(systemPrompt, userPrompt, settings) {
+function openAiRequestBody(systemPrompt, userPrompt, settings, { caps = {}, tier = null } = {}) {
   const reasoning = JOB_FIT_PROVIDER.isOpenAiReasoningModel(settings.model);
-  const effort = JOB_FIT_PROVIDER.effectiveReasoningEffort(settings.model, settings.reasoningEffort);
+  const effort = caps.noReasoning
+    ? ""
+    : JOB_FIT_PROVIDER.effectiveReasoningEffort(settings.model, settings.reasoningEffort, caps.rejectedEfforts);
+  const sendTemperature = !reasoning && !caps.noTemperature;
   return {
     model: settings.model,
     input: [
@@ -261,8 +264,9 @@ function openAiRequestBody(systemPrompt, userPrompt, settings) {
     text: { format: { type: "json_object" } },
     max_output_tokens: settings.maxOutputTokens,
     store: false,
-    ...(reasoning ? {} : { temperature: 0.2 }),
+    ...(sendTemperature ? { temperature: 0.2 } : {}),
     ...(effort ? { reasoning: { effort } } : {}),
+    ...(tier ? { service_tier: tier } : {}),
   };
 }
 
@@ -320,6 +324,8 @@ function usageFrom(provider, data) {
       output: u.output_tokens || 0,
       reasoning: (u.output_tokens_details && u.output_tokens_details.reasoning_tokens) || 0,
       cached: (u.input_tokens_details && u.input_tokens_details.cached_tokens) || 0,
+      // Billed above the normal input rate on models that list a cache-write price.
+      cacheWrite: (u.input_tokens_details && u.input_tokens_details.cache_write_tokens) || 0,
     };
   }
   return {
@@ -327,6 +333,7 @@ function usageFrom(provider, data) {
     output: u.completion_tokens || 0,
     reasoning: (u.completion_tokens_details && u.completion_tokens_details.reasoning_tokens) || 0,
     cached: (u.prompt_tokens_details && u.prompt_tokens_details.cached_tokens) || 0,
+    cacheWrite: (u.prompt_tokens_details && u.prompt_tokens_details.cache_write_tokens) || 0,
   };
 }
 
@@ -343,6 +350,8 @@ function recordUsage(provider, usage) {
     const day = (days[key] = days[key] || {});
     const t = (day[provider] = day[provider] || { requests: 0, input: 0, output: 0, reasoning: 0, cached: 0 });
     t.requests += 1;
+    if (usage.tier === "flex") t.flexRequests = (t.flexRequests || 0) + 1;
+    t.cacheWrite = (t.cacheWrite || 0) + (usage.cacheWrite || 0);
     t.input += usage.input;
     t.output += usage.output;
     t.reasoning += usage.reasoning;
@@ -363,6 +372,100 @@ async function openAiTokensToday() {
   return t ? t.input + t.output : 0;
 }
 
+// One POST with a timeout, a caller's cancel signal and the service-worker
+// keep-alive. Returns { resp } or { error: "cancelled" | "timeout" |
+// "unreachable", message }.
+async function postJson(url, body, { apiKey, timeoutMs, signal }) {
+  const controller = new AbortController();
+  const timeoutId = setTimeout(() => controller.abort(), timeoutMs);
+  const onAbort = () => controller.abort();
+  if (signal) signal.addEventListener("abort", onAbort, { once: true });
+  const stopKeepAlive = keepAlive();
+  try {
+    const resp = await fetch(url, {
+      method: "POST",
+      headers: { "Content-Type": "application/json", ...(apiKey ? { Authorization: `Bearer ${apiKey}` } : {}) },
+      signal: controller.signal,
+      body: JSON.stringify(body),
+    });
+    return { resp };
+  } catch (err) {
+    if (err.name === "AbortError") return { error: signal && signal.aborted ? "cancelled" : "timeout" };
+    return { error: "unreachable", message: err.message };
+  } finally {
+    clearTimeout(timeoutId);
+    if (signal) signal.removeEventListener("abort", onAbort);
+    stopKeepAlive();
+  }
+}
+
+function parseOpenAiError(text) {
+  try {
+    const e = (JSON.parse(text) || {}).error || {};
+    return { message: e.message || "", param: e.param || "", code: e.code || "", type: e.type || "" };
+  } catch (err) {
+    return { message: "", param: "", code: "", type: "" };
+  }
+}
+
+// --- self-correcting OpenAI parameters -------------------------------------
+//
+// Which models take temperature, which reasoning levels, and which support
+// Flex is guessed from the model name (provider.js) — and names change with
+// every release. So when OpenAI rejects a setting as unsupported, the request
+// is retried without it and the model's quirk is remembered in
+// `openaiModelCaps`, so the next request gets it right first time.
+
+const FLEX_MIN_TIMEOUT_SECONDS = 900;
+
+async function loadModelCaps(model) {
+  const stored = await chrome.storage.local.get("openaiModelCaps");
+  const caps = (stored.openaiModelCaps || {})[model] || {};
+  return { noTemperature: false, noReasoning: false, noFlex: false, rejectedEfforts: [], ...caps };
+}
+
+async function saveModelCaps(model, caps) {
+  const stored = await chrome.storage.local.get("openaiModelCaps");
+  const all = stored.openaiModelCaps || {};
+  all[model] = caps;
+  await chrome.storage.local.set({ openaiModelCaps: all });
+}
+
+// Returns which setting was adjusted ("temperature", "reasoning",
+// "service_tier"), or null when the rejection isn't one a retry can fix.
+function learnFromRejection(status, err, body, caps) {
+  if (status !== 400) return null;
+  const text = `${err.param} ${err.message}`.toLowerCase();
+  if (!/unsupported|not supported|does not support|invalid value|not allowed/.test(text)) return null;
+
+  if (/temperature/.test(text) && "temperature" in body && !caps.noTemperature) {
+    caps.noTemperature = true;
+    return "temperature";
+  }
+  if (/reasoning/.test(text) && body.reasoning && !caps.noReasoning) {
+    // A level the model doesn't take: try without that level first (the next
+    // one down, if any), and only then without reasoning at all.
+    const effort = body.reasoning.effort;
+    if (effort && !caps.rejectedEfforts.includes(effort)) caps.rejectedEfforts.push(effort);
+    else caps.noReasoning = true;
+    return "reasoning";
+  }
+  if (/service_tier|flex/.test(text) && body.service_tier && !caps.noFlex) {
+    caps.noFlex = true;
+    return "service_tier";
+  }
+  return null;
+}
+
+// Flex is half price and slower. "bulk" (the default) uses it only for work
+// nobody is watching — re-evaluations queued from Tracked jobs.
+function wantsFlex(settings, bulk, caps) {
+  if (caps && caps.noFlex) return false;
+  if (settings.flex === "always") return true;
+  if (settings.flex === "never") return false;
+  return Boolean(bulk);
+}
+
 // The timeout, not max_tokens, is what actually bounds how long the user
 // waits — a bigger max_tokens costs nothing for a request that finishes
 // normally (the model stops itself via its own stop token), it only matters
@@ -374,7 +477,7 @@ async function openAiTokensToday() {
 // `signal` lets a caller cancel: the setup wizard's model calls can take
 // minutes, and a Cancel button that only hid the spinner would leave LM
 // Studio busy generating an answer nobody is waiting for.
-async function callLmStudio(systemPrompt, userPrompt, { signal } = {}) {
+async function callLmStudio(systemPrompt, userPrompt, { signal, bulk = false } = {}) {
   // Named for where it started; it now calls whichever provider is selected
   // (see provider.js): LM Studio's chat-completions endpoint, or OpenAI's
   // Responses API. The request and reply shapes differ per provider; the
@@ -382,7 +485,6 @@ async function callLmStudio(systemPrompt, userPrompt, { signal } = {}) {
   const settings = await JOB_FIT_PROVIDER.load();
   const { url, provider, label, timeoutSeconds } = settings;
   const model = settings.model || undefined;
-  const timeoutMs = timeoutSeconds * 1000;
 
   if (provider === "openai") {
     // Caught here rather than sent: OpenAI would answer 401/400, and "config"
@@ -408,72 +510,95 @@ async function callLmStudio(systemPrompt, userPrompt, { signal } = {}) {
   }
 
   const startedAt = Date.now();
-  const controller = new AbortController();
-  const timeoutId = setTimeout(() => controller.abort(), timeoutMs);
-  if (signal) signal.addEventListener("abort", () => controller.abort(), { once: true });
-  const stopKeepAlive = keepAlive();
+  // What this model is known to reject (learned from earlier replies), and
+  // whether to ask for Flex. Both can change between attempts below.
+  const caps = provider === "openai" ? await loadModelCaps(model) : null;
+  let tier = provider === "openai" && wantsFlex(settings, bulk, caps) ? "flex" : null;
+  let fellBackFromFlex = false;
   let resp;
-  try {
-    resp = await fetch(url, {
-      method: "POST",
-      headers: {
-        "Content-Type": "application/json",
-        ...(provider === "openai" ? { Authorization: `Bearer ${settings.apiKey}` } : {}),
-      },
-      signal: controller.signal,
-      body: JSON.stringify(
-        provider === "openai"
-          ? openAiRequestBody(systemPrompt, userPrompt, settings)
-          : lmStudioRequestBody(systemPrompt, userPrompt, settings)
-      ),
+  let failureBody = "";
+
+  // At most one retry per adjustable setting, so a model that keeps rejecting
+  // things can't loop: temperature, reasoning effort (twice: a lower level,
+  // then none) and Flex.
+  for (let attempt = 0; attempt < 5; attempt++) {
+    const body =
+      provider === "openai"
+        ? openAiRequestBody(systemPrompt, userPrompt, settings, { caps, tier })
+        : lmStudioRequestBody(systemPrompt, userPrompt, settings);
+    // Flex responses are slower by design; OpenAI's own SDKs allow 10 minutes.
+    const attemptTimeoutSeconds = tier === "flex" ? Math.max(timeoutSeconds, FLEX_MIN_TIMEOUT_SECONDS) : timeoutSeconds;
+    const sent = await postJson(url, body, {
+      apiKey: provider === "openai" ? settings.apiKey : null,
+      timeoutMs: attemptTimeoutSeconds * 1000,
+      signal,
     });
-  } catch (err) {
-    if (err.name === "AbortError" && signal && signal.aborted) {
-      return { ok: false, failure: "cancelled", error: "Cancelled." };
-    }
-    if (err.name === "AbortError") {
+
+    if (sent.error) {
+      if (sent.error === "cancelled") return { ok: false, failure: "cancelled", error: "Cancelled." };
+      if (sent.error === "timeout") {
+        return {
+          ok: false,
+          failure: "timeout",
+          error:
+            provider === "openai"
+              ? `OpenAI didn't respond within ${attemptTimeoutSeconds}s${tier === "flex" ? " (Flex processing is slower by design)" : ""}. Try again, or raise the timeout in the popup settings.`
+              : `Local model didn't respond within ${timeoutSeconds}s. If LM Studio's own console shows it was still making progress (not stuck repeating itself), raise the timeout in the popup settings — this model may just need longer. If it looked stuck looping, a longer timeout won't help.`,
+        };
+      }
       return {
         ok: false,
-        failure: "timeout",
+        failure: "unreachable",
         error:
           provider === "openai"
-            ? `OpenAI didn't respond within ${timeoutSeconds}s. Try again, or raise the timeout in the popup settings.`
-            : `Local model didn't respond within ${timeoutSeconds}s. If LM Studio's own console shows it was still making progress (not stuck repeating itself), raise the timeout in the popup settings — this model may just need longer. If it looked stuck looping, a longer timeout won't help.`,
+            ? `Could not reach OpenAI — check the internet connection. (${sent.message})`
+            : `Could not reach LM Studio at ${url} — is it running? (${sent.message})`,
       };
     }
-    return {
-      ok: false,
-      failure: "unreachable",
-      error:
-        provider === "openai"
-          ? `Could not reach OpenAI — check the internet connection. (${err.message})`
-          : `Could not reach LM Studio at ${url} — is it running? (${err.message})`,
-    };
-  } finally {
-    clearTimeout(timeoutId);
-    stopKeepAlive();
+
+    resp = sent.resp;
+    if (resp.ok || provider !== "openai") break;
+
+    failureBody = await resp.text().catch(() => "");
+    const err = parseOpenAiError(failureBody);
+
+    // No Flex capacity right now. Not billed; retried on Standard, which is
+    // OpenAI's own recommended fallback, so the queue never stalls on it.
+    if (tier === "flex" && resp.status === 429 && /resource.?unavailable|capacity/i.test(`${err.code} ${err.type} ${err.message}`)) {
+      tier = null;
+      fellBackFromFlex = true;
+      continue;
+    }
+
+    // A setting this model doesn't take: remember that, and retry without it.
+    const adjusted = learnFromRejection(resp.status, err, body, caps);
+    if (adjusted) {
+      if (adjusted === "service_tier") tier = null;
+      await saveModelCaps(model, caps);
+      continue;
+    }
+    break;
   }
 
   if (!resp.ok) {
-    const body = await resp.text().catch(() => "");
+    const body = provider === "openai" ? failureBody : await resp.text().catch(() => "");
     // Names the model: a paused queue shows this message until it resumes, and
     // without the name there's no way to tell whether it's about the model
     // configured now or one you've since switched away from.
     const which = model ? ` for model "${model}"` : "";
     // OpenAI wraps its reason in {"error":{"message"}}; show just that.
-    let detail = body.slice(0, 300);
-    try {
-      const parsed = JSON.parse(body);
-      if (parsed && parsed.error && parsed.error.message) detail = parsed.error.message;
-    } catch (err) {
-      /* not JSON — keep the raw text */
-    }
+    const detail = parseOpenAiError(body).message || body.slice(0, 300);
     return { ok: false, failure: "http", error: `${label} returned HTTP ${resp.status}${which}: ${detail}` };
   }
 
   const data = await resp.json().catch(() => null);
   // Recorded whatever happens next: a reply that fails to parse was still billed.
   const usage = usageFrom(provider, data);
+  if (usage && provider === "openai") {
+    // What actually served it, which OpenAI says can differ from what was asked.
+    usage.tier = (data && data.service_tier) || tier || "default";
+    if (fellBackFromFlex) usage.flexFallback = true;
+  }
   await recordUsage(provider, usage);
 
   if (provider === "openai") {
@@ -633,9 +758,9 @@ function applyScoreCaps(data, { domainFlags, seniorityFlag }) {
 // independent read could land on a different profile if the user switched in
 // between, scoring a posting against one profile's keywords and another's
 // salary expectations.
-async function evaluateWithLmStudio({ profile, postingText, domainFlags, expectedSalary }, signal) {
+async function evaluateWithLmStudio({ profile, postingText, domainFlags, expectedSalary }, signal, { bulk = false } = {}) {
   const { prompt, truncated } = buildUserPrompt(profile, postingText, expectedSalary, domainFlags);
-  const result = await callLmStudio(SYSTEM_PROMPT, prompt, { signal });
+  const result = await callLmStudio(SYSTEM_PROMPT, prompt, { signal, bulk });
 
   if (result.ok && result.data) {
     // Surfaced in the banner: a score produced from a partial posting is worth
@@ -848,7 +973,11 @@ function buildSummarizePrompt(postingText) {
 const QUEUE_ALARM = "jobfit-queue-watchdog";
 
 async function configuredTimeoutMs() {
-  return (await JOB_FIT_PROVIDER.load()).timeoutSeconds * 1000;
+  // The queue's lease on an item has to outlast the slowest request it could
+  // make, or a slow Flex response would be "reclaimed" and run twice.
+  const settings = await JOB_FIT_PROVIDER.load();
+  const flexPossible = settings.provider === "openai" && settings.flex !== "never";
+  return (flexPossible ? Math.max(settings.timeoutSeconds, FLEX_MIN_TIMEOUT_SECONDS) : settings.timeoutSeconds) * 1000;
 }
 
 async function setBadge(count, state) {
@@ -919,12 +1048,17 @@ async function recordProbe(probe) {
 
 async function runQueuedEvaluation(item) {
   const snapshot = item.profileSnapshot || {};
-  const result = await evaluateWithLmStudio({
-    profile: snapshot.profile,
-    postingText: item.postingText,
-    domainFlags: item.domainFlags,
-    expectedSalary: snapshot.expectedSalary,
-  });
+  const result = await evaluateWithLmStudio(
+    {
+      profile: snapshot.profile,
+      postingText: item.postingText,
+      domainFlags: item.domainFlags,
+      expectedSalary: snapshot.expectedSalary,
+    },
+    undefined,
+    // Set on re-evaluations queued in bulk from Tracked jobs: eligible for Flex.
+    { bulk: Boolean(item.bulk) }
+  );
   if (!result.ok) return result;
 
   // Reported as an item failure rather than thrown: the queue keeps moving and

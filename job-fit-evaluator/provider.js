@@ -34,10 +34,12 @@ var JOB_FIT_PROVIDER = (function () {
         provider,
         label: LABELS.openai,
         url: OPENAI_RESPONSES_URL,
-        model: (oa.model || "").trim(),
+        // Empty means "not chosen yet", not "none": use the default tier.
+        model: (oa.model || JOB_FIT_DEFAULTS.openai.model || "").trim(),
         apiKey: (oa.apiKey || "").trim(),
         reasoningEffort: oa.reasoningEffort || "",
         maxOutputTokens: clampOutputTokens(oa.maxOutputTokens),
+        flex: ["bulk", "always", "never"].includes(oa.flex) ? oa.flex : "bulk",
         dailyTokenBudget: Math.max(0, Number(oa.dailyTokenBudget) || 0),
         timeoutSeconds,
       };
@@ -63,11 +65,12 @@ var JOB_FIT_PROVIDER = (function () {
     return resolve(stored).model;
   }
 
-  // OpenAI's reasoning models (o-series, gpt-5 family) reject temperature and
-  // the penalty parameters, and take reasoning_effort; the others are the
-  // reverse. Decided by name because the models list doesn't say.
+  // OpenAI's reasoning models (o-series, gpt-5 and later) reject temperature
+  // and take reasoning effort; the others are the reverse. Decided by name
+  // because the models list doesn't say — and it's only a first guess:
+  // background.js retries without whatever a model rejects and remembers it.
   function isOpenAiReasoningModel(model) {
-    return /^(o\d|gpt-5)/i.test(model || "");
+    return /^(o\d|gpt-([5-9]|\d{2,}))/i.test(model || "");
   }
 
   // Which reasoning.effort values a model takes. GPT-5 adds "minimal"; the
@@ -76,18 +79,27 @@ var JOB_FIT_PROVIDER = (function () {
   function reasoningEffortsFor(model) {
     const name = String(model || "").toLowerCase();
     if (/^gpt-5/.test(name)) return ["minimal", "low", "medium", "high"];
-    if (/^o\d/.test(name)) return ["low", "medium", "high"];
+    // gpt-6 and later, and the o-series: the levels every reasoning model has
+    // taken so far. Anything else a newer model adds isn't offered until known.
+    if (/^(o\d|gpt-([6-9]|\d{2,}))/.test(name)) return ["low", "medium", "high"];
     return [];
   }
+
+  const EFFORT_ORDER = ["none", "minimal", "low", "medium", "high", "xhigh"];
 
   // The saved effort, adjusted to what this model accepts: "minimal" on an
   // o-series model becomes "low" rather than a rejected request, and a model
   // that takes no effort gets none.
-  function effectiveReasoningEffort(model, wanted) {
-    const allowed = reasoningEffortsFor(model);
+  //
+  // `rejected` are levels OpenAI has refused for this model before. The
+  // nearest level at or above the wanted one is used — rounding up rather than
+  // down, so a rejection never quietly lowers scoring quality.
+  function effectiveReasoningEffort(model, wanted, rejected = []) {
+    const allowed = reasoningEffortsFor(model).filter((e) => !rejected.includes(e));
     if (!allowed.length || !wanted) return "";
     if (allowed.includes(wanted)) return wanted;
-    return wanted === "minimal" ? allowed[0] : "";
+    const rank = EFFORT_ORDER.indexOf(wanted);
+    return allowed.find((e) => EFFORT_ORDER.indexOf(e) >= rank) || allowed[allowed.length - 1];
   }
 
   // A ceiling on what one request can cost. Reasoning tokens count toward it,
@@ -97,6 +109,25 @@ var JOB_FIT_PROVIDER = (function () {
     const n = Math.round(Number(value));
     if (!n) return JOB_FIT_DEFAULTS.openai.maxOutputTokens;
     return Math.min(OUTPUT_TOKEN_RANGE.max, Math.max(OUTPUT_TOKEN_RANGE.min, n));
+  }
+
+  // A rough cost per 100 evaluations for a tier, to make the choice concrete.
+  // Assumes a typical evaluation (1,800 input + 700 output tokens) unless the
+  // caller has the user's own average; prices are per 1M tokens.
+  const TYPICAL_EVALUATION = { input: 1800, output: 700 };
+  function costPer100(tier, mode = "standard", tokens = TYPICAL_EVALUATION) {
+    const price = tier && tier.price && tier.price[mode];
+    if (!price) return null;
+    return (100 * (tokens.input * price[0] + tokens.output * price[1])) / 1e6;
+  }
+
+  function formatDollars(amount) {
+    if (amount == null) return "";
+    return amount < 0.1 ? `$${amount.toFixed(3)}` : `$${amount.toFixed(2)}`;
+  }
+
+  function tierForModel(model) {
+    return (JOB_FIT_DEFAULTS.openaiTiers || []).find((t) => t.model === model) || null;
   }
 
   // Local calendar day, so "today" in the usage totals matches the user's day,
@@ -129,5 +160,8 @@ var JOB_FIT_PROVIDER = (function () {
     effectiveReasoningEffort,
     clampOutputTokens,
     dayKey,
+    costPer100,
+    formatDollars,
+    tierForModel,
   };
 })();
