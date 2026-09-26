@@ -1152,93 +1152,19 @@ chrome.alarms.onAlarm.addListener((alarm) => {
 
 // Resume automatically after a browser restart or an extension reload: a batch
 // left running overnight should still be running in the morning.
-chrome.runtime.onStartup.addListener(() => {
-  kick();
-  syncAllTabs();
-});
+chrome.runtime.onStartup.addListener(kick);
 chrome.runtime.onInstalled.addListener((details) => {
   kick();
-  createActionMenu();
-  syncAllTabs();
   if (details.reason === "install") startFirstRunSetup();
 });
 
 // ---------------------------------------------------------------------------
-// Fewer clicks: the toolbar icon, a keyboard shortcut and the icon's
-// right-click menu can all start an evaluation without the popup.
+// Keyboard shortcut: evaluate the posting in the current tab without opening
+// the popup (manifest "commands"; Command+Shift+E on a Mac, Alt+Shift+E
+// elsewhere). The toolbar icon always opens the popup — an icon that
+// evaluated on some sites and opened the popup on others hid Tracked jobs
+// and settings on exactly the job boards where they're used most.
 // ---------------------------------------------------------------------------
-
-// Job-posting pages on the boards JobFit has extractors for, recognised by
-// address alone: the extension can't read a page before it's clicked, so
-// the URL is all there is to decide what a click on the icon should do.
-// Deliberately narrow — a miss just means the popup opens as before, while a
-// false hit would make the icon evaluate a page that isn't a posting.
-const JOB_POSTING_URLS = [
-  /^https:\/\/([a-z]+\.)?linkedin\.com\/jobs\/view\/\d+/i,
-  /^https:\/\/([a-z]+\.)?linkedin\.com\/jobs\/[^?#]*[?&]currentJobId=\d+/i,
-  /^https:\/\/(boards|job-boards)\.greenhouse\.io\/[^/]+\/jobs\/\d+/i,
-  /^https:\/\/[^/]+\/[^?#]*[?&]gh_jid=\d+/i,
-  /^https:\/\/([a-z]+\.)?indeed\.[a-z.]+\/(viewjob|jobs|m\/viewjob)[^#]*[?&](jk|vjk)=[0-9a-f]+/i,
-  /^https:\/\/[^/]+\.myworkdayjobs\.com\/.+\/job\/.+/i,
-  /^https:\/\/jobs\.lever\.co\/[^/]+\/[0-9a-f-]{36}/i,
-  /^https:\/\/jobs\.ashbyhq\.com\/[^/]+\/[0-9a-f-]{36}/i,
-];
-
-function isJobPostingUrl(url) {
-  return JOB_POSTING_URLS.some((re) => re.test(url || ""));
-}
-
-// "evaluate" (default): on a recognised posting the icon evaluates straight
-// away; the popup is on the right-click menu. "popup": the icon always opens
-// the popup, as before.
-async function iconClickMode() {
-  const stored = await chrome.storage.local.get("uiIconClick");
-  return stored.uiIconClick === "popup" ? "popup" : "evaluate";
-}
-
-// Per tab, so the popup still opens everywhere that isn't a posting.
-async function syncActionForTab(tabId, url) {
-  const direct = (await iconClickMode()) === "evaluate" && isJobPostingUrl(url);
-  try {
-    await chrome.action.setPopup({ tabId, popup: direct ? "" : "popup.html" });
-    await chrome.action.setTitle({
-      tabId,
-      title: direct ? "JobFit — click to evaluate this posting (right-click for more)" : "JobFit",
-    });
-  } catch (err) {
-    // The tab closed in the meantime.
-  }
-}
-
-// Tab URLs aren't readable without the "tabs" permission, but each tab's top
-// frame URL is available through webNavigation, which JobFit already has.
-async function syncAllTabs() {
-  const tabs = await chrome.tabs.query({});
-  await Promise.all(
-    tabs.map(async (tab) => {
-      try {
-        const frames = await chrome.webNavigation.getAllFrames({ tabId: tab.id });
-        const top = (frames || []).find((f) => f.frameId === 0);
-        if (top) await syncActionForTab(tab.id, top.url);
-      } catch (err) {
-        /* discarded or closed tab */
-      }
-    })
-  );
-}
-
-// Full navigations, and LinkedIn's in-page switching between jobs, which
-// changes the address with history.pushState rather than loading a page.
-chrome.webNavigation.onCommitted.addListener((d) => {
-  if (d.frameId === 0) syncActionForTab(d.tabId, d.url);
-});
-chrome.webNavigation.onHistoryStateUpdated.addListener((d) => {
-  if (d.frameId === 0) syncActionForTab(d.tabId, d.url);
-});
-
-chrome.storage.onChanged.addListener((changes, area) => {
-  if (area === "local" && changes.uiIconClick) syncAllTabs();
-});
 
 // Evaluating without the popup has nowhere to show an error, so it goes on
 // the icon: a red "!" for this tab, with the reason as the tooltip.
@@ -1252,72 +1178,19 @@ async function evaluateTab(tab) {
     await chrome.action.setTitle({ tabId: tab.id, title: `JobFit — ${started.error}` });
     setTimeout(() => {
       // null, not "": null drops this tab's override so the queue count shows
-      // again; "" would pin an empty badge on the tab.
+      // again; "" would pin an empty badge on the tab. Same for the title.
       chrome.action.setBadgeText({ tabId: tab.id, text: null }).catch(() => {});
+      chrome.action.setTitle({ tabId: tab.id, title: null }).catch(() => {});
     }, 8000);
   } catch (err) {
     /* tab gone */
   }
 }
 
-// Only fires when the tab has no popup set, i.e. on a recognised posting.
-chrome.action.onClicked.addListener(evaluateTab);
-
-// The keyboard shortcut (manifest "commands"). Works on any page, including
-// career sites the icon doesn't recognise.
+// Chrome grants the shortcut access to the active tab, so this works on any
+// page the extension could evaluate from the popup.
 chrome.commands.onCommand.addListener((command, tab) => {
   if (command === "evaluate-tab") evaluateTab(tab);
-});
-
-// Right-click on the icon. The popup has to stay reachable on job pages,
-// where a left click now evaluates instead.
-function createActionMenu() {
-  chrome.contextMenus.removeAll(() => {
-    chrome.contextMenus.create({ id: "jf-evaluate", title: "Evaluate this tab", contexts: ["action"] });
-    chrome.contextMenus.create({ id: "jf-panel", title: "Open JobFit panel (settings, summarize)", contexts: ["action"] });
-    chrome.contextMenus.create({ id: "jf-history", title: "Tracked jobs", contexts: ["action"] });
-  });
-}
-
-// Tabs whose popup was switched on just to open the panel from the menu; put
-// back when that popup closes (see the "popup" port below).
-const panelOpenedFor = new Set();
-
-chrome.contextMenus.onClicked.addListener(async (info, tab) => {
-  if (info.menuItemId === "jf-evaluate") return evaluateTab(tab);
-  if (info.menuItemId === "jf-history") {
-    chrome.tabs.create({ url: chrome.runtime.getURL("history.html") });
-    return;
-  }
-  if (info.menuItemId === "jf-panel" && tab) {
-    // openPopup opens the popup set for the tab, which on a posting is none,
-    // so set it first and restore it once the popup closes.
-    try {
-      await chrome.action.setPopup({ tabId: tab.id, popup: "popup.html" });
-      panelOpenedFor.add(tab.id);
-      await chrome.action.openPopup({ windowId: tab.windowId });
-    } catch (err) {
-      // Older Chrome, or no user gesture: a small window with the same panel,
-      // pointed at this tab.
-      panelOpenedFor.delete(tab.id);
-      const frames = await chrome.webNavigation.getAllFrames({ tabId: tab.id }).catch(() => []);
-      const top = (frames || []).find((f) => f.frameId === 0);
-      syncActionForTab(tab.id, top ? top.url : "");
-      chrome.windows.create({ url: chrome.runtime.getURL(`popup.html?tabId=${tab.id}`), type: "popup", width: 400, height: 640 });
-    }
-  }
-});
-
-chrome.runtime.onConnect.addListener((port) => {
-  if (port.name !== "popup") return;
-  port.onDisconnect.addListener(async () => {
-    for (const tabId of panelOpenedFor) {
-      panelOpenedFor.delete(tabId);
-      const frames = await chrome.webNavigation.getAllFrames({ tabId }).catch(() => []);
-      const top = (frames || []).find((f) => f.frameId === 0);
-      if (top) syncActionForTab(tabId, top.url);
-    }
-  });
 });
 
 // A fresh install gets the setup wizard, never an update: an existing user

@@ -1,24 +1,3 @@
-// The tab this panel acts on. Normally the active tab of the popup's window;
-// when the panel was opened as its own window from the icon's right-click
-// menu (older Chrome), that window's active tab is the panel itself, so the
-// real tab arrives as ?tabId=.
-async function getTargetTab() {
-  const fromParam = Number(new URLSearchParams(location.search).get("tabId"));
-  if (fromParam) {
-    try {
-      return await chrome.tabs.get(fromParam);
-    } catch (err) {
-      return null;
-    }
-  }
-  const [tab] = await chrome.tabs.query({ active: true, currentWindow: true });
-  return tab || null;
-}
-
-// Tells the service worker when this popup closes, so a tab whose popup was
-// switched on only to open this panel goes back to one-click evaluation.
-chrome.runtime.connect({ name: "popup" });
-
 const els = {
   profileSelect: document.getElementById("profileSelect"),
   profileNameRow: document.getElementById("profileNameRow"),
@@ -653,9 +632,6 @@ async function renderShortcuts() {
   document.getElementById("evaluateTip").textContent = shortcut
     ? `Tip: press ${shortcut} on any posting to evaluate it without opening this panel.`
     : "Tip: set a keyboard shortcut under Shortcuts to evaluate without opening this panel.";
-
-  const stored = await chrome.storage.local.get("uiIconClick");
-  document.getElementById("iconClickMode").value = stored.uiIconClick === "popup" ? "popup" : "evaluate";
 }
 
 // --- readiness -------------------------------------------------------------
@@ -737,7 +713,7 @@ function probePage() {
 }
 
 async function checkPage() {
-  const tab = await getTargetTab();
+  const [tab] = await chrome.tabs.query({ active: true, currentWindow: true });
   if (!tab?.id) {
     setReady("pageDot", "pageState", "warn", "No active tab.");
     return;
@@ -884,7 +860,7 @@ async function evaluateCurrentTab() {
   if (btn.disabled) return;
   btn.disabled = true;
 
-  const tab = await getTargetTab();
+  const [tab] = await chrome.tabs.query({ active: true, currentWindow: true });
   if (!tab?.id) {
     btn.disabled = false;
     return;
@@ -927,7 +903,7 @@ async function summarizeCurrentTab() {
   copyBtn.hidden = true;
   statusEl.textContent = "Extracting…";
 
-  const tab = await getTargetTab();
+  const [tab] = await chrome.tabs.query({ active: true, currentWindow: true });
   if (!tab?.id) {
     statusEl.textContent = "No active tab.";
     btn.disabled = false;
@@ -1073,7 +1049,7 @@ async function waitForSummary(url, profileId, since, timeoutMs = 120000) {
 }
 
 async function restoreLastSummary() {
-  const tab = await getTargetTab();
+  const [tab] = await chrome.tabs.query({ active: true, currentWindow: true });
   if (!tab?.url) return;
 
   const stored = await chrome.storage.local.get("lastSummary");
@@ -1103,10 +1079,6 @@ async function copySummary() {
 }
 
 document.getElementById("save").addEventListener("click", saveSettings);
-document.getElementById("iconClickMode").addEventListener("change", (e) => {
-  // The service worker re-applies it to every open tab.
-  chrome.storage.local.set({ uiIconClick: e.target.value });
-});
 // chrome:// pages can't be linked to, but an extension can open one in a tab.
 document.getElementById("changeShortcut").addEventListener("click", () => {
   chrome.tabs.create({ url: "chrome://extensions/shortcuts" });

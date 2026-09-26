@@ -639,38 +639,31 @@ Two ways the UI could strand itself, both fixed in the 2026-09-19 audit:
 ## Fewer clicks per evaluation (2026-09-26)
 
 Evaluating used to be three steps: open the posting, click the icon, then click
-**Evaluate this tab**. Now:
-- **Keyboard shortcut** (`commands.evaluate-tab`): ⌘⇧E on a Mac (`Command+Shift+E`),
-  Alt+Shift+E elsewhere. Chrome grants the shortcut access to the tab, so it works on
-  any page.
-- **One-click icon on recognised postings.**
-  - The extension can't read a page before it's clicked, so "is this a posting?" is
-    decided from the address. `JOB_POSTING_URLS` in `background.js` matches LinkedIn
-    `/jobs/view/<id>` and `currentJobId=`, Greenhouse boards and `gh_jid`, Indeed `jk`
-    and `vjk`, Workday, Lever and Ashby.
-  - The popup is removed per tab (`action.setPopup`) on those pages, so a click fires
-    `action.onClicked` and evaluates. Everywhere else the popup opens as before.
-  - The address comes from `webNavigation` (`onCommitted` and `onHistoryStateUpdated`,
-    the latter for LinkedIn's in-page job switching), which JobFit already had. No
-    `tabs` permission is needed. Open tabs are re-checked on install and startup via
-    `getAllFrames`.
-  - Kept deliberately narrow: a miss just means the popup opens, while a false match
-    would make the icon evaluate a page that isn't a posting.
-- **The icon's right-click menu** (`contextMenus`, action context): Evaluate this tab,
-  Open JobFit panel, Tracked jobs. It keeps the popup reachable on postings.
-  - "Open JobFit panel" briefly restores the tab's popup and calls
-    `action.openPopup()`. The popup holds a `"popup"` port, and when it closes, the tab
-    goes back to one-click.
-  - On a Chrome without `openPopup`, the panel opens as a small window with
-    `?tabId=`, and the popup acts on that tab through `getTargetTab()`.
-- **Errors** from the icon or shortcut have no popup to appear in, so they go on the
-  icon: a red "!" for that tab, with the reason as its tooltip, cleared after 8s. The
-  badge is cleared with `text: null`, not `""`, so the queue count returns.
-- **One code path:** starting an evaluation (injecting the page scripts, including
-  into Greenhouse iframes) moved from `popup.js` to `inject.js`, shared by the popup
-  and the service worker.
-- **Setting** (`uiIconClick`): "evaluate" (default) or "popup". Changing it re-applies
-  to every open tab.
+**Evaluate this tab**. A **keyboard shortcut** (`commands.evaluate-tab`) removes the
+last two: ⌘⇧E on a Mac (`Command+Shift+E`), Alt+Shift+E elsewhere. Chrome gives the
+shortcut access to the active tab, so it works on any page the popup could evaluate.
+The popup shows the shortcut Chrome actually assigned (`commands.getAll()`, which can
+differ if another extension had it), with a **Change shortcut** button that opens
+`chrome://extensions/shortcuts`.
+
+**Tried and removed: a one-click icon on job postings.** For a while the popup was
+removed per tab on recognised posting URLs, so a click on the icon evaluated
+directly. It came out for three reasons:
+- It took over the icon exactly where the popup matters most. Tracked jobs, Summarize,
+  settings and the queue status moved behind a right-click on the job boards
+  themselves.
+- The icon did different things on different sites, so every click needed a guess
+  first.
+- The shortcut already does it with no clicks, on every site.
+
+The icon always opens the popup.
+
+What stayed from that work:
+- **Errors** from the shortcut have no popup to appear in, so they go on the icon: a
+  red "!" for that tab, with the reason as its tooltip, cleared after 8s. The badge is
+  cleared with `text: null`, not `""`, so the queue count returns.
+- **One code path:** starting an evaluation (injecting the page scripts, including into
+  Greenhouse iframes) lives in `inject.js`, shared by the popup and the service worker.
 
 ## Popup readiness
 
