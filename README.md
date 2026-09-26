@@ -100,8 +100,18 @@ Then open a job posting and click **Evaluate this tab**.
 
 ## Using it
 
-**Evaluate.** A banner appears in the page with the score, verdict and a one-line
-read; **Details** expands to matches, gaps, required gaps, warnings and salary.
+**Evaluate.** Three ways, from fastest:
+- **Keyboard shortcut** on any posting: **⌘⇧E** on a Mac, **Alt+Shift+E** on Windows
+  and Linux. You can change it at `chrome://extensions/shortcuts`, or from the popup
+  under **Shortcuts**.
+- **One click on the JobFit icon** on a LinkedIn, Greenhouse, Indeed, Workday, Lever
+  or Ashby posting. On those pages, **right-click** the icon to open the popup
+  instead (settings, Summarize), or switch the icon back to always opening the popup
+  under **Shortcuts**.
+- **The popup's Evaluate this tab** button, anywhere.
+
+A banner appears in the page with the score, verdict and a one-line read;
+**Details** expands to matches, gaps, required gaps, warnings and salary.
 
 **Queue.** Clicking Evaluate on a second posting while the first is still running
 queues it — up to 10. Click through a search page, queue everything that looks
