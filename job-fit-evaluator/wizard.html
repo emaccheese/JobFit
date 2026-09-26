@@ -282,17 +282,23 @@
                 <input id="lmTimeout" type="number" min="30" step="30">
                 <div class="hint">How long to wait for one evaluation. Slower models on modest hardware can need several minutes.</div>
               </label>
-              <label class="field" id="oaReasoningField" hidden>
-                <span>Reasoning effort</span>
-                <select id="oaReasoning">
-                  <option value="">(model default)</option>
-                  <option value="minimal">minimal</option>
-                  <option value="low">low</option>
-                  <option value="medium">medium</option>
-                  <option value="high">high</option>
-                </select>
-                <div class="hint">Only o-series and GPT-5 models use it. Lower is faster and cheaper.</div>
-              </label>
+              <div id="oaCostFields" hidden>
+                <label class="field" id="oaReasoningField" hidden>
+                  <span>Reasoning effort</span>
+                  <select id="oaReasoning"></select>
+                  <div class="hint">Reasoning tokens are billed as output. Lower is faster and cheaper; low is usually enough to score a posting.</div>
+                </label>
+                <label class="field">
+                  <span>Max output tokens per request</span>
+                  <input id="oaMaxOutput" type="number" min="500" max="64000" step="500">
+                  <div class="hint">A ceiling on what one request can cost, reasoning included. Too low and answers get cut off.</div>
+                </label>
+                <label class="field">
+                  <span>Daily token budget</span>
+                  <input id="oaBudget" type="number" min="0" step="10000" placeholder="no limit">
+                  <div class="hint">When today's usage reaches it, the queue pauses until you raise it or resume tomorrow. A scoring request is typically a few thousand tokens.</div>
+                </label>
+              </div>
               <div id="lmOnlyAdvanced">
               <label class="field">
                 <span>Reasoning effort</span>

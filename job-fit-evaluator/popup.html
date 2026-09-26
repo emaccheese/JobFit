@@ -171,15 +171,22 @@
     <datalist id="openAiModelList"></datalist>
   </section>
 
+  <section id="openAiReasoningSection" hidden>
+    <label for="openAiReasoningEffort">Reasoning effort</label>
+    <select id="openAiReasoningEffort"></select>
+    <div class="hint">Reasoning tokens are billed as output. Lower is cheaper and faster; low is usually enough to score a posting.</div>
+  </section>
+
   <section>
-    <label for="openAiReasoningEffort">Reasoning effort (o-series and GPT-5 models only)</label>
-    <select id="openAiReasoningEffort">
-      <option value="">(model default)</option>
-      <option value="minimal">minimal</option>
-      <option value="low">low</option>
-      <option value="medium">medium</option>
-      <option value="high">high</option>
-    </select>
+    <label for="openAiMaxOutput">Max output tokens per request</label>
+    <input id="openAiMaxOutput" type="number" min="500" max="64000" step="500">
+    <div class="hint">A ceiling on what one request can cost, reasoning included. Too low and answers get cut off.</div>
+  </section>
+
+  <section>
+    <label for="openAiBudget">Daily token budget</label>
+    <input id="openAiBudget" type="number" min="0" step="10000" placeholder="no limit">
+    <div class="hint" id="openAiUsage"></div>
   </section>
   </div>
 

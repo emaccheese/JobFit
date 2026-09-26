@@ -15,7 +15,9 @@
 // injected pages; assigned with var so re-injection doesn't throw.
 var JOB_FIT_PROVIDER = (function () {
   const KEYS = ["modelProvider", "lmStudio", "openai"];
-  const OPENAI_CHAT_URL = "https://api.openai.com/v1/chat/completions";
+  // The Responses API, OpenAI's current recommended API. LM Studio keeps its
+  // chat-completions URL (see lmStudio.url).
+  const OPENAI_RESPONSES_URL = "https://api.openai.com/v1/responses";
   const OPENAI_MODELS_URL = "https://api.openai.com/v1/models";
 
   const LABELS = { lmstudio: "LM Studio", openai: "OpenAI" };
@@ -31,10 +33,12 @@ var JOB_FIT_PROVIDER = (function () {
       return {
         provider,
         label: LABELS.openai,
-        url: OPENAI_CHAT_URL,
+        url: OPENAI_RESPONSES_URL,
         model: (oa.model || "").trim(),
         apiKey: (oa.apiKey || "").trim(),
         reasoningEffort: oa.reasoningEffort || "",
+        maxOutputTokens: clampOutputTokens(oa.maxOutputTokens),
+        dailyTokenBudget: Math.max(0, Number(oa.dailyTokenBudget) || 0),
         timeoutSeconds,
       };
     }
@@ -66,6 +70,42 @@ var JOB_FIT_PROVIDER = (function () {
     return /^(o\d|gpt-5)/i.test(model || "");
   }
 
+  // Which reasoning.effort values a model takes. GPT-5 adds "minimal"; the
+  // o-series starts at "low"; other models take none, and sending one is
+  // rejected. Name-based, like isOpenAiReasoningModel.
+  function reasoningEffortsFor(model) {
+    const name = String(model || "").toLowerCase();
+    if (/^gpt-5/.test(name)) return ["minimal", "low", "medium", "high"];
+    if (/^o\d/.test(name)) return ["low", "medium", "high"];
+    return [];
+  }
+
+  // The saved effort, adjusted to what this model accepts: "minimal" on an
+  // o-series model becomes "low" rather than a rejected request, and a model
+  // that takes no effort gets none.
+  function effectiveReasoningEffort(model, wanted) {
+    const allowed = reasoningEffortsFor(model);
+    if (!allowed.length || !wanted) return "";
+    if (allowed.includes(wanted)) return wanted;
+    return wanted === "minimal" ? allowed[0] : "";
+  }
+
+  // A ceiling on what one request can cost. Reasoning tokens count toward it,
+  // so too low a cap cuts the answer off — callLmStudio reports that plainly.
+  const OUTPUT_TOKEN_RANGE = { min: 500, max: 64000 };
+  function clampOutputTokens(value) {
+    const n = Math.round(Number(value));
+    if (!n) return JOB_FIT_DEFAULTS.openai.maxOutputTokens;
+    return Math.min(OUTPUT_TOKEN_RANGE.max, Math.max(OUTPUT_TOKEN_RANGE.min, n));
+  }
+
+  // Local calendar day, so "today" in the usage totals matches the user's day,
+  // not UTC's.
+  function dayKey(ts) {
+    const d = new Date(ts || Date.now());
+    return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
+  }
+
   // /v1/models lists every model on the account — embeddings, speech, image,
   // moderation — and only chat models can score a posting.
   function isOpenAiChatModel(id) {
@@ -74,5 +114,20 @@ var JOB_FIT_PROVIDER = (function () {
     return !/(embedding|whisper|tts|dall-e|image|audio|realtime|transcribe|search|moderation|instruct)/.test(name);
   }
 
-  return { KEYS, LABELS, OPENAI_CHAT_URL, OPENAI_MODELS_URL, resolve, load, currentModel, isOpenAiReasoningModel, isOpenAiChatModel };
+  return {
+    KEYS,
+    LABELS,
+    OPENAI_RESPONSES_URL,
+    OPENAI_MODELS_URL,
+    OUTPUT_TOKEN_RANGE,
+    resolve,
+    load,
+    currentModel,
+    isOpenAiReasoningModel,
+    isOpenAiChatModel,
+    reasoningEffortsFor,
+    effectiveReasoningEffort,
+    clampOutputTokens,
+    dayKey,
+  };
 })();

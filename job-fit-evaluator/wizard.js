@@ -370,6 +370,7 @@ function renderModelStatus(probe) {
   });
   $("modelPicker").hidden = false;
   state.modelOk = true;
+  if (openai) renderOaReasoning();
 }
 
 async function testConnection() {
@@ -392,15 +393,34 @@ function showProviderFields() {
   const openai = state.provider === "openai";
   $("openAiKeyField").hidden = !openai;
   $("lmUrlField").hidden = openai;
-  $("oaReasoningField").hidden = !openai;
+  $("oaCostFields").hidden = !openai;
+  renderOaReasoning();
   $("lmOnlyAdvanced").hidden = openai;
   document.querySelectorAll('input[name="provider"]').forEach((r) => (r.checked = r.value === state.provider));
+}
+
+// Only the effort levels the selected model accepts; hidden for models that
+// take none. The saved preference in state.oa is left alone, so picking a
+// different model and back restores it.
+function renderOaReasoning() {
+  const model = state.oa.model || "";
+  const allowed = JOB_FIT_PROVIDER.reasoningEffortsFor(model);
+  $("oaReasoningField").hidden = !allowed.length;
+  const select = $("oaReasoning");
+  select.innerHTML = "";
+  ["", ...allowed].forEach((value) => {
+    const opt = el("option", null, value || "(model default)");
+    opt.value = value;
+    select.appendChild(opt);
+  });
+  select.value = JOB_FIT_PROVIDER.effectiveReasoningEffort(model, state.oa.reasoningEffort);
 }
 
 function fillModel() {
   showProviderFields();
   $("oaKey").value = state.oa.apiKey || "";
-  $("oaReasoning").value = state.oa.reasoningEffort || "";
+  $("oaMaxOutput").value = JOB_FIT_PROVIDER.clampOutputTokens(state.oa.maxOutputTokens);
+  $("oaBudget").value = Number(state.oa.dailyTokenBudget) || "";
   $("lmUrl").value = state.lm.url || JOB_FIT_DEFAULTS.lmStudio.url;
   $("lmTimeout").value = state.lm.timeoutSeconds || JOB_FIT_DEFAULTS.lmStudio.timeoutSeconds;
   $("lmReasoning").value = state.lm.reasoningEffort ?? "";
@@ -415,7 +435,9 @@ function collectModel() {
   state.lm.enableThinking = $("lmThinking").checked;
   const beforeOa = JSON.stringify(state.oa);
   state.oa.apiKey = $("oaKey").value.trim();
-  state.oa.reasoningEffort = $("oaReasoning").value;
+  if (!$("oaReasoningField").hidden) state.oa.reasoningEffort = $("oaReasoning").value;
+  state.oa.maxOutputTokens = JOB_FIT_PROVIDER.clampOutputTokens($("oaMaxOutput").value);
+  state.oa.dailyTokenBudget = Math.max(0, Number($("oaBudget").value) || 0);
   const picked = document.querySelector('input[name="lmModel"]:checked');
   if (picked) activeModelSettings().model = picked.value;
   if (JSON.stringify(state.lm) !== before || JSON.stringify(state.oa) !== beforeOa) state.modelDirty = true;
@@ -1022,7 +1044,7 @@ async function runTest() {
       el(
         "div",
         "hint",
-        `Took ${seconds}s. Your timeout is ${timeout}s.${tight ? " That's close; consider raising it under Model → Advanced." : ""}`
+        `Took ${seconds}s${response.usage ? `, ${(response.usage.input + response.usage.output).toLocaleString()} tokens${response.usage.reasoning ? ` (${response.usage.reasoning.toLocaleString()} reasoning)` : ""}` : ""}. Your timeout is ${timeout}s.${tight ? " That's close; consider raising it under Model → Advanced." : ""}`
       )
     );
   }
@@ -1271,7 +1293,13 @@ $("card").addEventListener("change", (e) => {
   const group = e.target.closest(".choices");
   if (group && e.target.checked) applyAnswer(group.dataset.answer, e.target.value);
   if (e.target.closest("#markets")) syncSalaryRows();
-  if (e.target.name === "lmModel") state.modelDirty = true;
+  if (e.target.name === "lmModel") {
+    state.modelDirty = true;
+    if (state.provider === "openai") {
+      state.oa.model = e.target.value;
+      renderOaReasoning();
+    }
+  }
   if (e.target.id === "lmUrl" || e.target.id === "oaKey") testConnection();
   // Switching provider re-tests against the new one straight away; with no
   // key yet, that just asks for one.

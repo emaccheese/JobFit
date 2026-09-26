@@ -71,6 +71,11 @@ Target: the roles, seniority and locations you actually want.`,
     apiKey: "",
     model: "",
     reasoningEffort: "low",
+    // Per-request ceiling. A scoring answer is well under 1k tokens; the rest
+    // is headroom for reasoning.
+    maxOutputTokens: 4000,
+    // Input + output tokens per local day; 0 = no limit.
+    dailyTokenBudget: 0,
   },
   expectedSalary: {
     USD: { min: null, max: null },

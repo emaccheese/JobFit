@@ -49,6 +49,7 @@ var JOB_FIT_EVALSTORE = (function () {
       evaluation: record.evaluation || null,
       hardReject: record.hardReject || null,
       durationMs: record.durationMs || null,
+      usage: record.usage || null,
       evaluatedAt: record.lastEvaluatedAt,
     };
   }

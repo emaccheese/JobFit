@@ -92,7 +92,13 @@ function buildUserPrompt(profile, postingText, expectedSalary, domainFlags) {
     domainFlags && domainFlags.length
       ? `\n\nDETECTED DOMAIN-FLAG TERMS IN POSTING (keyword scan, cross-check each against the profile per the scoring guidance): ${domainFlags.join(", ")}`
       : "";
-  const prompt = `CANDIDATE PROFILE:\n${profile}\n\nCANDIDATE EXPECTED SALARY (per year): ${formatExpectedSalary(expectedSalary)}${domainFlagsLine}\n\nJOB POSTING:\n${trimmed}`;
+  // Everything that's the same on every call comes first — the system prompt,
+  // then this profile and its salary expectations — and everything that
+  // changes per posting comes last. Providers cache a repeated prefix (OpenAI
+  // bills it at a discount; LM Studio reuses its KV cache), and the domain-flag
+  // line used to sit between the profile and the posting, cutting that prefix
+  // short on every posting that hit a different flag.
+  const prompt = `CANDIDATE PROFILE:\n${profile}\n\nCANDIDATE EXPECTED SALARY (per year): ${formatExpectedSalary(expectedSalary)}\n\nJOB POSTING:\n${trimmed}${domainFlagsLine}`;
   return { prompt, truncated };
 }
 
@@ -229,26 +235,132 @@ function lmStudioRequestBody(systemPrompt, userPrompt, settings) {
   };
 }
 
-// OpenAI rejects parameters it doesn't support rather than ignoring them, so
-// this sends only what the chosen model takes. No "/no_think" (a local-model
-// convention) and no penalties (they were there to stop local models looping).
-// JSON mode guarantees a parseable object; every prompt already asks for JSON,
-// which JSON mode requires.
+// OpenAI goes through the Responses API (POST /v1/responses), its current
+// recommended API; LM Studio stays on chat completions, which is what its
+// server implements. OpenAI rejects parameters it doesn't support rather than
+// ignoring them, so this sends only what the chosen model takes:
+// - no "/no_think" (a local-model convention) and no penalties (they were
+//   there to stop local models looping); no seed, which Responses doesn't take
+// - JSON mode via text.format. It requires the word "JSON" in the input
+//   messages, so the instructions go in as a developer message rather than
+//   the separate `instructions` field.
+// - store: false. Responses keeps each response on OpenAI's side by default
+//   for later retrieval; nothing here ever retrieves one, and the input is
+//   a CV and salary expectations.
+// - Reasoning models (o-series, gpt-5) take reasoning.effort and only the
+//   default temperature; the others take temperature.
 function openAiRequestBody(systemPrompt, userPrompt, settings) {
   const reasoning = JOB_FIT_PROVIDER.isOpenAiReasoningModel(settings.model);
+  const effort = JOB_FIT_PROVIDER.effectiveReasoningEffort(settings.model, settings.reasoningEffort);
   return {
     model: settings.model,
-    messages: [
-      { role: "system", content: systemPrompt },
+    input: [
+      { role: "developer", content: systemPrompt },
       { role: "user", content: userPrompt },
     ],
-    response_format: { type: "json_object" },
-    max_completion_tokens: 16000,
-    seed: JOB_FIT_DEFAULTS.lmStudio.seed,
-    // Reasoning models only accept the default temperature.
+    text: { format: { type: "json_object" } },
+    max_output_tokens: settings.maxOutputTokens,
+    store: false,
     ...(reasoning ? {} : { temperature: 0.2 }),
-    ...(reasoning && settings.reasoningEffort ? { reasoning_effort: settings.reasoningEffort } : {}),
+    ...(effort ? { reasoning: { effort } } : {}),
   };
+}
+
+// A Responses API reply is a list of output items — reasoning items, then the
+// assistant message whose content parts hold the text. Returns the text, or a
+// failure in the same shape callLmStudio uses everywhere else.
+function readOpenAiResponse(data) {
+  if (!data || !Array.isArray(data.output)) {
+    return { ok: false, failure: "shape", error: "Unexpected response shape from OpenAI." };
+  }
+  const parts = data.output
+    .filter((item) => item && item.type === "message")
+    .flatMap((item) => (Array.isArray(item.content) ? item.content : []));
+  const refusal = parts.find((p) => p.type === "refusal");
+  if (refusal) {
+    return { ok: false, failure: "refusal", error: `OpenAI declined to answer: ${refusal.refusal || "no reason given"}` };
+  }
+  const text = parts
+    .filter((p) => p.type === "output_text" && typeof p.text === "string")
+    .map((p) => p.text)
+    .join("");
+  if (text.trim()) return { ok: true, text };
+
+  // Nothing usable: say why, when OpenAI says why.
+  const reason = data.incomplete_details && data.incomplete_details.reason;
+  if (data.status === "incomplete" && reason === "max_output_tokens") {
+    return {
+      ok: false,
+      failure: "length",
+      error: "The model used its whole output budget (much of it on reasoning) before answering. Lower the reasoning effort or pick a non-reasoning model.",
+    };
+  }
+  return {
+    ok: false,
+    failure: "empty",
+    error: `OpenAI returned no text${data.status && data.status !== "completed" ? ` (status: ${data.status}${reason ? `, ${reason}` : ""})` : ""}.`,
+  };
+}
+
+// --- token usage ----------------------------------------------------------
+//
+// Both APIs report what a request used, in different field names. Kept per
+// local day and provider in `usageByDay`, which drives the popup's totals and
+// the OpenAI daily budget. Tokens, not dollars: prices differ per model and
+// change, and a stale price table would be worse than none.
+
+const USAGE_KEEP_DAYS = 62;
+
+function usageFrom(provider, data) {
+  const u = data && data.usage;
+  if (!u) return null;
+  if (provider === "openai") {
+    return {
+      input: u.input_tokens || 0,
+      output: u.output_tokens || 0,
+      reasoning: (u.output_tokens_details && u.output_tokens_details.reasoning_tokens) || 0,
+      cached: (u.input_tokens_details && u.input_tokens_details.cached_tokens) || 0,
+    };
+  }
+  return {
+    input: u.prompt_tokens || 0,
+    output: u.completion_tokens || 0,
+    reasoning: (u.completion_tokens_details && u.completion_tokens_details.reasoning_tokens) || 0,
+    cached: (u.prompt_tokens_details && u.prompt_tokens_details.cached_tokens) || 0,
+  };
+}
+
+// Serialized: wizard calls can finish while a queued evaluation does, and
+// two read-modify-writes of the same key would drop one of them.
+let usageWrite = Promise.resolve();
+
+function recordUsage(provider, usage) {
+  if (!usage) return Promise.resolve();
+  usageWrite = usageWrite.then(async () => {
+    const stored = await chrome.storage.local.get("usageByDay");
+    const days = stored.usageByDay || {};
+    const key = JOB_FIT_PROVIDER.dayKey();
+    const day = (days[key] = days[key] || {});
+    const t = (day[provider] = day[provider] || { requests: 0, input: 0, output: 0, reasoning: 0, cached: 0 });
+    t.requests += 1;
+    t.input += usage.input;
+    t.output += usage.output;
+    t.reasoning += usage.reasoning;
+    t.cached += usage.cached;
+    Object.keys(days)
+      .sort()
+      .slice(0, -USAGE_KEEP_DAYS)
+      .forEach((old) => delete days[old]);
+    await chrome.storage.local.set({ usageByDay: days });
+  }).catch(() => {});
+  return usageWrite;
+}
+
+async function openAiTokensToday() {
+  const stored = await chrome.storage.local.get("usageByDay");
+  const day = (stored.usageByDay || {})[JOB_FIT_PROVIDER.dayKey()] || {};
+  const t = day.openai;
+  return t ? t.input + t.output : 0;
 }
 
 // The timeout, not max_tokens, is what actually bounds how long the user
@@ -264,8 +376,9 @@ function openAiRequestBody(systemPrompt, userPrompt, settings) {
 // Studio busy generating an answer nobody is waiting for.
 async function callLmStudio(systemPrompt, userPrompt, { signal } = {}) {
   // Named for where it started; it now calls whichever provider is selected
-  // (see provider.js). Both speak the OpenAI chat-completions format, so only
-  // the URL, the auth header and the accepted parameters differ.
+  // (see provider.js): LM Studio's chat-completions endpoint, or OpenAI's
+  // Responses API. The request and reply shapes differ per provider; the
+  // result handed back is the same either way.
   const settings = await JOB_FIT_PROVIDER.load();
   const { url, provider, label, timeoutSeconds } = settings;
   const model = settings.model || undefined;
@@ -279,6 +392,18 @@ async function callLmStudio(systemPrompt, userPrompt, { signal } = {}) {
     }
     if (!model) {
       return { ok: false, failure: "config", error: "No OpenAI model is selected. Pick one in the popup under Model." };
+    }
+    // Checked before sending, so the request that would cross the line is
+    // never made. "budget" pauses the queue; raising the budget resumes it.
+    if (settings.dailyTokenBudget) {
+      const used = await openAiTokensToday();
+      if (used >= settings.dailyTokenBudget) {
+        return {
+          ok: false,
+          failure: "budget",
+          error: `Today's OpenAI budget is used up (${used.toLocaleString()} of ${settings.dailyTokenBudget.toLocaleString()} tokens). Raise it in the popup under Model to continue now, or press Resume tomorrow.`,
+        };
+      }
     }
   }
 
@@ -347,6 +472,20 @@ async function callLmStudio(systemPrompt, userPrompt, { signal } = {}) {
   }
 
   const data = await resp.json().catch(() => null);
+  // Recorded whatever happens next: a reply that fails to parse was still billed.
+  const usage = usageFrom(provider, data);
+  await recordUsage(provider, usage);
+
+  if (provider === "openai") {
+    const read = readOpenAiResponse(data);
+    if (!read.ok) return { ...read, raw: JSON.stringify(data) };
+    try {
+      return { ok: true, data: extractJson(read.text), model: model || "", usage, durationMs: Date.now() - startedAt };
+    } catch (err) {
+      return { ok: false, failure: "parse", error: "Could not parse JSON from OpenAI's response.", raw: read.text };
+    }
+  }
+
   const message = data?.choices?.[0]?.message;
   const content = message?.content;
   const reasoningContent = message?.reasoning_content;
@@ -376,7 +515,7 @@ async function callLmStudio(systemPrompt, userPrompt, { signal } = {}) {
   try {
     // The model is reported back so it can be stored on the record: scores from
     // different models are not comparable, and the history page sorts by score.
-    return { ok: true, data: extractJson(raw), model: model || "", durationMs: Date.now() - startedAt };
+    return { ok: true, data: extractJson(raw), model: model || "", usage, durationMs: Date.now() - startedAt };
   } catch (err) {
     return { ok: false, failure: "parse", error: "Could not parse JSON from the model's response.", raw };
   }
@@ -805,6 +944,7 @@ async function runQueuedEvaluation(item) {
       profileFingerprint: snapshot.fingerprint,
       model: result.model || "",
       durationMs: result.durationMs || null,
+      usage: result.usage || null,
       hardReject: null,
       evaluation: result.data,
       score: result.data.score,
@@ -989,7 +1129,7 @@ chrome.storage.onChanged.addListener((changes, area) => {
     if (key === "modelProvider") return before !== after;
     const b = before || {};
     const a = after || {};
-    return b.model !== a.model || b.url !== a.url || b.apiKey !== a.apiKey;
+    return b.model !== a.model || b.url !== a.url || b.apiKey !== a.apiKey || b.dailyTokenBudget !== a.dailyTokenBudget;
   });
   if (!touched) return;
   clearTimeout(settingsResumeTimer);

@@ -12,6 +12,8 @@ const els = {
   openAiKey: document.getElementById("openAiKey"),
   openAiModel: document.getElementById("openAiModel"),
   openAiReasoningEffort: document.getElementById("openAiReasoningEffort"),
+  openAiMaxOutput: document.getElementById("openAiMaxOutput"),
+  openAiBudget: document.getElementById("openAiBudget"),
   profile: document.getElementById("profile"),
   salaryUsdMin: document.getElementById("salaryUsdMin"),
   salaryUsdMax: document.getElementById("salaryUsdMax"),
@@ -200,8 +202,14 @@ async function loadSettings() {
   els.modelProvider.value = stored.modelProvider === "openai" ? "openai" : "lmstudio";
   els.openAiKey.value = openai.apiKey || "";
   els.openAiModel.value = openai.model || "";
-  els.openAiReasoningEffort.value = openai.reasoningEffort || "";
+  els.openAiMaxOutput.value = openai.maxOutputTokens;
+  els.openAiBudget.value = Number(openai.dailyTokenBudget) || "";
+  // The saved effort, kept even while a model that doesn't take one is
+  // selected, so switching back restores it.
+  els.openAiReasoningEffort.dataset.saved = openai.reasoningEffort || "";
+  renderReasoningOptions();
   showProviderFields();
+  renderUsage();
   els.lmStudioUrl.value = lmStudio.url || JOB_FIT_DEFAULTS.lmStudio.url;
   els.lmStudioModel.value = lmStudio.model || "";
   els.lmStudioTimeout.value = lmStudio.timeoutSeconds || JOB_FIT_DEFAULTS.lmStudio.timeoutSeconds;
@@ -257,7 +265,11 @@ function modelSettingsFromForm() {
     openai: {
       apiKey: els.openAiKey.value.trim(),
       model: els.openAiModel.value.trim(),
-      reasoningEffort: els.openAiReasoningEffort.value,
+      reasoningEffort: document.getElementById("openAiReasoningSection").hidden
+        ? els.openAiReasoningEffort.dataset.saved || ""
+        : els.openAiReasoningEffort.value,
+      maxOutputTokens: JOB_FIT_PROVIDER.clampOutputTokens(els.openAiMaxOutput.value),
+      dailyTokenBudget: Math.max(0, Number(els.openAiBudget.value) || 0),
     },
   };
 }
@@ -265,6 +277,66 @@ function modelSettingsFromForm() {
 async function persistSettings() {
   await chrome.storage.local.set(modelSettingsFromForm());
   await JOB_FIT_PROFILES.save(store);
+}
+
+// Only the effort levels this model accepts, and the field only for models
+// that take one at all: a value the model rejects fails the whole request.
+function renderReasoningOptions() {
+  const select = els.openAiReasoningEffort;
+  const allowed = JOB_FIT_PROVIDER.reasoningEffortsFor(els.openAiModel.value.trim());
+  const wanted = select.dataset.saved ?? select.value ?? "";
+  document.getElementById("openAiReasoningSection").hidden = !allowed.length;
+  select.innerHTML = "";
+  if (!allowed.length) return;
+  ["", ...allowed].forEach((value) => {
+    const opt = document.createElement("option");
+    opt.value = value;
+    opt.textContent = value || "(model default)";
+    select.appendChild(opt);
+  });
+  select.value = JOB_FIT_PROVIDER.effectiveReasoningEffort(els.openAiModel.value.trim(), wanted);
+}
+
+function formatTokens(n) {
+  if (n >= 1e6) return `${(n / 1e6).toFixed(1)}M`;
+  if (n >= 1e3) return `${(n / 1e3).toFixed(1)}k`;
+  return String(n);
+}
+
+// Today's and this month's OpenAI tokens beside the budget field, plus what
+// the budget comes to in requests at the current average — a token budget
+// means nothing until it's translated into evaluations.
+async function renderUsage() {
+  const host = document.getElementById("openAiUsage");
+  const days = (await chrome.storage.local.get("usageByDay")).usageByDay || {};
+  const today = JOB_FIT_PROVIDER.dayKey();
+  const month = today.slice(0, 7);
+  const sum = (filter) =>
+    Object.entries(days)
+      .filter(([day]) => filter(day))
+      .reduce(
+        (acc, [, d]) => {
+          const t = d.openai;
+          if (t) {
+            acc.requests += t.requests;
+            acc.tokens += t.input + t.output;
+          }
+          return acc;
+        },
+        { requests: 0, tokens: 0 }
+      );
+  const t = sum((d) => d === today);
+  const m = sum((d) => d.startsWith(month));
+  if (!m.requests) {
+    host.textContent = "Blank for no limit. Usage shows here once you've run some requests.";
+    return;
+  }
+  const avg = Math.round(m.tokens / m.requests);
+  const budget = Number(els.openAiBudget.value) || 0;
+  host.textContent =
+    `Today: ${t.requests} request${t.requests === 1 ? "" : "s"}, ${formatTokens(t.tokens)} tokens · ` +
+    `this month: ${formatTokens(m.tokens)} · about ${formatTokens(avg)} per request` +
+    (budget ? ` — this budget allows roughly ${Math.floor(budget / avg)} a day.` : ". Blank budget = no limit.");
 }
 
 function showProviderFields() {
@@ -297,6 +369,7 @@ function watchSettingsFields() {
     els.profile, els.lmStudioUrl, els.lmStudioModel, els.lmStudioTimeout,
     els.lmStudioReasoningEffort, els.lmStudioEnableThinking,
     els.modelProvider, els.openAiKey, els.openAiModel, els.openAiReasoningEffort,
+    els.openAiMaxOutput, els.openAiBudget,
     els.hardRejectsPhrases, els.hardRejectsPatterns,
     els.softWarningsPhrases, els.softWarningsPatterns,
     els.domainFlagsPhrases, els.domainFlagsPatterns,
@@ -1091,7 +1164,17 @@ els.openAiKey.addEventListener("change", () => {
   loadOpenAiModels();
   flushAutoSave().then(checkModel);
 });
-els.openAiModel.addEventListener("change", () => flushAutoSave().then(checkModel));
+els.openAiModel.addEventListener("change", () => {
+  renderReasoningOptions();
+  flushAutoSave().then(checkModel);
+});
+els.openAiModel.addEventListener("input", renderReasoningOptions);
+els.openAiBudget.addEventListener("input", renderUsage);
+// The preference is only what the user picks here, never the adjusted value a
+// half-typed model name produced.
+els.openAiReasoningEffort.addEventListener("change", () => {
+  els.openAiReasoningEffort.dataset.saved = els.openAiReasoningEffort.value;
+});
 document.getElementById("reset").addEventListener("click", resetKeywordLists);
 els.profileSelect.addEventListener("change", (e) => switchProfile(e.target.value));
 // New profiles go through the setup wizard: a blank profile has no CV, no

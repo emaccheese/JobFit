@@ -62,6 +62,15 @@ function resetPage() {
   page = 0;
 }
 
+// " · 2.3k tokens (800 reasoning)", or "" for scores from before usage was
+// recorded.
+function usageText(usage) {
+  if (!usage) return "";
+  const k = (n) => (n >= 1000 ? `${(n / 1000).toFixed(1)}k` : String(n));
+  const total = (usage.input || 0) + (usage.output || 0);
+  return ` · ${k(total)} tokens${usage.reasoning ? ` (${k(usage.reasoning)} reasoning)` : ""}`;
+}
+
 function scoreClass(score) {
   // Null means summarized but never scored — that has to read as neutral, not
   // as a red 0, which is what a hard reject looks like.
@@ -393,7 +402,7 @@ function appendPreviousResults(body, record) {
       detail.appendChild(el("div", null, `${p.hardReject.label}: "${p.hardReject.matchedText}"`));
     } else if (p.evaluation) {
       if (p.evaluation.one_line) detail.appendChild(el("div", null, p.evaluation.one_line));
-      if (p.durationMs) detail.appendChild(el("div", "meta-line", `Scored in ${Math.round(p.durationMs / 1000)}s`));
+      if (p.durationMs) detail.appendChild(el("div", "meta-line", `Scored in ${Math.round(p.durationMs / 1000)}s${usageText(p.usage)}`));
       evaluationTags(detail, p.evaluation);
     } else {
       detail.appendChild(el("div", "meta-line", "No reasoning was stored for this run."));
@@ -688,7 +697,9 @@ function renderJob(record) {
     body.appendChild(headline);
     if (e.one_line) body.appendChild(el("div", null, e.one_line));
     if (record.durationMs) {
-      body.appendChild(el("div", "meta-line", `Scored in ${Math.round(record.durationMs / 1000)}s${record.model ? ` by ${record.model}` : ""}`));
+      body.appendChild(
+        el("div", "meta-line", `Scored in ${Math.round(record.durationMs / 1000)}s${record.model ? ` by ${record.model}` : ""}${usageText(record.usage)}`)
+      );
     }
     evaluationTags(body, e);
     tagList(body, "Warnings", record.softWarnings, "tag-amber");
