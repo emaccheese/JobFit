@@ -8,6 +8,14 @@ const els = {
   lmStudioTimeout: document.getElementById("lmStudioTimeout"),
   lmStudioReasoningEffort: document.getElementById("lmStudioReasoningEffort"),
   lmStudioEnableThinking: document.getElementById("lmStudioEnableThinking"),
+  modelProvider: document.getElementById("modelProvider"),
+  openAiKey: document.getElementById("openAiKey"),
+  openAiModel: document.getElementById("openAiModel"),
+  openAiTier: document.getElementById("openAiTier"),
+  openAiFlex: document.getElementById("openAiFlex"),
+  openAiReasoningEffort: document.getElementById("openAiReasoningEffort"),
+  openAiMaxOutput: document.getElementById("openAiMaxOutput"),
+  openAiBudget: document.getElementById("openAiBudget"),
   profile: document.getElementById("profile"),
   salaryUsdMin: document.getElementById("salaryUsdMin"),
   salaryUsdMax: document.getElementById("salaryUsdMax"),
@@ -190,8 +198,22 @@ function captureForm() {
 }
 
 async function loadSettings() {
-  const stored = await chrome.storage.local.get(["lmStudio", "uiOpenSections"]);
+  const stored = await chrome.storage.local.get([...JOB_FIT_PROVIDER.KEYS, "uiOpenSections"]);
   const lmStudio = stored.lmStudio || JOB_FIT_DEFAULTS.lmStudio;
+  const openai = { ...JOB_FIT_DEFAULTS.openai, ...(stored.openai || {}) };
+  els.modelProvider.value = stored.modelProvider === "openai" ? "openai" : "lmstudio";
+  els.openAiKey.value = openai.apiKey || "";
+  els.openAiModel.value = openai.model || JOB_FIT_DEFAULTS.openai.model;
+  els.openAiFlex.value = ["bulk", "always", "never"].includes(openai.flex) ? openai.flex : "bulk";
+  renderTierOptions();
+  els.openAiMaxOutput.value = openai.maxOutputTokens;
+  els.openAiBudget.value = Number(openai.dailyTokenBudget) || "";
+  // The saved effort, kept even while a model that doesn't take one is
+  // selected, so switching back restores it.
+  els.openAiReasoningEffort.dataset.saved = openai.reasoningEffort || "";
+  renderReasoningOptions();
+  showProviderFields();
+  renderUsage();
   els.lmStudioUrl.value = lmStudio.url || JOB_FIT_DEFAULTS.lmStudio.url;
   els.lmStudioModel.value = lmStudio.model || "";
   els.lmStudioTimeout.value = lmStudio.timeoutSeconds || JOB_FIT_DEFAULTS.lmStudio.timeoutSeconds;
@@ -231,8 +253,11 @@ function flushAutoSave() {
   return persistSettings();
 }
 
-async function persistSettings() {
-  await chrome.storage.local.set({
+// The model settings as the form holds them. One builder for autosave and the
+// Save button, which used to each spell the object out and could drift.
+function modelSettingsFromForm() {
+  return {
+    modelProvider: els.modelProvider.value === "openai" ? "openai" : "lmstudio",
     lmStudio: {
       url: els.lmStudioUrl.value.trim() || JOB_FIT_DEFAULTS.lmStudio.url,
       model: els.lmStudioModel.value.trim(),
@@ -241,8 +266,149 @@ async function persistSettings() {
       reasoningEffort: els.lmStudioReasoningEffort.value,
       enableThinking: els.lmStudioEnableThinking.checked,
     },
-  });
+    openai: {
+      apiKey: els.openAiKey.value.trim(),
+      model: selectedOpenAiModel(),
+      flex: els.openAiFlex.value,
+      reasoningEffort: document.getElementById("openAiReasoningSection").hidden
+        ? els.openAiReasoningEffort.dataset.saved || ""
+        : els.openAiReasoningEffort.value,
+      maxOutputTokens: JOB_FIT_PROVIDER.clampOutputTokens(els.openAiMaxOutput.value),
+      dailyTokenBudget: Math.max(0, Number(els.openAiBudget.value) || 0),
+    },
+  };
+}
+
+async function persistSettings() {
+  await chrome.storage.local.set(modelSettingsFromForm());
   await JOB_FIT_PROFILES.save(store);
+}
+
+// Only the effort levels this model accepts, and the field only for models
+// that take one at all: a value the model rejects fails the whole request.
+// Tiers first, a custom model id only when asked for. `available` is the
+// key's model list once known, so a tier the key can't use is greyed out.
+let availableOpenAiModels = null;
+
+function renderTierOptions() {
+  const select = els.openAiTier;
+  const current = els.openAiModel.value.trim();
+  select.innerHTML = "";
+  (JOB_FIT_DEFAULTS.openaiTiers || []).forEach((tier) => {
+    const opt = document.createElement("option");
+    opt.value = tier.id;
+    const cost = JOB_FIT_PROVIDER.formatDollars(JOB_FIT_PROVIDER.costPer100(tier));
+    const missing = availableOpenAiModels && !availableOpenAiModels.includes(tier.model);
+    opt.textContent = `${tier.label} — ${tier.model}${missing ? " (not on this key)" : ` · ≈ ${cost} per 100 jobs`}`;
+    opt.disabled = Boolean(missing);
+    select.appendChild(opt);
+  });
+  const custom = document.createElement("option");
+  custom.value = "custom";
+  custom.textContent = "Custom model…";
+  select.appendChild(custom);
+  const tier = JOB_FIT_PROVIDER.tierForModel(current);
+  select.value = tier ? tier.id : "custom";
+  syncTierHint();
+}
+
+function syncTierHint() {
+  const tier = (JOB_FIT_DEFAULTS.openaiTiers || []).find((t) => t.id === els.openAiTier.value);
+  document.getElementById("openAiCustomRow").hidden = Boolean(tier);
+  const hint = document.getElementById("openAiTierHint");
+  if (!tier) {
+    hint.textContent = "Any chat model your key has. Its cost isn't estimated here.";
+    return;
+  }
+  const flex = JOB_FIT_PROVIDER.formatDollars(JOB_FIT_PROVIDER.costPer100(tier, "flex"));
+  hint.textContent = `${tier.blurb} About ${flex} per 100 with Flex.`;
+}
+
+function selectedOpenAiModel() {
+  const tier = (JOB_FIT_DEFAULTS.openaiTiers || []).find((t) => t.id === els.openAiTier.value);
+  return tier ? tier.model : els.openAiModel.value.trim();
+}
+
+function renderReasoningOptions() {
+  const select = els.openAiReasoningEffort;
+  const allowed = JOB_FIT_PROVIDER.reasoningEffortsFor(selectedOpenAiModel());
+  const wanted = select.dataset.saved ?? select.value ?? "";
+  document.getElementById("openAiReasoningSection").hidden = !allowed.length;
+  select.innerHTML = "";
+  if (!allowed.length) return;
+  ["", ...allowed].forEach((value) => {
+    const opt = document.createElement("option");
+    opt.value = value;
+    opt.textContent = value || "(model default)";
+    select.appendChild(opt);
+  });
+  select.value = JOB_FIT_PROVIDER.effectiveReasoningEffort(selectedOpenAiModel(), wanted);
+}
+
+function formatTokens(n) {
+  if (n >= 1e6) return `${(n / 1e6).toFixed(1)}M`;
+  if (n >= 1e3) return `${(n / 1e3).toFixed(1)}k`;
+  return String(n);
+}
+
+// Today's and this month's OpenAI tokens beside the budget field, plus what
+// the budget comes to in requests at the current average — a token budget
+// means nothing until it's translated into evaluations.
+async function renderUsage() {
+  const host = document.getElementById("openAiUsage");
+  const days = (await chrome.storage.local.get("usageByDay")).usageByDay || {};
+  const today = JOB_FIT_PROVIDER.dayKey();
+  const month = today.slice(0, 7);
+  const sum = (filter) =>
+    Object.entries(days)
+      .filter(([day]) => filter(day))
+      .reduce(
+        (acc, [, d]) => {
+          const t = d.openai;
+          if (t) {
+            acc.requests += t.requests;
+            acc.tokens += t.input + t.output;
+          }
+          return acc;
+        },
+        { requests: 0, tokens: 0 }
+      );
+  const t = sum((d) => d === today);
+  const m = sum((d) => d.startsWith(month));
+  if (!m.requests) {
+    host.textContent = "Blank for no limit. Usage shows here once you've run some requests.";
+    return;
+  }
+  const avg = Math.round(m.tokens / m.requests);
+  const budget = Number(els.openAiBudget.value) || 0;
+  host.textContent =
+    `Today: ${t.requests} request${t.requests === 1 ? "" : "s"}, ${formatTokens(t.tokens)} tokens · ` +
+    `this month: ${formatTokens(m.tokens)} · about ${formatTokens(avg)} per request` +
+    (budget ? ` — this budget allows roughly ${Math.floor(budget / avg)} a day.` : ". Blank budget = no limit.");
+}
+
+function showProviderFields() {
+  const openai = els.modelProvider.value === "openai";
+  document.getElementById("lmStudioFields").hidden = openai;
+  document.getElementById("openAiFields").hidden = !openai;
+}
+
+// Fills the model suggestions from the account's own model list, so the name
+// is picked rather than typed from memory.
+async function loadOpenAiModels() {
+  const key = els.openAiKey.value.trim();
+  if (!key) return;
+  const probe = await probeModels({ provider: "openai", apiKey: key });
+  const list = document.getElementById("openAiModelList");
+  list.innerHTML = "";
+  if (!probe.ok) return;
+  availableOpenAiModels = probe.models;
+  renderTierOptions();
+  probe.models.forEach((id) => {
+    const opt = document.createElement("option");
+    opt.value = id;
+    list.appendChild(opt);
+  });
 }
 
 // Every field that belongs to a profile or to the LM Studio settings. The
@@ -252,6 +418,8 @@ function watchSettingsFields() {
   const fields = [
     els.profile, els.lmStudioUrl, els.lmStudioModel, els.lmStudioTimeout,
     els.lmStudioReasoningEffort, els.lmStudioEnableThinking,
+    els.modelProvider, els.openAiKey, els.openAiModel, els.openAiReasoningEffort,
+    els.openAiMaxOutput, els.openAiBudget, els.openAiFlex,
     els.hardRejectsPhrases, els.hardRejectsPatterns,
     els.softWarningsPhrases, els.softWarningsPatterns,
     els.domainFlagsPhrases, els.domainFlagsPatterns,
@@ -275,16 +443,7 @@ function watchSettingsFields() {
 
 async function saveSettings() {
   captureForm();
-  await chrome.storage.local.set({
-    lmStudio: {
-      url: els.lmStudioUrl.value.trim() || JOB_FIT_DEFAULTS.lmStudio.url,
-      model: els.lmStudioModel.value.trim(),
-      timeoutSeconds:
-        els.lmStudioTimeout.value === "" ? JOB_FIT_DEFAULTS.lmStudio.timeoutSeconds : Number(els.lmStudioTimeout.value),
-      reasoningEffort: els.lmStudioReasoningEffort.value,
-      enableThinking: els.lmStudioEnableThinking.checked,
-    },
-  });
+  await chrome.storage.local.set(modelSettingsFromForm());
   await JOB_FIT_PROFILES.save(store);
   setStatus(`Saved "${activeProfile().name}".`);
 }
@@ -445,7 +604,8 @@ function applyForcedSections() {
   // An unfinished wizard profile gets the banner instead: the wizard is the
   // better place to finish, and opening sections underneath it would compete.
   if (activeProfile() && activeProfile().setupIncomplete) return;
-  if (!els.lmStudioModel.value.trim()) document.getElementById("sec-lmstudio").open = true;
+  const modelMissing = els.modelProvider.value === "openai" ? !selectedOpenAiModel() : !els.lmStudioModel.value.trim();
+  if (modelMissing) document.getElementById("sec-lmstudio").open = true;
   if (!els.profile.value.trim()) document.getElementById("sec-profile").open = true;
 }
 
@@ -476,10 +636,27 @@ function setReady(dotId, textId, state, text, title) {
 }
 
 async function checkModel() {
-  const stored = await chrome.storage.local.get("lmStudio");
-  const settings = stored.lmStudio || JOB_FIT_DEFAULTS.lmStudio;
-  const wanted = (settings.model || "").trim();
-  const probe = await probeModels(settings.url || JOB_FIT_DEFAULTS.lmStudio.url);
+  const settings = await JOB_FIT_PROVIDER.load();
+  const wanted = settings.model;
+  const probe = await probeModels(settings);
+
+  if (settings.provider === "openai") {
+    if (probe.reason === "no-key") {
+      setReady("modelDot", "modelState", "bad", "OpenAI is selected but no API key is set.");
+    } else if (probe.reason === "unauthorized") {
+      setReady("modelDot", "modelState", "bad", "OpenAI rejected the API key — check it under Model.");
+    } else if (!probe.ok) {
+      setReady("modelDot", "modelState", "bad", "Couldn't reach OpenAI — check the connection.");
+    } else if (!wanted) {
+      setReady("modelDot", "modelState", "warn", "OpenAI connected — pick a model under Model.");
+    } else if (probe.models.length && !probe.models.includes(wanted)) {
+      setReady("modelDot", "modelState", "warn", `"${wanted}" isn't available on this OpenAI account.`, probe.models.join("\n"));
+    } else {
+      setReady("modelDot", "modelState", "ok", `OpenAI — ${wanted}`);
+    }
+    return;
+  }
+
   if (probe.reason === "invalid-url") {
     setReady("modelDot", "modelState", "bad", "The endpoint isn't a valid URL.");
     return;
@@ -774,6 +951,7 @@ async function evaluateCurrentTab() {
   }
   const files = [
     "defaults.js",
+    "provider.js",
     "keywords.js",
     "profiles.js",
     "evalstore.js",
@@ -844,6 +1022,7 @@ async function summarizeCurrentTab() {
   }
   const files = [
     "defaults.js",
+    "provider.js",
     "keywords.js",
     "profiles.js",
     "evalstore.js",
@@ -1026,6 +1205,33 @@ async function copySummary() {
 }
 
 document.getElementById("save").addEventListener("click", saveSettings);
+els.modelProvider.addEventListener("change", () => {
+  showProviderFields();
+  flushAutoSave().then(checkModel);
+  if (els.modelProvider.value === "openai") loadOpenAiModels();
+});
+els.openAiKey.addEventListener("change", () => {
+  loadOpenAiModels();
+  flushAutoSave().then(checkModel);
+});
+els.openAiTier.addEventListener("change", () => {
+  syncTierHint();
+  if (els.openAiTier.value !== "custom") els.openAiModel.value = selectedOpenAiModel();
+  else els.openAiModel.focus();
+  renderReasoningOptions();
+  flushAutoSave().then(checkModel);
+});
+els.openAiModel.addEventListener("change", () => {
+  renderReasoningOptions();
+  flushAutoSave().then(checkModel);
+});
+els.openAiModel.addEventListener("input", renderReasoningOptions);
+els.openAiBudget.addEventListener("input", renderUsage);
+// The preference is only what the user picks here, never the adjusted value a
+// half-typed model name produced.
+els.openAiReasoningEffort.addEventListener("change", () => {
+  els.openAiReasoningEffort.dataset.saved = els.openAiReasoningEffort.value;
+});
 document.getElementById("reset").addEventListener("click", resetKeywordLists);
 els.profileSelect.addEventListener("change", (e) => switchProfile(e.target.value));
 // New profiles go through the setup wizard: a blank profile has no CV, no
@@ -1074,7 +1280,10 @@ document.getElementById("viewHistory").addEventListener("click", () => {
 document.addEventListener("visibilitychange", flushOnHide);
 window.addEventListener("pagehide", flushAutoSave);
 
-loadSettings().then(restoreLastSummary);
+loadSettings().then(() => {
+  restoreLastSummary();
+  if (els.modelProvider.value === "openai") loadOpenAiModels();
+});
 renderQueueStatus();
 checkModel();
 checkPage();

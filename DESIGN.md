@@ -12,7 +12,39 @@ A Chrome/Edge extension that reads a job posting on the current tab, applies det
 - **Two-layer evaluation** — cheap deterministic filters run first and stop early. The local model is only invoked for postings that pass, saving a round-trip (and your GPU/CPU) on obvious rejects.
 - **Structured output** — the model returns JSON, not prose, so the UI can color a banner by score and every evaluation can be logged.
 - **CV-vs-posting keyword comparison lives in the model call, not a hand-maintained list.** Layer 1's static "soft warning"/"positive match" regex lists were really just a manual copy of your own skills — redundant once the model already compares your profile against the posting text directly and returns `matches`/`gaps`. Layer 1 keeps only the dealbreaker regexes (citizenship, ITAR, sponsorship, etc.), since those check the *posting's* language, not your CV, and are worth catching instantly without waiting on a model call.
-- **No API key, no cloud dependency.** LM Studio's local server speaks the OpenAI-compatible chat completions format at `http://localhost:1234/v1/chat/completions` (port configurable). Since it's free and local, there's no cost pressure driving the two-layer split — Layer 1 survives purely for speed and determinism on dealbreakers.
+- **No API key, no cloud dependency — by default.** LM Studio's local server speaks the OpenAI-compatible chat completions format at `http://localhost:1234/v1/chat/completions` (port configurable). Since it's free and local, there's no cost pressure driving the two-layer split — Layer 1 survives purely for speed and determinism on dealbreakers.
+- **OpenAI API as an opt-in provider** (added 2026-09-25). `modelProvider` chooses between LM Studio and OpenAI. `lmStudio` keeps its original shape, so no migration is needed, and it still owns the shared response timeout. `openai` holds `{ apiKey, model, reasoningEffort }`. `provider.js` resolves the active provider and model for every consumer (the request, the out-of-date check, popup readiness, queue auto-resume), so a switch can't leave one of them reading the old model.
+  - **OpenAI uses the Responses API** (`POST /v1/responses`), OpenAI's current recommended API. LM Studio stays on chat completions, because that's what its server implements. The OpenAI request is built by `openAiRequestBody`, and OpenAI rejects unknown parameters rather than ignoring them, so it sends only what applies:
+    - the instructions as a `developer` input message, because JSON mode (`text.format: json_object`) requires the word "JSON" in the input messages
+    - `max_output_tokens`
+    - `store: false`, since Responses keeps each response on OpenAI's side for later retrieval by default, and this input is a CV and salary expectations
+    - no `seed`, no `/no_think` suffix and no penalties (those were local-model fixes for looping)
+    - reasoning models (o-series, gpt-5) get `reasoning.effort` and no `temperature`; other models get `temperature: 0.2`
+
+    `readOpenAiResponse` takes the text from the `output_text` parts of the message items in `output`. It reports a refusal as `refusal`, and a reply cut off with `incomplete_details.reason: max_output_tokens` as `length`, with advice.
+  - **A missing key or model fails as `config`** before any request is sent, which pauses the queue with a message naming the fix. HTTP errors show OpenAI's own `error.message`.
+  - **The model list comes from the key's own `/v1/models`**, filtered to chat models. The wizard defaults to a `-mini` model rather than whatever sorts first, since this provider bills per request.
+  - **The key never leaves extension storage:** backups export only the OpenAI model choice, and a restore never touches the key or the provider switch.
+  - **Cost controls:**
+    - **Prompt order.** Parts that are the same on every call come first (system prompt, profile, salary) and per-posting parts last (posting, then the domain-flag line). A repeated prefix is discounted by OpenAI's automatic caching and reused by LM Studio's KV cache.
+    - **Reasoning effort per model.** `reasoningEffortsFor()` returns the levels a model accepts: GPT-5 adds `minimal`, o-series starts at `low`, other models take none. The menu shows only those levels, and `effectiveReasoningEffort()` maps a saved preference onto them, so a switch of model never sends a value the model rejects.
+    - **`max_output_tokens`** comes from a user setting (default 4,000, clamped to 500–64,000) rather than a hard-coded 16,000.
+    - **Usage** from each reply (`usage.input_tokens`/`output_tokens`, including reasoning and cached tokens, or chat-completions' `prompt_tokens`/`completion_tokens`) is stored on the record and summed per local day and provider in `usageByDay` (62 days kept). A reply that fails to parse still counts, because it was still billed.
+    - **The daily budget** is checked before each OpenAI request. When it's spent, the request fails as `budget`, which pauses the queue like a connection error; raising the budget resumes it. It's measured in tokens, not dollars, because prices differ per model and change. The popup turns the budget into a number of requests at the month's average.
+  - **Tiers, not raw model ids** (`JOB_FIT_DEFAULTS.openaiTiers`): Economy gpt-6-luna, **Balanced gpt-6-sol (default)**, Best gpt-6-astra, plus Custom (any chat model on the key).
+    - Balanced is the default because scoring is a judgment task: required vs preferred, "or" lists, domain flags. At about $1 per 100 evaluations, a stronger model is worth more than the savings of the cheapest.
+    - Each tier shows a rough cost per 100 jobs (1,800 input + 700 output tokens at the listed September 2026 prices). This is display only and never used for any decision.
+    - A tier the key's `/v1/models` doesn't list is greyed out.
+    - New models are a one-line change in `defaults.js`.
+  - **Self-correcting parameters.** The name-based guesses (`isOpenAiReasoningModel`, `reasoningEffortsFor`, which now cover gpt-6 and later) are only a first try. When OpenAI rejects `temperature`, a `reasoning.effort` level, or `service_tier` as unsupported (a 400 naming it), the request is retried without it, and the model's quirk is saved in `openaiModelCaps`, so later calls get it right first time.
+    - A rejected effort level rounds **up** to the next level, never down, so a rejection can't quietly lower quality.
+    - Each setting is adjusted at most once per request, so a model can't cause a retry loop.
+  - **Flex processing** (`service_tier: "flex"`, half price, slower). The default is **bulk**: only re-evaluations queued from Tracked jobs (`item.bulk`) use it, because nobody is watching them run. "Evaluate this tab" stays on Standard.
+    - When Flex has no capacity, OpenAI returns `429 Resource Unavailable`, isn't billed, and the job retries on Standard, OpenAI's recommended fallback. A real rate limit (`rate_limit_exceeded`) is **not** retried.
+    - Flex requests get at least a 15-minute timeout. The queue's item lease grows to match, or a slow Flex job would be reclaimed and run twice.
+    - The tier that actually served a request (`service_tier` in the reply) is recorded in its usage, with `flexFallback` when it fell back.
+  - **Defaults:** 200,000-token daily budget (about 80 evaluations), reasoning effort low, max output 4,000, Flex for bulk only. An empty model field falls back to the default tier rather than failing as "no model".
+  - **The privacy tradeoff is stated where you choose:** the wizard's provider cards and the popup's notice both say postings, the profile and salary expectations are sent to OpenAI and billed to your key.
 
 ---
 

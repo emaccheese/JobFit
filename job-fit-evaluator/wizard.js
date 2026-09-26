@@ -13,7 +13,7 @@
 
 const ALL_STEPS = [
   { key: "welcome", title: "Welcome" },
-  { key: "model", title: "Local model" },
+  { key: "model", title: "Model" },
   { key: "about", title: "About you" },
   { key: "profile", title: "Candidate profile" },
   { key: "salary", title: "Expected salary" },
@@ -88,7 +88,7 @@ const state = {
   profile: null, // the working profile; written through to storage
   persisted: false, // false only for a "new" profile before it has a name
   lm: null,
-  lmDirty: false,
+  modelDirty: false,
   modelOk: false,
   modelExpanded: false,
   flagSuggestions: [],
@@ -146,12 +146,34 @@ function setSaveState(text, isError) {
   node.classList.toggle("error", Boolean(isError));
 }
 
-function lmToStore() {
+// The provider's own settings object: its .model is the one in use.
+function activeModelSettings() {
+  return state.provider === "openai" ? state.oa : state.lm;
+}
+
+function activeModel() {
+  const model = activeModelSettings().model || (state.provider === "openai" ? JOB_FIT_DEFAULTS.openai.model : "");
+  return (model || "").trim();
+}
+
+function resolvedSettings() {
+  return JOB_FIT_PROVIDER.resolve({ modelProvider: state.provider, lmStudio: state.lm, openai: state.oa });
+}
+
+function modelSettingsToStore() {
   return {
-    ...state.lm,
-    url: (state.lm.url || "").trim() || JOB_FIT_DEFAULTS.lmStudio.url,
-    model: (state.lm.model || "").trim(),
-    timeoutSeconds: Number(state.lm.timeoutSeconds) || JOB_FIT_DEFAULTS.lmStudio.timeoutSeconds,
+    modelProvider: state.provider,
+    lmStudio: {
+      ...state.lm,
+      url: (state.lm.url || "").trim() || JOB_FIT_DEFAULTS.lmStudio.url,
+      model: (state.lm.model || "").trim(),
+      timeoutSeconds: Number(state.lm.timeoutSeconds) || JOB_FIT_DEFAULTS.lmStudio.timeoutSeconds,
+    },
+    openai: {
+      ...state.oa,
+      apiKey: (state.oa.apiKey || "").trim(),
+      model: (state.oa.model || "").trim(),
+    },
   };
 }
 
@@ -177,12 +199,12 @@ async function saveProfile({ activate = false } = {}) {
 async function saveNow() {
   clearTimeout(saveTimer);
   collectCurrent();
-  if (!state.lmDirty && !state.persisted) return;
+  if (!state.modelDirty && !state.persisted) return;
   setSaveState("Saving…");
   try {
-    if (state.lmDirty) {
-      await chrome.storage.local.set({ lmStudio: lmToStore() });
-      state.lmDirty = false;
+    if (state.modelDirty) {
+      await chrome.storage.local.set(modelSettingsToStore());
+      state.modelDirty = false;
     }
     if (state.persisted) await saveProfile();
     setSaveState("All changes saved");
@@ -273,6 +295,19 @@ function renderModelStatus(probe) {
   state.modelOk = false;
 
   if (!probe) return;
+  const openai = state.provider === "openai";
+  if (probe.reason === "no-key") {
+    host.appendChild(callout("info", "Paste your OpenAI API key above and press Connect."));
+    return;
+  }
+  if (probe.reason === "unauthorized") {
+    host.appendChild(callout("bad", "OpenAI rejected that key. Check it was copied in full, and that the key is active on your OpenAI account."));
+    return;
+  }
+  if (openai && !probe.ok) {
+    host.appendChild(callout("bad", "Couldn't reach OpenAI. Check your internet connection and try again."));
+    return;
+  }
   if (probe.reason === "invalid-url") {
     host.appendChild(callout("bad", "That isn't a valid URL. The default is http://localhost:1234/v1/chat/completions."));
     return;
@@ -292,53 +327,142 @@ function renderModelStatus(probe) {
     return;
   }
   if (!probe.models.length) {
-    host.appendChild(callout("warn", "LM Studio is running, but no model is loaded. Load one in LM Studio, then test again."));
+    host.appendChild(
+      callout(
+        "warn",
+        openai
+          ? "That key works, but the account has no chat models available."
+          : "LM Studio is running, but no model is loaded. Load one in LM Studio, then test again."
+      )
+    );
     return;
   }
 
-  host.appendChild(callout("ok", "Connected to LM Studio."));
+  host.appendChild(callout("ok", openai ? "Connected to OpenAI." : "Connected to LM Studio."));
+  $("modelPickerHint").textContent = openai
+    ? "Costs assume a typical posting; bulk re-evaluations use Flex at about half that. You can change this any time in the popup."
+    : "These are the models LM Studio has loaded right now.";
   const list = $("modelList");
   list.innerHTML = "";
-  const wanted = (state.lm.model || "").trim();
+  const wanted = activeModel();
   if (wanted && !probe.models.includes(wanted)) {
-    host.appendChild(el("div", "hint", `The model you had selected, "${wanted}", isn't loaded any more. Pick one below.`));
+    host.appendChild(el("div", "hint", `The model you had selected, "${wanted}", isn't available any more. Pick one below.`));
   }
   // Preselected, not saved: it's written when you leave this step, so merely
   // opening the wizard never changes the model other profiles are using.
-  const chosen = probe.models.includes(wanted) ? wanted : probe.models[0];
+  // For OpenAI: the default tier if the key has it, else the first tier it
+  // has, else the first model — never whatever happens to sort first, which
+  // is often an expensive one.
+  const tiers = openai ? (JOB_FIT_DEFAULTS.openaiTiers || []) : [];
+  const tierModels = tiers.map((t) => t.model).filter((m) => probe.models.includes(m));
+  const fallback = tierModels.includes(JOB_FIT_DEFAULTS.openai.model)
+    ? JOB_FIT_DEFAULTS.openai.model
+    : tierModels[0] || probe.models[0];
+  const chosen = probe.models.includes(wanted) ? wanted : fallback;
   if (chosen !== wanted) {
-    state.lm.model = chosen;
-    state.lmDirty = true;
+    activeModelSettings().model = chosen;
+    state.modelDirty = true;
   }
-  probe.models.forEach((id) => {
+
+  const addRow = (host, id, labelNode, disabled) => {
     const row = el("label");
     const radio = el("input");
     radio.type = "radio";
     radio.name = "lmModel";
     radio.value = id;
     radio.checked = id === chosen;
+    radio.disabled = Boolean(disabled);
     row.appendChild(radio);
-    row.appendChild(document.createTextNode(id));
-    list.appendChild(row);
-  });
+    row.appendChild(labelNode);
+    if (disabled) row.style.opacity = ".5";
+    host.appendChild(row);
+  };
+
+  if (openai) {
+    // Three tiers, each with a rough cost, instead of a raw list of ids.
+    tiers.forEach((tier) => {
+      const onKey = probe.models.includes(tier.model);
+      const text = el("span", "tier-text");
+      text.appendChild(el("strong", null, `${tier.label}${tier.model === JOB_FIT_DEFAULTS.openai.model ? " (recommended)" : ""}`));
+      text.appendChild(el("span", "tier-model", tier.model));
+      text.appendChild(
+        el(
+          "span",
+          "tier-blurb",
+          onKey
+            ? `${tier.blurb} ≈ ${JOB_FIT_PROVIDER.formatDollars(JOB_FIT_PROVIDER.costPer100(tier))} per 100 jobs.`
+            : "Not available on this API key."
+        )
+      );
+      addRow(list, tier.model, text, !onKey);
+    });
+    const others = probe.models.filter((m) => !tiers.some((t) => t.model === m));
+    if (others.length) {
+      const more = el("details", "other-models");
+      more.open = !tiers.some((t) => t.model === chosen);
+      more.appendChild(el("summary", null, `Other models on this key (${others.length})`));
+      const inner = el("div", "model-list");
+      others.forEach((id) => addRow(inner, id, document.createTextNode(id)));
+      more.appendChild(inner);
+      list.appendChild(more);
+    }
+  } else {
+    probe.models.forEach((id) => addRow(list, id, document.createTextNode(id)));
+  }
   $("modelPicker").hidden = false;
   state.modelOk = true;
+  if (openai) renderOaReasoning();
 }
 
 async function testConnection() {
   collectModel();
-  const button = $("testConnection");
+  const button = state.provider === "openai" ? $("testOpenAi") : $("testConnection");
+  const label = button.textContent;
   button.disabled = true;
   button.textContent = "Testing…";
-  const probe = await probeModels(state.lm.url || JOB_FIT_DEFAULTS.lmStudio.url, 4000);
+  const probe = await probeModels(resolvedSettings(), 4000);
   button.disabled = false;
-  button.textContent = "Test connection";
+  button.textContent = label;
   renderModelStatus(probe);
   updateNav();
   return probe;
 }
 
+// Shows the fields for the chosen provider only: an endpoint means nothing to
+// OpenAI, and an API key means nothing to LM Studio.
+function showProviderFields() {
+  const openai = state.provider === "openai";
+  $("openAiKeyField").hidden = !openai;
+  $("lmUrlField").hidden = openai;
+  $("oaCostFields").hidden = !openai;
+  renderOaReasoning();
+  $("lmOnlyAdvanced").hidden = openai;
+  document.querySelectorAll('input[name="provider"]').forEach((r) => (r.checked = r.value === state.provider));
+}
+
+// Only the effort levels the selected model accepts; hidden for models that
+// take none. The saved preference in state.oa is left alone, so picking a
+// different model and back restores it.
+function renderOaReasoning() {
+  const model = state.oa.model || JOB_FIT_DEFAULTS.openai.model || "";
+  const allowed = JOB_FIT_PROVIDER.reasoningEffortsFor(model);
+  $("oaReasoningField").hidden = !allowed.length;
+  const select = $("oaReasoning");
+  select.innerHTML = "";
+  ["", ...allowed].forEach((value) => {
+    const opt = el("option", null, value || "(model default)");
+    opt.value = value;
+    select.appendChild(opt);
+  });
+  select.value = JOB_FIT_PROVIDER.effectiveReasoningEffort(model, state.oa.reasoningEffort);
+}
+
 function fillModel() {
+  showProviderFields();
+  $("oaKey").value = state.oa.apiKey || "";
+  $("oaMaxOutput").value = JOB_FIT_PROVIDER.clampOutputTokens(state.oa.maxOutputTokens);
+  $("oaBudget").value = Number(state.oa.dailyTokenBudget) || "";
+  $("oaFlex").value = ["bulk", "always", "never"].includes(state.oa.flex) ? state.oa.flex : "bulk";
   $("lmUrl").value = state.lm.url || JOB_FIT_DEFAULTS.lmStudio.url;
   $("lmTimeout").value = state.lm.timeoutSeconds || JOB_FIT_DEFAULTS.lmStudio.timeoutSeconds;
   $("lmReasoning").value = state.lm.reasoningEffort ?? "";
@@ -351,9 +475,15 @@ function collectModel() {
   state.lm.timeoutSeconds = $("lmTimeout").value === "" ? JOB_FIT_DEFAULTS.lmStudio.timeoutSeconds : Number($("lmTimeout").value);
   state.lm.reasoningEffort = $("lmReasoning").value;
   state.lm.enableThinking = $("lmThinking").checked;
+  const beforeOa = JSON.stringify(state.oa);
+  state.oa.apiKey = $("oaKey").value.trim();
+  if (!$("oaReasoningField").hidden) state.oa.reasoningEffort = $("oaReasoning").value;
+  state.oa.maxOutputTokens = JOB_FIT_PROVIDER.clampOutputTokens($("oaMaxOutput").value);
+  state.oa.dailyTokenBudget = Math.max(0, Number($("oaBudget").value) || 0);
+  state.oa.flex = $("oaFlex").value;
   const picked = document.querySelector('input[name="lmModel"]:checked');
-  if (picked) state.lm.model = picked.value;
-  if (JSON.stringify(state.lm) !== before) state.lmDirty = true;
+  if (picked) activeModelSettings().model = picked.value;
+  if (JSON.stringify(state.lm) !== before || JSON.stringify(state.oa) !== beforeOa) state.modelDirty = true;
 }
 
 async function enterModel() {
@@ -365,7 +495,7 @@ async function enterModel() {
   $("modelFull").hidden = compactable;
   const probe = await testConnection();
   if (compactable && state.modelOk) {
-    $("compactModelName").textContent = state.lm.model;
+    $("compactModelName").textContent = `${activeModel()} (${resolvedSettings().label})`;
     $("modelCompact").hidden = false;
   } else {
     $("modelFull").hidden = false;
@@ -798,9 +928,11 @@ function renderReview() {
   const cards = [
     {
       step: "model",
-      title: "Local model",
-      body: state.lm.model ? `${state.lm.model}\n${state.lm.url}` : "Not connected. Evaluations won't run until it is.",
-      missing: !state.lm.model,
+      title: "Model",
+      body: activeModel()
+        ? `${activeModel()}\n${state.provider === "openai" ? "OpenAI API (postings and your profile are sent to OpenAI)" : state.lm.url}`
+        : "Not connected. Evaluations won't run until it is.",
+      missing: !activeModel(),
     },
     { step: "about", title: "About you", body: [p.name, authorisationSentence()].filter(Boolean).join("\n") },
     {
@@ -955,7 +1087,7 @@ async function runTest() {
       el(
         "div",
         "hint",
-        `Took ${seconds}s. Your timeout is ${timeout}s.${tight ? " That's close; consider raising it under Local model → Advanced." : ""}`
+        `Took ${seconds}s${response.usage ? `, ${(response.usage.input + response.usage.output).toLocaleString()} tokens${response.usage.reasoning ? ` (${response.usage.reasoning.toLocaleString()} reasoning)` : ""}` : ""}. Your timeout is ${timeout}s.${tight ? " That's close; consider raising it under Model → Advanced." : ""}`
       )
     );
   }
@@ -969,7 +1101,7 @@ const STEP_HOOKS = {
   model: {
     enter: enterModel,
     collect: collectModel,
-    valid: () => state.modelOk && Boolean((state.lm.model || "").trim()),
+    valid: () => state.modelOk && Boolean(activeModel()),
   },
   about: {
     enter: fillAbout,
@@ -1114,7 +1246,7 @@ async function finish() {
   $("nav").hidden = true;
   $("done").hidden = false;
   $("doneName").textContent = `"${state.profile.name}" is ready.`;
-  $("doneModelWarn").hidden = Boolean((state.lm.model || "").trim());
+  $("doneModelWarn").hidden = Boolean(activeModel());
   state.furthest = state.steps.length - 1;
   state.finished = true;
   renderRail();
@@ -1138,8 +1270,10 @@ function showFatal(message) {
 
 async function init() {
   const store = await JOB_FIT_PROFILES.load();
-  const stored = await chrome.storage.local.get(["lmStudio", "wizardProgress"]);
+  const stored = await chrome.storage.local.get([...JOB_FIT_PROVIDER.KEYS, "wizardProgress"]);
   state.lm = { ...JOB_FIT_DEFAULTS.lmStudio, ...(stored.lmStudio || {}) };
+  state.oa = { ...JOB_FIT_DEFAULTS.openai, ...(stored.openai || {}) };
+  state.provider = stored.modelProvider === "openai" ? "openai" : "lmstudio";
 
   let mode = params.get("mode");
   const profileId = params.get("profile");
@@ -1202,8 +1336,29 @@ $("card").addEventListener("change", (e) => {
   const group = e.target.closest(".choices");
   if (group && e.target.checked) applyAnswer(group.dataset.answer, e.target.value);
   if (e.target.closest("#markets")) syncSalaryRows();
-  if (e.target.name === "lmModel") state.lmDirty = true;
-  if (e.target.id === "lmUrl") testConnection();
+  if (e.target.name === "lmModel") {
+    state.modelDirty = true;
+    if (state.provider === "openai") {
+      state.oa.model = e.target.value;
+      renderOaReasoning();
+    }
+  }
+  if (e.target.id === "lmUrl" || e.target.id === "oaKey") testConnection();
+  // Switching provider re-tests against the new one straight away; with no
+  // key yet, that just asks for one.
+  if (e.target.name === "provider") {
+    collectModel();
+    state.provider = e.target.value === "openai" ? "openai" : "lmstudio";
+    state.modelDirty = true;
+    // The list still shows the other provider's models; cleared before the
+    // re-test reads the ticked one, or an LM Studio model name would be saved
+    // as the OpenAI model.
+    $("modelList").innerHTML = "";
+    $("modelPicker").hidden = true;
+    showProviderFields();
+    testConnection();
+    if (state.provider === "openai" && !state.oa.apiKey) $("oaKey").focus();
+  }
   collectCurrent();
   scheduleSave();
   updateNav();
@@ -1213,6 +1368,7 @@ $("next").addEventListener("click", next);
 $("back").addEventListener("click", () => goTo(state.returnToReview ? stepIndex("review") : state.index - 1));
 $("skip").addEventListener("click", () => goTo(state.index + 1));
 $("testConnection").addEventListener("click", testConnection);
+$("testOpenAi").addEventListener("click", testConnection);
 $("modelChange").addEventListener("click", () => {
   state.modelExpanded = true;
   $("modelCompact").hidden = true;

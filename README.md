@@ -1,11 +1,13 @@
 # JobFit
 
-**Screens job postings against your CV, entirely on your own machine.**
+**Screens job postings against your CV — on your own machine, or through the OpenAI API if you'd rather not run a model.**
 
 A Chrome extension that reads the job posting in your current tab, checks it against
 your profile, and gives you a score, the concrete matches and gaps, and a salary
-read — using a local model through [LM Studio](https://lmstudio.ai/). No API keys,
-no per-call billing, and no posting or CV ever leaves your computer.
+read. By default it uses a local model through [LM Studio](https://lmstudio.ai/): no
+API keys, no per-call billing, and no posting or CV ever leaves your computer. You
+can instead pick **OpenAI API** as the provider and score with ChatGPT models using
+your own API key.
 
 It also keeps what it finds: every evaluated job is tracked, with application
 status, notes and CSV export, so a month of searching doesn't live in browser tabs.
@@ -21,6 +23,19 @@ CV", so the whole thing runs against `localhost`.
 
 The extension talks to any OpenAI-compatible endpoint, so LM Studio is the default
 but not a requirement.
+
+**Or use the OpenAI API.** If you'd rather not run a model locally, set the provider
+to **OpenAI API** (in the setup wizard, or the popup under **Model**), paste your API
+key and pick a tier: **Economy** (gpt-6-luna, about $0.05 per 100 postings),
+**Balanced** (gpt-6-sol, about $1 per 100, the default) or **Best** (gpt-6-astra,
+about $5 per 100), or any other chat model your key has. Bulk re-evaluations from
+Tracked jobs use OpenAI's Flex processing at about half price, and a daily token
+budget (200k by default) pauses the queue before a runaway batch gets expensive. The tradeoff is explicit:
+every evaluated posting, your candidate profile and your salary expectations are sent
+to OpenAI, and each request is billed to your key. The key stays in this browser's
+extension storage and is never written to a backup file. Switching back to LM Studio
+keeps the key, so you can go back and forth. Scores from different models are marked
+as out of date against each other in Tracked jobs, as before.
 
 ## How it works
 

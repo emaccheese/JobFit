@@ -91,7 +91,9 @@ var JOB_FIT_QUEUE = (function () {
   // item, so burning the whole queue on it wastes the walk-away time the queue
   // exists to protect. Two timeouts in a row is the machine, not the posting.
   function shouldPause(failure, consecutiveTimeouts) {
-    if (failure === "unreachable" || failure === "http" || failure === "config") return true;
+    // "budget": the daily OpenAI token budget is spent — every remaining item
+    // would hit the same wall.
+    if (failure === "unreachable" || failure === "http" || failure === "config" || failure === "budget") return true;
     if (failure === "timeout") return consecutiveTimeouts >= 2;
     return false;
   }

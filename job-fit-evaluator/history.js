@@ -62,6 +62,15 @@ function resetPage() {
   page = 0;
 }
 
+// " · 2.3k tokens (800 reasoning)", or "" for scores from before usage was
+// recorded.
+function usageText(usage) {
+  if (!usage) return "";
+  const k = (n) => (n >= 1000 ? `${(n / 1000).toFixed(1)}k` : String(n));
+  const total = (usage.input || 0) + (usage.output || 0);
+  return ` · ${k(total)} tokens${usage.reasoning ? ` (${k(usage.reasoning)} reasoning)` : ""}`;
+}
+
 function scoreClass(score) {
   // Null means summarized but never scored — that has to read as neutral, not
   // as a red 0, which is what a hard reject looks like.
@@ -393,7 +402,7 @@ function appendPreviousResults(body, record) {
       detail.appendChild(el("div", null, `${p.hardReject.label}: "${p.hardReject.matchedText}"`));
     } else if (p.evaluation) {
       if (p.evaluation.one_line) detail.appendChild(el("div", null, p.evaluation.one_line));
-      if (p.durationMs) detail.appendChild(el("div", "meta-line", `Scored in ${Math.round(p.durationMs / 1000)}s`));
+      if (p.durationMs) detail.appendChild(el("div", "meta-line", `Scored in ${Math.round(p.durationMs / 1000)}s${usageText(p.usage)}`));
       evaluationTags(detail, p.evaluation);
     } else {
       detail.appendChild(el("div", "meta-line", "No reasoning was stored for this run."));
@@ -688,7 +697,9 @@ function renderJob(record) {
     body.appendChild(headline);
     if (e.one_line) body.appendChild(el("div", null, e.one_line));
     if (record.durationMs) {
-      body.appendChild(el("div", "meta-line", `Scored in ${Math.round(record.durationMs / 1000)}s${record.model ? ` by ${record.model}` : ""}`));
+      body.appendChild(
+        el("div", "meta-line", `Scored in ${Math.round(record.durationMs / 1000)}s${record.model ? ` by ${record.model}` : ""}${usageText(record.usage)}`)
+      );
     }
     evaluationTags(body, e);
     tagList(body, "Warnings", record.softWarnings, "tag-amber");
@@ -1010,7 +1021,7 @@ function watchForChanges() {
     }
 
     // Swapping the model or editing the CV changes which scores are out of date.
-    if (changes.profiles || changes.lmStudio) {
+    if (changes.profiles || changes.lmStudio || changes.modelProvider || changes.openai) {
       loadCurrentScoring().then(safeRender);
     }
 
@@ -1246,7 +1257,7 @@ function showBackupStatus(text, isError = false) {
 }
 
 async function exportData() {
-  const stored = await chrome.storage.local.get(["profiles", "activeProfileId", "lmStudio"]);
+  const stored = await chrome.storage.local.get(["profiles", "activeProfileId", "lmStudio", "modelProvider", "openai"]);
   // The queue and lastSummary are deliberately left out: both are transient
   // working state, and the queue holds tab ids that mean nothing on restore.
   const payload = {
@@ -1256,6 +1267,10 @@ async function exportData() {
     profiles: stored.profiles || [],
     activeProfileId: stored.activeProfileId || null,
     lmStudio: stored.lmStudio || null,
+    modelProvider: stored.modelProvider || "lmstudio",
+    // The API key is deliberately left out: a backup file gets copied around,
+    // and a leaked key is billed to its owner.
+    openai: stored.openai ? { model: stored.openai.model || "", reasoningEffort: stored.openai.reasoningEffort || "" } : null,
     records: await JOB_FIT_EVALSTORE.exportRecords(),
   };
 
@@ -1340,6 +1355,16 @@ async function importData(file) {
   } else if (payload.lmStudio) {
     settingsNote = "\nLM Studio settings left alone — you already have a model configured.";
   }
+  // Only the OpenAI model choice is in a backup, never the key, and it's
+  // restored only if none is set here. The provider switch itself is left as
+  // it is: restoring onto a machine without a key would just break scoring.
+  const currentOpenAi = (await chrome.storage.local.get("openai")).openai || {};
+  if (payload.openai && payload.openai.model && !currentOpenAi.model) {
+    await chrome.storage.local.set({
+      openai: { ...currentOpenAi, model: String(payload.openai.model), reasoningEffort: String(payload.openai.reasoningEffort || "") },
+    });
+    settingsNote += "\nOpenAI model choice restored (the API key is never in a backup).";
+  }
 
   const lines = [
     `Restored from ${payload.exportedAt ? payload.exportedAt.slice(0, 10) : "backup"}.`,
@@ -1355,9 +1380,8 @@ async function importData(file) {
 
 async function loadCurrentScoring() {
   const profile = store.profiles.find((p) => p.id === viewProfileId);
-  const settings = await chrome.storage.local.get("lmStudio");
   current = {
-    model: (settings.lmStudio && settings.lmStudio.model) || "",
+    model: JOB_FIT_PROVIDER.currentModel(await chrome.storage.local.get(JOB_FIT_PROVIDER.KEYS)),
     fingerprint: profile ? JOB_FIT_PROFILES.fingerprint(profile) : null,
   };
 }
@@ -1571,7 +1595,9 @@ async function requeueSelected(btn) {
   for (const record of chosen) {
     const response = await queueMessage({
       type: "JOB_FIT_ENQUEUE",
-      item: evaluateItem(record, profile, fingerprint),
+      // Bulk: nobody is waiting on these, so they may use OpenAI's Flex
+      // processing (half price, slower) — see the popup's Flex setting.
+      item: { ...evaluateItem(record, profile, fingerprint), bulk: true },
     });
     if (response && response.full) { full = true; break; }
     if (response && response.ok) {

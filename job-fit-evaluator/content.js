@@ -550,8 +550,7 @@
     const activeProfile = await JOB_FIT_PROFILES.getActive();
     const fingerprint = JOB_FIT_PROFILES.fingerprint(activeProfile);
 
-    const settings = await chrome.storage.local.get("lmStudio");
-    const currentModel = (settings.lmStudio && settings.lmStudio.model) || "";
+    const currentModel = JOB_FIT_PROVIDER.currentModel(await chrome.storage.local.get(JOB_FIT_PROVIDER.KEYS));
 
     const cached = ignoreCache ? null : await JOB_FIT_EVALSTORE.get(activeProfile.id, jobKey);
     if (cached) {

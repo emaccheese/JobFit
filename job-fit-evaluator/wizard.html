@@ -107,8 +107,22 @@
     padding: 8px 10px; cursor: pointer; font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 12.5px;
   }
   .model-list label:has(input:checked) { border-color: var(--accent); background: var(--accent-soft); }
+  .model-list label .tier-text { display: flex; flex-direction: column; gap: 1px; font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif; font-size: 13.5px; }
+  .model-list label .tier-model { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 12px; color: var(--muted); }
+  .model-list label .tier-blurb { font-size: 12.5px; color: var(--muted); }
+  .other-models { margin-top: 4px; }
+  .other-models summary { cursor: pointer; font-size: 13px; color: var(--muted); padding: 4px 0; }
   .compact-model { display: flex; align-items: center; gap: 10px; }
   .dot { width: 9px; height: 9px; border-radius: 50%; background: var(--green); flex: 0 0 auto; }
+
+  /* provider choice */
+  .provider-choice { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; margin-bottom: 16px; }
+  @media (max-width: 560px) { .provider-choice { grid-template-columns: 1fr; } }
+  .provider-card { display: flex; flex-direction: column; gap: 3px; border: 1px solid var(--line); border-radius: 8px; padding: 12px 14px; cursor: pointer; position: relative; }
+  .provider-card:has(input:checked) { border-color: var(--accent); background: var(--accent-soft); }
+  .provider-card input { position: absolute; top: 12px; right: 12px; }
+  .provider-name { font-weight: 700; }
+  .provider-desc { font-size: 12.5px; color: var(--muted); padding-right: 18px; }
 
   /* choice pills for the work-authorisation questions */
   .question { margin-bottom: 18px; }
@@ -203,20 +217,20 @@
           <h1>Welcome to JobFit</h1>
           <p class="lede">JobFit reads a job posting and tells you how well it fits you, with a score, what you match, what you're missing, and whether the pay is in your range.</p>
           <div class="callout info">
-            <strong>Everything stays on this computer.</strong> Postings are scored by a model running locally in LM Studio. Nothing is sent to any server.
+            <strong>You choose where postings are scored.</strong> With LM Studio, a model runs on this computer and nothing is sent anywhere. With the OpenAI API, there's nothing to install, but postings and your profile are sent to OpenAI.
           </div>
           <p>Setup takes about five minutes. You'll need:</p>
           <ul>
-            <li><strong>LM Studio</strong>, running with a model loaded (the next step checks this for you)</li>
+            <li><strong>LM Studio</strong> running with a model loaded, <em>or</em> an <strong>OpenAI API key</strong> (the next step checks either for you)</li>
             <li><strong>Your CV or LinkedIn profile</strong>, as text to paste</li>
           </ul>
           <p class="hint">Moving from another computer? <button type="button" class="link" id="openRestore">Restore a backup instead</button> (Tracked jobs → Data).</p>
         </section>
 
-        <!-- 1. Local model -->
+        <!-- 1. Model -->
         <section class="step" data-step="model" hidden>
-          <h1>Connect your local model</h1>
-          <p class="lede">JobFit sends each posting to LM Studio on this machine. This setting is shared by every profile.</p>
+          <h1>Choose the model</h1>
+          <p class="lede">Which model scores your postings. This setting is shared by every profile.</p>
 
           <div id="modelCompact" class="callout ok" hidden>
             <div class="compact-model">
@@ -227,7 +241,29 @@
           </div>
 
           <div id="modelFull">
-            <label class="field">
+            <div class="provider-choice" role="radiogroup" aria-label="Model provider">
+              <label class="provider-card">
+                <input type="radio" name="provider" value="lmstudio">
+                <span class="provider-name">LM Studio</span>
+                <span class="provider-desc">Runs on this computer. Private and free, but needs a reasonably capable machine.</span>
+              </label>
+              <label class="provider-card">
+                <input type="radio" name="provider" value="openai">
+                <span class="provider-name">OpenAI API</span>
+                <span class="provider-desc">Nothing to install and fast. Postings and your profile are sent to OpenAI and billed to your API key.</span>
+              </label>
+            </div>
+
+            <label class="field" id="openAiKeyField" hidden>
+              <span>OpenAI API key</span>
+              <div class="row">
+                <input id="oaKey" class="grow" type="password" autocomplete="off" spellcheck="false" placeholder="sk-…">
+                <button type="button" id="testOpenAi">Connect</button>
+              </div>
+              <div class="hint">Create one at platform.openai.com under API keys. It's stored only in this browser's extension storage and never included in backups.</div>
+            </label>
+
+            <label class="field" id="lmUrlField">
               <span>LM Studio endpoint</span>
               <div class="row">
                 <input id="lmUrl" class="grow" type="text" spellcheck="false">
@@ -241,7 +277,7 @@
             <div id="modelPicker" hidden>
               <span class="field-label">Which model should score postings?</span>
               <div class="model-list" id="modelList"></div>
-              <div class="hint">These are the models LM Studio has loaded right now.</div>
+              <div class="hint" id="modelPickerHint">These are the models LM Studio has loaded right now.</div>
             </div>
 
             <details class="advanced" id="modelAdvanced">
@@ -251,6 +287,33 @@
                 <input id="lmTimeout" type="number" min="30" step="30">
                 <div class="hint">How long to wait for one evaluation. Slower models on modest hardware can need several minutes.</div>
               </label>
+              <div id="oaCostFields" hidden>
+                <label class="field" id="oaReasoningField" hidden>
+                  <span>Reasoning effort</span>
+                  <select id="oaReasoning"></select>
+                  <div class="hint">Reasoning tokens are billed as output. Lower is faster and cheaper; low is usually enough to score a posting.</div>
+                </label>
+                <label class="field">
+                  <span>Max output tokens per request</span>
+                  <input id="oaMaxOutput" type="number" min="500" max="64000" step="500">
+                  <div class="hint">A ceiling on what one request can cost, reasoning included. Too low and answers get cut off.</div>
+                </label>
+                <label class="field">
+                  <span>Flex processing (half price, slower)</span>
+                  <select id="oaFlex">
+                    <option value="bulk">For bulk re-evaluations only</option>
+                    <option value="always">Always</option>
+                    <option value="never">Never</option>
+                  </select>
+                  <div class="hint">When Flex has no capacity, that job runs at the standard price instead.</div>
+                </label>
+                <label class="field">
+                  <span>Daily token budget</span>
+                  <input id="oaBudget" type="number" min="0" step="10000" placeholder="no limit">
+                  <div class="hint">When today's usage reaches it, the queue pauses until you raise it or resume tomorrow. A scoring request is typically a few thousand tokens.</div>
+                </label>
+              </div>
+              <div id="lmOnlyAdvanced">
               <label class="field">
                 <span>Reasoning effort</span>
                 <select id="lmReasoning">
@@ -264,6 +327,7 @@
               </label>
               <label class="row" style="gap:8px;"><input id="lmThinking" type="checkbox" style="width:auto;"> Enable model thinking/reasoning</label>
               <div class="hint">Off by default for speed.</div>
+              </div>
             </details>
           </div>
         </section>
@@ -466,6 +530,7 @@
   </div>
 
   <script src="defaults.js"></script>
+  <script src="provider.js"></script>
   <script src="keywords.js"></script>
   <script src="profiles.js"></script>
   <script src="lmstudio-ui.js"></script>

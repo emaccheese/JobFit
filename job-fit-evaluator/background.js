@@ -3,7 +3,7 @@
 // once already: reasoning_effort and enable_thinking were added to the popup
 // but not to this file, so neither was ever sent for anyone who hadn't
 // re-saved their settings.
-importScripts("defaults.js", "keywords.js", "profiles.js", "evalstore.js", "queue.js", "lmstudio-ui.js");
+importScripts("defaults.js", "provider.js", "keywords.js", "profiles.js", "evalstore.js", "queue.js", "lmstudio-ui.js");
 
 const SYSTEM_PROMPT = `You evaluate job postings against a candidate profile.
 Return ONLY a JSON object, no prose, no markdown fences.
@@ -92,7 +92,13 @@ function buildUserPrompt(profile, postingText, expectedSalary, domainFlags) {
     domainFlags && domainFlags.length
       ? `\n\nDETECTED DOMAIN-FLAG TERMS IN POSTING (keyword scan, cross-check each against the profile per the scoring guidance): ${domainFlags.join(", ")}`
       : "";
-  const prompt = `CANDIDATE PROFILE:\n${profile}\n\nCANDIDATE EXPECTED SALARY (per year): ${formatExpectedSalary(expectedSalary)}${domainFlagsLine}\n\nJOB POSTING:\n${trimmed}`;
+  // Everything that's the same on every call comes first — the system prompt,
+  // then this profile and its salary expectations — and everything that
+  // changes per posting comes last. Providers cache a repeated prefix (OpenAI
+  // bills it at a discount; LM Studio reuses its KV cache), and the domain-flag
+  // line used to sit between the profile and the posting, cutting that prefix
+  // short on every posting that hit a different flag.
+  const prompt = `CANDIDATE PROFILE:\n${profile}\n\nCANDIDATE EXPECTED SALARY (per year): ${formatExpectedSalary(expectedSalary)}\n\nJOB POSTING:\n${trimmed}${domainFlagsLine}`;
   return { prompt, truncated };
 }
 
@@ -190,6 +196,276 @@ function keepAlive(intervalMs = 20000) {
   return () => clearInterval(id);
 }
 
+function lmStudioRequestBody(systemPrompt, userPrompt, settings) {
+  const { reasoningEffort, enableThinking, seed } = settings;
+  return {
+    model: settings.model || undefined,
+    messages: [
+      { role: "system", content: systemPrompt },
+      // "/no_think" is an older Qwen3 convention for skipping the
+      // reasoning phase entirely; harmless no-op for models that don't
+      // recognize it, kept as a fallback alongside reasoning_effort
+      // below for models that use the graduated-effort API instead.
+      { role: "user", content: `${userPrompt}\n\n/no_think` },
+    ],
+    temperature: 0.2,
+    // Reproducibility, not determinism-at-any-cost: the same posting and
+    // profile give the same score twice, while temperature stays where it
+    // produces better output than greedy decoding.
+    ...(typeof seed === "number" ? { seed } : {}),
+    max_tokens: 16000,
+    frequency_penalty: 0.3,
+    presence_penalty: 0.3,
+    // Newer reasoning models (e.g. this Qwen3 variant) expose graduated
+    // reasoning_effort levels (low/medium/high/xhigh) instead of a
+    // binary think/no-think toggle. Three different "thinking" models
+    // have now shown extremely verbose reasoning before ever reaching
+    // real output — on one model/hardware combo, ~10 tok/s, making a
+    // 16000-token ceiling a 25-minute worst case — so defaulting to
+    // "low" targets the actual cause instead of just raising timeout/
+    // token budgets further. Omitted entirely if unset, since it's
+    // meaningless (and possibly rejected) by non-reasoning models.
+    ...(reasoningEffort ? { reasoning_effort: reasoningEffort } : {}),
+    // The model's own LM Studio page confirmed the real root cause:
+    // it defaults to reasoning_effort "xhigh" with thinking enabled.
+    // This is a direct, stronger override of that default — disable
+    // thinking outright rather than just requesting a lower effort
+    // level, which may still produce a non-trivial reasoning pass.
+    ...(typeof enableThinking === "boolean" ? { enable_thinking: enableThinking } : {}),
+  };
+}
+
+// OpenAI goes through the Responses API (POST /v1/responses), its current
+// recommended API; LM Studio stays on chat completions, which is what its
+// server implements. OpenAI rejects parameters it doesn't support rather than
+// ignoring them, so this sends only what the chosen model takes:
+// - no "/no_think" (a local-model convention) and no penalties (they were
+//   there to stop local models looping); no seed, which Responses doesn't take
+// - JSON mode via text.format. It requires the word "JSON" in the input
+//   messages, so the instructions go in as a developer message rather than
+//   the separate `instructions` field.
+// - store: false. Responses keeps each response on OpenAI's side by default
+//   for later retrieval; nothing here ever retrieves one, and the input is
+//   a CV and salary expectations.
+// - Reasoning models (o-series, gpt-5) take reasoning.effort and only the
+//   default temperature; the others take temperature.
+function openAiRequestBody(systemPrompt, userPrompt, settings, { caps = {}, tier = null } = {}) {
+  const reasoning = JOB_FIT_PROVIDER.isOpenAiReasoningModel(settings.model);
+  const effort = caps.noReasoning
+    ? ""
+    : JOB_FIT_PROVIDER.effectiveReasoningEffort(settings.model, settings.reasoningEffort, caps.rejectedEfforts);
+  const sendTemperature = !reasoning && !caps.noTemperature;
+  return {
+    model: settings.model,
+    input: [
+      { role: "developer", content: systemPrompt },
+      { role: "user", content: userPrompt },
+    ],
+    text: { format: { type: "json_object" } },
+    max_output_tokens: settings.maxOutputTokens,
+    store: false,
+    ...(sendTemperature ? { temperature: 0.2 } : {}),
+    ...(effort ? { reasoning: { effort } } : {}),
+    ...(tier ? { service_tier: tier } : {}),
+  };
+}
+
+// A Responses API reply is a list of output items — reasoning items, then the
+// assistant message whose content parts hold the text. Returns the text, or a
+// failure in the same shape callLmStudio uses everywhere else.
+function readOpenAiResponse(data) {
+  if (!data || !Array.isArray(data.output)) {
+    return { ok: false, failure: "shape", error: "Unexpected response shape from OpenAI." };
+  }
+  const parts = data.output
+    .filter((item) => item && item.type === "message")
+    .flatMap((item) => (Array.isArray(item.content) ? item.content : []));
+  const refusal = parts.find((p) => p.type === "refusal");
+  if (refusal) {
+    return { ok: false, failure: "refusal", error: `OpenAI declined to answer: ${refusal.refusal || "no reason given"}` };
+  }
+  const text = parts
+    .filter((p) => p.type === "output_text" && typeof p.text === "string")
+    .map((p) => p.text)
+    .join("");
+  if (text.trim()) return { ok: true, text };
+
+  // Nothing usable: say why, when OpenAI says why.
+  const reason = data.incomplete_details && data.incomplete_details.reason;
+  if (data.status === "incomplete" && reason === "max_output_tokens") {
+    return {
+      ok: false,
+      failure: "length",
+      error: "The model used its whole output budget (much of it on reasoning) before answering. Lower the reasoning effort or pick a non-reasoning model.",
+    };
+  }
+  return {
+    ok: false,
+    failure: "empty",
+    error: `OpenAI returned no text${data.status && data.status !== "completed" ? ` (status: ${data.status}${reason ? `, ${reason}` : ""})` : ""}.`,
+  };
+}
+
+// --- token usage ----------------------------------------------------------
+//
+// Both APIs report what a request used, in different field names. Kept per
+// local day and provider in `usageByDay`, which drives the popup's totals and
+// the OpenAI daily budget. Tokens, not dollars: prices differ per model and
+// change, and a stale price table would be worse than none.
+
+const USAGE_KEEP_DAYS = 62;
+
+function usageFrom(provider, data) {
+  const u = data && data.usage;
+  if (!u) return null;
+  if (provider === "openai") {
+    return {
+      input: u.input_tokens || 0,
+      output: u.output_tokens || 0,
+      reasoning: (u.output_tokens_details && u.output_tokens_details.reasoning_tokens) || 0,
+      cached: (u.input_tokens_details && u.input_tokens_details.cached_tokens) || 0,
+      // Billed above the normal input rate on models that list a cache-write price.
+      cacheWrite: (u.input_tokens_details && u.input_tokens_details.cache_write_tokens) || 0,
+    };
+  }
+  return {
+    input: u.prompt_tokens || 0,
+    output: u.completion_tokens || 0,
+    reasoning: (u.completion_tokens_details && u.completion_tokens_details.reasoning_tokens) || 0,
+    cached: (u.prompt_tokens_details && u.prompt_tokens_details.cached_tokens) || 0,
+    cacheWrite: (u.prompt_tokens_details && u.prompt_tokens_details.cache_write_tokens) || 0,
+  };
+}
+
+// Serialized: wizard calls can finish while a queued evaluation does, and
+// two read-modify-writes of the same key would drop one of them.
+let usageWrite = Promise.resolve();
+
+function recordUsage(provider, usage) {
+  if (!usage) return Promise.resolve();
+  usageWrite = usageWrite.then(async () => {
+    const stored = await chrome.storage.local.get("usageByDay");
+    const days = stored.usageByDay || {};
+    const key = JOB_FIT_PROVIDER.dayKey();
+    const day = (days[key] = days[key] || {});
+    const t = (day[provider] = day[provider] || { requests: 0, input: 0, output: 0, reasoning: 0, cached: 0 });
+    t.requests += 1;
+    if (usage.tier === "flex") t.flexRequests = (t.flexRequests || 0) + 1;
+    t.cacheWrite = (t.cacheWrite || 0) + (usage.cacheWrite || 0);
+    t.input += usage.input;
+    t.output += usage.output;
+    t.reasoning += usage.reasoning;
+    t.cached += usage.cached;
+    Object.keys(days)
+      .sort()
+      .slice(0, -USAGE_KEEP_DAYS)
+      .forEach((old) => delete days[old]);
+    await chrome.storage.local.set({ usageByDay: days });
+  }).catch(() => {});
+  return usageWrite;
+}
+
+async function openAiTokensToday() {
+  const stored = await chrome.storage.local.get("usageByDay");
+  const day = (stored.usageByDay || {})[JOB_FIT_PROVIDER.dayKey()] || {};
+  const t = day.openai;
+  return t ? t.input + t.output : 0;
+}
+
+// One POST with a timeout, a caller's cancel signal and the service-worker
+// keep-alive. Returns { resp } or { error: "cancelled" | "timeout" |
+// "unreachable", message }.
+async function postJson(url, body, { apiKey, timeoutMs, signal }) {
+  const controller = new AbortController();
+  const timeoutId = setTimeout(() => controller.abort(), timeoutMs);
+  const onAbort = () => controller.abort();
+  if (signal) signal.addEventListener("abort", onAbort, { once: true });
+  const stopKeepAlive = keepAlive();
+  try {
+    const resp = await fetch(url, {
+      method: "POST",
+      headers: { "Content-Type": "application/json", ...(apiKey ? { Authorization: `Bearer ${apiKey}` } : {}) },
+      signal: controller.signal,
+      body: JSON.stringify(body),
+    });
+    return { resp };
+  } catch (err) {
+    if (err.name === "AbortError") return { error: signal && signal.aborted ? "cancelled" : "timeout" };
+    return { error: "unreachable", message: err.message };
+  } finally {
+    clearTimeout(timeoutId);
+    if (signal) signal.removeEventListener("abort", onAbort);
+    stopKeepAlive();
+  }
+}
+
+function parseOpenAiError(text) {
+  try {
+    const e = (JSON.parse(text) || {}).error || {};
+    return { message: e.message || "", param: e.param || "", code: e.code || "", type: e.type || "" };
+  } catch (err) {
+    return { message: "", param: "", code: "", type: "" };
+  }
+}
+
+// --- self-correcting OpenAI parameters -------------------------------------
+//
+// Which models take temperature, which reasoning levels, and which support
+// Flex is guessed from the model name (provider.js) — and names change with
+// every release. So when OpenAI rejects a setting as unsupported, the request
+// is retried without it and the model's quirk is remembered in
+// `openaiModelCaps`, so the next request gets it right first time.
+
+const FLEX_MIN_TIMEOUT_SECONDS = 900;
+
+async function loadModelCaps(model) {
+  const stored = await chrome.storage.local.get("openaiModelCaps");
+  const caps = (stored.openaiModelCaps || {})[model] || {};
+  return { noTemperature: false, noReasoning: false, noFlex: false, rejectedEfforts: [], ...caps };
+}
+
+async function saveModelCaps(model, caps) {
+  const stored = await chrome.storage.local.get("openaiModelCaps");
+  const all = stored.openaiModelCaps || {};
+  all[model] = caps;
+  await chrome.storage.local.set({ openaiModelCaps: all });
+}
+
+// Returns which setting was adjusted ("temperature", "reasoning",
+// "service_tier"), or null when the rejection isn't one a retry can fix.
+function learnFromRejection(status, err, body, caps) {
+  if (status !== 400) return null;
+  const text = `${err.param} ${err.message}`.toLowerCase();
+  if (!/unsupported|not supported|does not support|invalid value|not allowed/.test(text)) return null;
+
+  if (/temperature/.test(text) && "temperature" in body && !caps.noTemperature) {
+    caps.noTemperature = true;
+    return "temperature";
+  }
+  if (/reasoning/.test(text) && body.reasoning && !caps.noReasoning) {
+    // A level the model doesn't take: try without that level first (the next
+    // one down, if any), and only then without reasoning at all.
+    const effort = body.reasoning.effort;
+    if (effort && !caps.rejectedEfforts.includes(effort)) caps.rejectedEfforts.push(effort);
+    else caps.noReasoning = true;
+    return "reasoning";
+  }
+  if (/service_tier|flex/.test(text) && body.service_tier && !caps.noFlex) {
+    caps.noFlex = true;
+    return "service_tier";
+  }
+  return null;
+}
+
+// Flex is half price and slower. "bulk" (the default) uses it only for work
+// nobody is watching — re-evaluations queued from Tracked jobs.
+function wantsFlex(settings, bulk, caps) {
+  if (caps && caps.noFlex) return false;
+  if (settings.flex === "always") return true;
+  if (settings.flex === "never") return false;
+  return Boolean(bulk);
+}
+
 // The timeout, not max_tokens, is what actually bounds how long the user
 // waits — a bigger max_tokens costs nothing for a request that finishes
 // normally (the model stops itself via its own stop token), it only matters
@@ -201,102 +477,140 @@ function keepAlive(intervalMs = 20000) {
 // `signal` lets a caller cancel: the setup wizard's model calls can take
 // minutes, and a Cancel button that only hid the spinner would leave LM
 // Studio busy generating an answer nobody is waiting for.
-async function callLmStudio(systemPrompt, userPrompt, { signal } = {}) {
-  const stored = await chrome.storage.local.get("lmStudio");
-  const defaults = JOB_FIT_DEFAULTS.lmStudio;
-  const url = (stored.lmStudio && stored.lmStudio.url) || defaults.url;
-  const model = (stored.lmStudio && stored.lmStudio.model) || undefined;
-  const timeoutSeconds = (stored.lmStudio && stored.lmStudio.timeoutSeconds) || defaults.timeoutSeconds;
-  const timeoutMs = timeoutSeconds * 1000;
-  const reasoningEffort =
-    stored.lmStudio && stored.lmStudio.reasoningEffort !== undefined
-      ? stored.lmStudio.reasoningEffort
-      : defaults.reasoningEffort;
-  const enableThinking =
-    stored.lmStudio && typeof stored.lmStudio.enableThinking === "boolean"
-      ? stored.lmStudio.enableThinking
-      : defaults.enableThinking;
-  const seed =
-    stored.lmStudio && typeof stored.lmStudio.seed === "number" ? stored.lmStudio.seed : defaults.seed;
+async function callLmStudio(systemPrompt, userPrompt, { signal, bulk = false } = {}) {
+  // Named for where it started; it now calls whichever provider is selected
+  // (see provider.js): LM Studio's chat-completions endpoint, or OpenAI's
+  // Responses API. The request and reply shapes differ per provider; the
+  // result handed back is the same either way.
+  const settings = await JOB_FIT_PROVIDER.load();
+  const { url, provider, label, timeoutSeconds } = settings;
+  const model = settings.model || undefined;
+
+  if (provider === "openai") {
+    // Caught here rather than sent: OpenAI would answer 401/400, and "config"
+    // pauses the queue with a message that says what to fix.
+    if (!settings.apiKey) {
+      return { ok: false, failure: "config", error: "No OpenAI API key is set. Add it in the popup under Model, or switch the provider back to LM Studio." };
+    }
+    if (!model) {
+      return { ok: false, failure: "config", error: "No OpenAI model is selected. Pick one in the popup under Model." };
+    }
+    // Checked before sending, so the request that would cross the line is
+    // never made. "budget" pauses the queue; raising the budget resumes it.
+    if (settings.dailyTokenBudget) {
+      const used = await openAiTokensToday();
+      if (used >= settings.dailyTokenBudget) {
+        return {
+          ok: false,
+          failure: "budget",
+          error: `Today's OpenAI budget is used up (${used.toLocaleString()} of ${settings.dailyTokenBudget.toLocaleString()} tokens). Raise it in the popup under Model to continue now, or press Resume tomorrow.`,
+        };
+      }
+    }
+  }
 
   const startedAt = Date.now();
-  const controller = new AbortController();
-  const timeoutId = setTimeout(() => controller.abort(), timeoutMs);
-  if (signal) signal.addEventListener("abort", () => controller.abort(), { once: true });
-  const stopKeepAlive = keepAlive();
+  // What this model is known to reject (learned from earlier replies), and
+  // whether to ask for Flex. Both can change between attempts below.
+  const caps = provider === "openai" ? await loadModelCaps(model) : null;
+  let tier = provider === "openai" && wantsFlex(settings, bulk, caps) ? "flex" : null;
+  let fellBackFromFlex = false;
   let resp;
-  try {
-    resp = await fetch(url, {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      signal: controller.signal,
-      body: JSON.stringify({
-        model,
-        messages: [
-          { role: "system", content: systemPrompt },
-          // "/no_think" is an older Qwen3 convention for skipping the
-          // reasoning phase entirely; harmless no-op for models that don't
-          // recognize it, kept as a fallback alongside reasoning_effort
-          // below for models that use the graduated-effort API instead.
-          { role: "user", content: `${userPrompt}\n\n/no_think` },
-        ],
-        temperature: 0.2,
-        // Reproducibility, not determinism-at-any-cost: the same posting and
-        // profile give the same score twice, while temperature stays where it
-        // produces better output than greedy decoding.
-        ...(typeof seed === "number" ? { seed } : {}),
-        max_tokens: 16000,
-        frequency_penalty: 0.3,
-        presence_penalty: 0.3,
-        // Newer reasoning models (e.g. this Qwen3 variant) expose graduated
-        // reasoning_effort levels (low/medium/high/xhigh) instead of a
-        // binary think/no-think toggle. Three different "thinking" models
-        // have now shown extremely verbose reasoning before ever reaching
-        // real output — on one model/hardware combo, ~10 tok/s, making a
-        // 16000-token ceiling a 25-minute worst case — so defaulting to
-        // "low" targets the actual cause instead of just raising timeout/
-        // token budgets further. Omitted entirely if unset, since it's
-        // meaningless (and possibly rejected) by non-reasoning models.
-        ...(reasoningEffort ? { reasoning_effort: reasoningEffort } : {}),
-        // The model's own LM Studio page confirmed the real root cause:
-        // it defaults to reasoning_effort "xhigh" with thinking enabled.
-        // This is a direct, stronger override of that default — disable
-        // thinking outright rather than just requesting a lower effort
-        // level, which may still produce a non-trivial reasoning pass.
-        ...(typeof enableThinking === "boolean" ? { enable_thinking: enableThinking } : {}),
-      }),
+  let failureBody = "";
+
+  // At most one retry per adjustable setting, so a model that keeps rejecting
+  // things can't loop: temperature, reasoning effort (twice: a lower level,
+  // then none) and Flex.
+  for (let attempt = 0; attempt < 5; attempt++) {
+    const body =
+      provider === "openai"
+        ? openAiRequestBody(systemPrompt, userPrompt, settings, { caps, tier })
+        : lmStudioRequestBody(systemPrompt, userPrompt, settings);
+    // Flex responses are slower by design; OpenAI's own SDKs allow 10 minutes.
+    const attemptTimeoutSeconds = tier === "flex" ? Math.max(timeoutSeconds, FLEX_MIN_TIMEOUT_SECONDS) : timeoutSeconds;
+    const sent = await postJson(url, body, {
+      apiKey: provider === "openai" ? settings.apiKey : null,
+      timeoutMs: attemptTimeoutSeconds * 1000,
+      signal,
     });
-  } catch (err) {
-    if (err.name === "AbortError" && signal && signal.aborted) {
-      return { ok: false, failure: "cancelled", error: "Cancelled." };
-    }
-    if (err.name === "AbortError") {
+
+    if (sent.error) {
+      if (sent.error === "cancelled") return { ok: false, failure: "cancelled", error: "Cancelled." };
+      if (sent.error === "timeout") {
+        return {
+          ok: false,
+          failure: "timeout",
+          error:
+            provider === "openai"
+              ? `OpenAI didn't respond within ${attemptTimeoutSeconds}s${tier === "flex" ? " (Flex processing is slower by design)" : ""}. Try again, or raise the timeout in the popup settings.`
+              : `Local model didn't respond within ${timeoutSeconds}s. If LM Studio's own console shows it was still making progress (not stuck repeating itself), raise the timeout in the popup settings — this model may just need longer. If it looked stuck looping, a longer timeout won't help.`,
+        };
+      }
       return {
         ok: false,
-        failure: "timeout",
-        error: `Local model didn't respond within ${timeoutSeconds}s. If LM Studio's own console shows it was still making progress (not stuck repeating itself), raise the timeout in the popup settings — this model may just need longer. If it looked stuck looping, a longer timeout won't help.`,
+        failure: "unreachable",
+        error:
+          provider === "openai"
+            ? `Could not reach OpenAI — check the internet connection. (${sent.message})`
+            : `Could not reach LM Studio at ${url} — is it running? (${sent.message})`,
       };
     }
-    return {
-      ok: false,
-      failure: "unreachable",
-      error: `Could not reach LM Studio at ${url} — is it running? (${err.message})`,
-    };
-  } finally {
-    clearTimeout(timeoutId);
-    stopKeepAlive();
+
+    resp = sent.resp;
+    if (resp.ok || provider !== "openai") break;
+
+    failureBody = await resp.text().catch(() => "");
+    const err = parseOpenAiError(failureBody);
+
+    // No Flex capacity right now. Not billed; retried on Standard, which is
+    // OpenAI's own recommended fallback, so the queue never stalls on it.
+    if (tier === "flex" && resp.status === 429 && /resource.?unavailable|capacity/i.test(`${err.code} ${err.type} ${err.message}`)) {
+      tier = null;
+      fellBackFromFlex = true;
+      continue;
+    }
+
+    // A setting this model doesn't take: remember that, and retry without it.
+    const adjusted = learnFromRejection(resp.status, err, body, caps);
+    if (adjusted) {
+      if (adjusted === "service_tier") tier = null;
+      await saveModelCaps(model, caps);
+      continue;
+    }
+    break;
   }
 
   if (!resp.ok) {
-    const body = await resp.text().catch(() => "");
+    const body = provider === "openai" ? failureBody : await resp.text().catch(() => "");
     // Names the model: a paused queue shows this message until it resumes, and
     // without the name there's no way to tell whether it's about the model
     // configured now or one you've since switched away from.
     const which = model ? ` for model "${model}"` : "";
-    return { ok: false, failure: "http", error: `LM Studio returned HTTP ${resp.status}${which}: ${body.slice(0, 300)}` };
+    // OpenAI wraps its reason in {"error":{"message"}}; show just that.
+    const detail = parseOpenAiError(body).message || body.slice(0, 300);
+    return { ok: false, failure: "http", error: `${label} returned HTTP ${resp.status}${which}: ${detail}` };
   }
 
   const data = await resp.json().catch(() => null);
+  // Recorded whatever happens next: a reply that fails to parse was still billed.
+  const usage = usageFrom(provider, data);
+  if (usage && provider === "openai") {
+    // What actually served it, which OpenAI says can differ from what was asked.
+    usage.tier = (data && data.service_tier) || tier || "default";
+    if (fellBackFromFlex) usage.flexFallback = true;
+  }
+  await recordUsage(provider, usage);
+
+  if (provider === "openai") {
+    const read = readOpenAiResponse(data);
+    if (!read.ok) return { ...read, raw: JSON.stringify(data) };
+    try {
+      return { ok: true, data: extractJson(read.text), model: model || "", usage, durationMs: Date.now() - startedAt };
+    } catch (err) {
+      return { ok: false, failure: "parse", error: "Could not parse JSON from OpenAI's response.", raw: read.text };
+    }
+  }
+
   const message = data?.choices?.[0]?.message;
   const content = message?.content;
   const reasoningContent = message?.reasoning_content;
@@ -326,7 +640,7 @@ async function callLmStudio(systemPrompt, userPrompt, { signal } = {}) {
   try {
     // The model is reported back so it can be stored on the record: scores from
     // different models are not comparable, and the history page sorts by score.
-    return { ok: true, data: extractJson(raw), model: model || "", durationMs: Date.now() - startedAt };
+    return { ok: true, data: extractJson(raw), model: model || "", usage, durationMs: Date.now() - startedAt };
   } catch (err) {
     return { ok: false, failure: "parse", error: "Could not parse JSON from the model's response.", raw };
   }
@@ -444,9 +758,9 @@ function applyScoreCaps(data, { domainFlags, seniorityFlag }) {
 // independent read could land on a different profile if the user switched in
 // between, scoring a posting against one profile's keywords and another's
 // salary expectations.
-async function evaluateWithLmStudio({ profile, postingText, domainFlags, expectedSalary }, signal) {
+async function evaluateWithLmStudio({ profile, postingText, domainFlags, expectedSalary }, signal, { bulk = false } = {}) {
   const { prompt, truncated } = buildUserPrompt(profile, postingText, expectedSalary, domainFlags);
-  const result = await callLmStudio(SYSTEM_PROMPT, prompt, { signal });
+  const result = await callLmStudio(SYSTEM_PROMPT, prompt, { signal, bulk });
 
   if (result.ok && result.data) {
     // Surfaced in the banner: a score produced from a partial posting is worth
@@ -659,9 +973,11 @@ function buildSummarizePrompt(postingText) {
 const QUEUE_ALARM = "jobfit-queue-watchdog";
 
 async function configuredTimeoutMs() {
-  const stored = await chrome.storage.local.get("lmStudio");
-  const seconds = (stored.lmStudio && stored.lmStudio.timeoutSeconds) || JOB_FIT_DEFAULTS.lmStudio.timeoutSeconds;
-  return seconds * 1000;
+  // The queue's lease on an item has to outlast the slowest request it could
+  // make, or a slow Flex response would be "reclaimed" and run twice.
+  const settings = await JOB_FIT_PROVIDER.load();
+  const flexPossible = settings.provider === "openai" && settings.flex !== "never";
+  return (flexPossible ? Math.max(settings.timeoutSeconds, FLEX_MIN_TIMEOUT_SECONDS) : settings.timeoutSeconds) * 1000;
 }
 
 async function setBadge(count, state) {
@@ -732,12 +1048,17 @@ async function recordProbe(probe) {
 
 async function runQueuedEvaluation(item) {
   const snapshot = item.profileSnapshot || {};
-  const result = await evaluateWithLmStudio({
-    profile: snapshot.profile,
-    postingText: item.postingText,
-    domainFlags: item.domainFlags,
-    expectedSalary: snapshot.expectedSalary,
-  });
+  const result = await evaluateWithLmStudio(
+    {
+      profile: snapshot.profile,
+      postingText: item.postingText,
+      domainFlags: item.domainFlags,
+      expectedSalary: snapshot.expectedSalary,
+    },
+    undefined,
+    // Set on re-evaluations queued in bulk from Tracked jobs: eligible for Flex.
+    { bulk: Boolean(item.bulk) }
+  );
   if (!result.ok) return result;
 
   // Reported as an item failure rather than thrown: the queue keeps moving and
@@ -757,6 +1078,7 @@ async function runQueuedEvaluation(item) {
       profileFingerprint: snapshot.fingerprint,
       model: result.model || "",
       durationMs: result.durationMs || null,
+      usage: result.usage || null,
       hardReject: null,
       evaluation: result.data,
       score: result.data.score,
@@ -932,10 +1254,18 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
 let settingsResumeTimer = null;
 
 chrome.storage.onChanged.addListener((changes, area) => {
-  if (area !== "local" || !changes.lmStudio) return;
-  const before = changes.lmStudio.oldValue || {};
-  const after = changes.lmStudio.newValue || {};
-  if (before.model === after.model && before.url === after.url) return;
+  if (area !== "local") return;
+  // Any of: provider switched, model or endpoint changed, API key added.
+  const touched = ["modelProvider", "lmStudio", "openai"].some((key) => {
+    if (!changes[key]) return false;
+    const before = changes[key].oldValue;
+    const after = changes[key].newValue;
+    if (key === "modelProvider") return before !== after;
+    const b = before || {};
+    const a = after || {};
+    return b.model !== a.model || b.url !== a.url || b.apiKey !== a.apiKey || b.dailyTokenBudget !== a.dailyTokenBudget;
+  });
+  if (!touched) return;
   clearTimeout(settingsResumeTimer);
   settingsResumeTimer = setTimeout(resumeAfterSettingsChange, 1500);
 });
@@ -943,11 +1273,10 @@ chrome.storage.onChanged.addListener((changes, area) => {
 async function resumeAfterSettingsChange() {
   const snapshot = await JOB_FIT_QUEUE.snapshot();
   if (snapshot.state !== "paused") return;
-  const stored = await chrome.storage.local.get("lmStudio");
-  const settings = stored.lmStudio || {};
-  const probe = await probeModels(settings.url || JOB_FIT_DEFAULTS.lmStudio.url);
+  const settings = await JOB_FIT_PROVIDER.load();
+  const probe = await probeModels(settings);
   if (!probe.ok) return;
-  const model = (settings.model || "").trim();
+  const model = settings.model;
   if (model && probe.models.length && !probe.models.includes(model)) return;
   await JOB_FIT_QUEUE.resume();
   kick();
