@@ -707,6 +707,7 @@ function probePage() {
     greenhouse: Boolean(document.querySelector(".job__description, .application-description")),
     embedded: hasEmbeddedBoard,
     jibe: Boolean(document.querySelector("descriptions-app #description-body")),
+    eightfold: Boolean(document.querySelector("#pcsx #job-description-container")),
     indeed: location.hostname.includes("indeed.") && Boolean(document.querySelector("#jobDescriptionText, .simple-job-description-html")),
     workday: Boolean(document.querySelector('[data-automation-id="jobPostingDescription"]')),
   };
@@ -737,6 +738,7 @@ async function checkPage() {
   else if (probe.indeed) setReady("pageDot", "pageState", "ok", "Indeed posting detected.");
   else if (probe.workday)setReady("pageDot", "pageState", "ok", "Workday posting detected.");
   else if (probe.jibe)setReady("pageDot", "pageState", "ok", "Jibe career-site posting detected.");
+  else if (probe.eightfold) setReady("pageDot", "pageState", "ok", "Eightfold career-site posting detected.");
   else
     setReady(
       "pageDot",
@@ -874,17 +876,27 @@ async function evaluateCurrentTab() {
   window.close();
 }
 
+// Runs in the page (executeScript serializes it, so it can't call anything
+// outside itself). Same order as content.js's pickExtractor: this used to try
+// only Greenhouse and LinkedIn before the whole-page fallback, so a brief on
+// Indeed, Workday, Jibe or Eightfold summarized the page chrome as well.
 function extractOnPage() {
   const host = location.hostname;
+  const jf = window.__jobFit || {};
+  const chain = [
+    jf.greenhouse,
+    host.includes("linkedin.com") && jf.linkedin,
+    host.includes("indeed.") && jf.indeed,
+    jf.workday,
+    jf.jibe,
+    jf.eightfold,
+    jf.generic,
+  ];
   let extracted = null;
-  if (host.includes("greenhouse.io") && window.__jobFit && window.__jobFit.greenhouse) {
-    extracted = window.__jobFit.greenhouse();
-  }
-  if (!extracted && host.includes("linkedin.com") && window.__jobFit && window.__jobFit.linkedin) {
-    extracted = window.__jobFit.linkedin();
-  }
-  if (!extracted && window.__jobFit && window.__jobFit.generic) {
-    extracted = window.__jobFit.generic();
+  for (const extract of chain) {
+    if (typeof extract !== "function") continue;
+    extracted = extract();
+    if (extracted) break;
   }
   if (!extracted) return null;
   // Computed in the page, where location and the DOM are available, so the

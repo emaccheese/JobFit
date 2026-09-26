@@ -17,6 +17,7 @@ const JOB_FIT_CONTENT_FILES = [
   "extractors/jibe.js",
   "extractors/workday.js",
   "extractors/indeed.js",
+  "extractors/eightfold.js",
   "jobkey.js",
   "content.js",
 ];

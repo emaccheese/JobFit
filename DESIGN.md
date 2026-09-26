@@ -86,6 +86,7 @@ job-fit-evaluator/
 │   ├── greenhouse.js    # site-specific selectors
 │   ├── lever.js
 │   ├── linkedin.js
+│   ├── eightfold.js     # Eightfold career sites (careers.qualcomm.com, …)
 │   └── generic.js       # fallback: largest text block
 └── README.md
 ```
@@ -506,6 +507,13 @@ read `innerText` — single-line values with no structure to preserve.)
   - **company** — `a[href*="/company/"]`, scoped to the nearest ancestor shared with the title anchor (bounded upward walk, since hashed classes give `closest()` nothing to target).
   - **location** — first `·`-separated segment of that container's meta line (`Bellevue, WA · Reposted 1 week ago · 96 people clicked apply`).
   - Each field degrades to `null` independently — better to return nothing than to confidently label the posting with another job's title.
+- **eightfold.js** — Eightfold career sites on companies' own domains (careers.qualcomm.com, 2026-09-26). The search page is a single-page app: a results list on the left, and the selected job on the right, swapped in place as you click. Before this, those pages fell to the generic extractor, which sent the whole page (about 14,000 words on the Qualcomm page tested, including the results list) titled with the search, "C++ at Tijuana, B.C., Mexico | Qualcomm".
+  - **recognised** by Eightfold's app root `#pcsx` plus `#job-description-container`, not by hostname, like Jibe.
+  - **text** — `#job-description-container`, a fixed id, where the classes carry a build hash (`position-title-3TPtN`), so only prefixes are matched.
+  - **title / location** — `[class^="position-title-"]` and `[class^="position-location-"]` in the job header.
+  - **company** — the page's JobPosting `hiringOrganization`, falling back to the tab title's last `|` segment.
+  - **job id** — the displayed job's own id, from the header's `add-to-cart-<pid>` button or Apply link, then `pid=` in the address, then `/job/<pid>` for direct links. The header comes first so the key names the job on screen even if the address lags a click behind. The key is `eightfold:<host>:<pid>`, dropping the search filters (query, start, location, sort) that would otherwise file the same job once per search.
+  - **The JobPosting block is written once, when the page loads,** so after you click another job it still describes the first. It's used for the title only when its `url`'s `pid` matches the job on screen, and for the company (which is the same for every job on one company's site).
 - **generic.js** — fallback: prefer the largest *visible* dialog, else `document.body`. Guard against garbage: under ~200 words, treat extraction as failed rather than sending a cookie banner or nav menu to the model.
 
 ### Why not innerText
