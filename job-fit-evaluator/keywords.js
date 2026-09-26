@@ -33,10 +33,22 @@ var JOB_FIT_KEYWORDS = (function () {
         id: "sponsorship",
         label: "No visa sponsorship available",
         example: "We are not able to sponsor visas for this role",
+        // Postings refuse sponsorship in many ways; "We will not sponsor
+        // individuals for employment visas" matched none of the original three
+        // and went straight to the model. Tested against refusals that must
+        // match and against "sponsorship is available" and the application
+        // question "Will you now or in the future require sponsorship?", which
+        // must not — so "now or in the future" is deliberately not a pattern
+        // on its own.
         patterns: [
-          "without (current or future )?sponsorship",
+          "without (the need for |requiring |needing |any )?(current or future |present or future |future )?(visa |employer |employment |immigration |company )?sponsorship",
           "not (able|available) to sponsor",
-          "no sponsorship",
+          "no (visa |immigration |employment |h-?1b )?sponsorship",
+          "(will|do|does|can|are|is) not (be )?(able to )?(offer |provide )?sponsor",
+          "(cannot|can't|won't|unable to|not able to) (offer |provide |support )?(visa |immigration |employment )?sponsor",
+          "(not|unable to|cannot) (currently )?(offer|offering|provide|providing|support|supporting)( any)? (visa |immigration |employment |work authorization |h-?1b )?sponsorship",
+          "sponsorship (is |will )?(not|n't) (be )?(available|offered|provided|supported|possible|an option)",
+          "(ineligible|not eligible) for (visa |immigration |employment )?sponsorship",
         ],
       },
       {
@@ -76,6 +88,19 @@ var JOB_FIT_KEYWORDS = (function () {
         label: "Export control mentioned (often satisfiable, unlike ITAR)",
         example: "Subject to U.S. export control regulations",
         patterns: ["export control"],
+      },
+      {
+        // Not a hard reject: "only employ those who are legally authorized to
+        // work" doesn't rule sponsorship out — many employers write it and
+        // still transfer or sponsor existing visas — but it's worth a look
+        // before applying if you'll need sponsorship.
+        id: "workauth",
+        label: "Must already be authorized to work in the US (sponsorship unclear)",
+        example: "Will only employ those who are legally authorized to work in the United States",
+        patterns: [
+          "only (employ|hire|consider|accept) (those|candidates|applicants|individuals|people) who are (legally )?authorized to work",
+          "must (be|already be) (legally )?authorized to work in the (united states|u\\.?s\\.?)",
+        ],
       },
       {
         id: "masters",

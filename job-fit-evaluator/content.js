@@ -15,55 +15,8 @@
     }
   }
 
-  // Takes a keyword config (ticked categories + phrases + raw patterns),
-  // compiles it, and carries each entry's human label alongside the regex so
-  // the UI can name the rule that fired without ever showing a pattern.
-  function compileConfig(config, kind) {
-    return JOB_FIT_KEYWORDS.compile(config, kind)
-      .map((entry) => {
-        try {
-          return { ...entry, re: new RegExp(entry.source, "i") };
-        } catch (e) {
-          console.warn(`[Job Fit Evaluator] invalid keyword pattern skipped: ${entry.source}`, e);
-          return null;
-        }
-      })
-      .filter(Boolean);
-  }
-
-  // Shows the words the POSTING actually used, not the pattern that matched
-  // them. Trying to prettify a regex into prose never worked — stripping
-  // backslashes left things like "master'?s degree (is )?required" and
-  // "graduat(ing|ion) (date )?(between|in) (20\d\d)" on screen — and the
-  // matched text is the more useful thing anyway: it says what tripped the
-  // flag rather than what the rule looks like.
-  const MAX_LABEL_CHARS = 80;
-
-  function matchedLabels(patterns, text) {
-    const seen = new Set();
-    const labels = [];
-
-    patterns.forEach((item) => {
-      const m = text.match(item.re);
-      if (!m) return;
-      const label = cleanMatch(m[0]);
-      if (!label) return;
-      const key = label.toLowerCase();
-      if (seen.has(key)) return;
-      seen.add(key);
-      labels.push(label);
-    });
-
-    return labels;
-  }
-
-  // Matched text comes straight out of the posting, so it can carry newlines
-  // from textFrom's block boundaries, and a loose pattern can match a long
-  // span.
-  function cleanMatch(raw) {
-    const collapsed = raw.replace(/\s+/g, " ").trim();
-    return collapsed.length > MAX_LABEL_CHARS ? `${collapsed.slice(0, MAX_LABEL_CHARS - 1)}…` : collapsed;
-  }
+  // Screening helpers are shared with the service worker's queue (screening.js).
+  const { compileConfig, matchedLabels, cleanMatch } = JOB_FIT_SCREEN;
 
   // The pattern is still worth showing for a hard reject — it's the thing
   // you'd go and edit — but labelled as a rule rather than presented as prose.
@@ -203,13 +156,7 @@
   }
 
   function runLayer1(text, hardRejects) {
-    for (const item of hardRejects) {
-      const m = text.match(item.re);
-      // label is the category name ("US citizenship or permanent residency")
-      // or the user's own phrase — never the underlying pattern.
-      if (m) return { hardReject: { label: item.label, matchedText: m[0] } };
-    }
-    return { hardReject: null };
+    return { hardReject: JOB_FIT_SCREEN.findHardReject(text, hardRejects) };
   }
 
   function removeExistingBanner() {

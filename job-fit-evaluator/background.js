@@ -3,7 +3,7 @@
 // once already: reasoning_effort and enable_thinking were added to the popup
 // but not to this file, so neither was ever sent for anyone who hadn't
 // re-saved their settings.
-importScripts("defaults.js", "provider.js", "keywords.js", "profiles.js", "evalstore.js", "queue.js", "lmstudio-ui.js", "inject.js");
+importScripts("defaults.js", "provider.js", "keywords.js", "screening.js", "profiles.js", "evalstore.js", "queue.js", "lmstudio-ui.js", "inject.js");
 
 const SYSTEM_PROMPT = `You evaluate job postings against a candidate profile.
 Return ONLY a JSON object, no prose, no markdown fences.
@@ -1046,13 +1046,65 @@ async function recordProbe(probe) {
   }
 }
 
+// Screens with the profile's CURRENT keyword settings, not the ones in force
+// when the job was first saved. That's the point of re-evaluating: a reject
+// rule added or improved since (the sponsorship phrasings, say) has to catch
+// jobs already in Tracked jobs. A deleted profile falls back to what the item
+// was queued with.
+async function screenQueuedItem(item) {
+  const { profiles } = await JOB_FIT_PROFILES.load();
+  const profile = profiles.find((p) => p.id === item.profileId);
+  if (!profile) return { hardReject: null, domainFlags: item.domainFlags || [], softWarnings: item.softWarnings || [] };
+  return JOB_FIT_SCREEN.screen(item.postingText || "", profile.keywords);
+}
+
 async function runQueuedEvaluation(item) {
   const snapshot = item.profileSnapshot || {};
+  const screened = await screenQueuedItem(item);
+
+  const baseRecord = {
+    jobKey: item.jobKey,
+    profileId: item.profileId,
+    profileName: item.profileName,
+    url: item.url,
+    title: item.title,
+    company: item.company,
+    location: item.location,
+    text: item.postingText,
+    extractor: item.extractor,
+    profileFingerprint: snapshot.fingerprint,
+  };
+
+  // A hard reject is filed the way the page files one — score 0, no model
+  // call, nothing to pay for. The previous score moves to the job's earlier
+  // results as usual.
+  if (screened.hardReject) {
+    let record;
+    try {
+      record = await JOB_FIT_EVALSTORE.saveEvaluation({
+        ...baseRecord,
+        model: "",
+        durationMs: null,
+        usage: null,
+        hardReject: screened.hardReject,
+        evaluation: null,
+        score: 0,
+        verdict: "hard reject",
+        domainFlags: [],
+        softWarnings: [],
+      });
+    } catch (err) {
+      return { ok: false, failure: "storage", error: `Rejected, but could not be saved: ${err.message}` };
+    }
+    await notifyTab(item, record);
+    return { ok: true };
+  }
+
   const result = await evaluateWithLmStudio(
     {
       profile: snapshot.profile,
       postingText: item.postingText,
-      domainFlags: item.domainFlags,
+      domainFlags: screened.domainFlags,
       expectedSalary: snapshot.expectedSalary,
     },
     undefined,
@@ -1066,16 +1118,7 @@ async function runQueuedEvaluation(item) {
   let record;
   try {
     record = await JOB_FIT_EVALSTORE.saveEvaluation({
-      jobKey: item.jobKey,
-      profileId: item.profileId,
-      profileName: item.profileName,
-      url: item.url,
-      title: item.title,
-      company: item.company,
-      location: item.location,
-      text: item.postingText,
-      extractor: item.extractor,
-      profileFingerprint: snapshot.fingerprint,
+      ...baseRecord,
       model: result.model || "",
       durationMs: result.durationMs || null,
       usage: result.usage || null,
@@ -1083,8 +1126,8 @@ async function runQueuedEvaluation(item) {
       evaluation: result.data,
       score: result.data.score,
       verdict: result.data.verdict,
-      domainFlags: item.domainFlags,
-      softWarnings: item.softWarnings,
+      domainFlags: screened.domainFlags,
+      softWarnings: screened.softWarnings,
     });
   } catch (err) {
     return { ok: false, failure: "storage", error: `Scored, but could not be saved: ${err.message}` };

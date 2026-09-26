@@ -8,6 +8,7 @@ const JOB_FIT_CONTENT_FILES = [
   "defaults.js",
   "provider.js",
   "keywords.js",
+  "screening.js",
   "profiles.js",
   "evalstore.js",
   "extractors/text.js",

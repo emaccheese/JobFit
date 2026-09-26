@@ -130,6 +130,40 @@ job-fit-evaluator/
 Run regex against the extracted text. On any **hard reject** hit, show a red banner with the matched phrase and **stop** — do not call the local model.
 
 ### Hard rejects
+
+> **Sponsorship phrasings widened** (2026-09-26). A GE HealthCare posting said
+> "We will not sponsor individuals for employment visas, now or in the future",
+> which matched none of the three original patterns. It was scored (78 by one
+> model) and sponsorship only surfaced in the reasoning. The category now covers
+> "will/do/does not sponsor", "cannot/unable to sponsor", "not (currently)
+> offering/providing … sponsorship", "sponsorship is not available/provided",
+> "not eligible for sponsorship", and "without the need for / requiring …
+> sponsorship". These were tested against 15 refusals that must match and 8
+> phrasings that must not.
+> - **"Now or in the future" is deliberately not a pattern on its own:** it's
+>   also the application question "Will you now or in the future require
+>   sponsorship?".
+> - **"Only employ those who are legally authorized to work" became a Warning,
+>   not a reject** (the `workauth` category). Many employers write it and still
+>   sponsor or transfer existing visas.
+>
+> Improvements to a category reach every profile that has it ticked. The new
+> Warnings category is ticked by default only for new profiles.
+>
+> **Re-evaluations are screened too** (same day). Layer 1 used to run only in
+> the page script. A re-evaluation queued from Tracked jobs sent the saved text
+> straight to the model, so a rule added or fixed later never caught a job
+> already saved, and on a paid provider a dead posting was paid for again.
+> - The screening helpers moved from `content.js` into a shared `screening.js`
+>   (`JOB_FIT_SCREEN`), used by the page and by `runQueuedEvaluation`.
+> - The queue screens with the profile's **current** keyword settings. A match
+>   is filed as a hard reject (score 0, no model call), and the job's previous
+>   score moves to its earlier results as usual.
+> - A job that passes gets its domain flags and warnings recomputed rather than
+>   reused from when it was first saved.
+> - A job whose profile was deleted falls back to the stored flags.
+
+The original list (see `keywords.js` for the current patterns):
 ```
 /without (current or future )?sponsorship/i
 /not (able|available) to sponsor/i

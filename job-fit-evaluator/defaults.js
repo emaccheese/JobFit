@@ -32,7 +32,7 @@ Target: the roles, seniority and locations you actually want.`,
       patterns: [],
     },
     softWarnings: {
-      presets: ["exportcontrol", "masters"],
+      presets: ["exportcontrol", "workauth", "masters"],
       phrases: [],
       patterns: [],
     },
