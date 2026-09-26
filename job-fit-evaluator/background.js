@@ -3,7 +3,7 @@
 // once already: reasoning_effort and enable_thinking were added to the popup
 // but not to this file, so neither was ever sent for anyone who hadn't
 // re-saved their settings.
-importScripts("defaults.js", "keywords.js", "profiles.js", "evalstore.js", "queue.js", "lmstudio-ui.js");
+importScripts("defaults.js", "provider.js", "keywords.js", "profiles.js", "evalstore.js", "queue.js", "lmstudio-ui.js");
 
 const SYSTEM_PROMPT = `You evaluate job postings against a candidate profile.
 Return ONLY a JSON object, no prose, no markdown fences.
@@ -190,6 +190,67 @@ function keepAlive(intervalMs = 20000) {
   return () => clearInterval(id);
 }
 
+function lmStudioRequestBody(systemPrompt, userPrompt, settings) {
+  const { reasoningEffort, enableThinking, seed } = settings;
+  return {
+    model: settings.model || undefined,
+    messages: [
+      { role: "system", content: systemPrompt },
+      // "/no_think" is an older Qwen3 convention for skipping the
+      // reasoning phase entirely; harmless no-op for models that don't
+      // recognize it, kept as a fallback alongside reasoning_effort
+      // below for models that use the graduated-effort API instead.
+      { role: "user", content: `${userPrompt}\n\n/no_think` },
+    ],
+    temperature: 0.2,
+    // Reproducibility, not determinism-at-any-cost: the same posting and
+    // profile give the same score twice, while temperature stays where it
+    // produces better output than greedy decoding.
+    ...(typeof seed === "number" ? { seed } : {}),
+    max_tokens: 16000,
+    frequency_penalty: 0.3,
+    presence_penalty: 0.3,
+    // Newer reasoning models (e.g. this Qwen3 variant) expose graduated
+    // reasoning_effort levels (low/medium/high/xhigh) instead of a
+    // binary think/no-think toggle. Three different "thinking" models
+    // have now shown extremely verbose reasoning before ever reaching
+    // real output — on one model/hardware combo, ~10 tok/s, making a
+    // 16000-token ceiling a 25-minute worst case — so defaulting to
+    // "low" targets the actual cause instead of just raising timeout/
+    // token budgets further. Omitted entirely if unset, since it's
+    // meaningless (and possibly rejected) by non-reasoning models.
+    ...(reasoningEffort ? { reasoning_effort: reasoningEffort } : {}),
+    // The model's own LM Studio page confirmed the real root cause:
+    // it defaults to reasoning_effort "xhigh" with thinking enabled.
+    // This is a direct, stronger override of that default — disable
+    // thinking outright rather than just requesting a lower effort
+    // level, which may still produce a non-trivial reasoning pass.
+    ...(typeof enableThinking === "boolean" ? { enable_thinking: enableThinking } : {}),
+  };
+}
+
+// OpenAI rejects parameters it doesn't support rather than ignoring them, so
+// this sends only what the chosen model takes. No "/no_think" (a local-model
+// convention) and no penalties (they were there to stop local models looping).
+// JSON mode guarantees a parseable object; every prompt already asks for JSON,
+// which JSON mode requires.
+function openAiRequestBody(systemPrompt, userPrompt, settings) {
+  const reasoning = JOB_FIT_PROVIDER.isOpenAiReasoningModel(settings.model);
+  return {
+    model: settings.model,
+    messages: [
+      { role: "system", content: systemPrompt },
+      { role: "user", content: userPrompt },
+    ],
+    response_format: { type: "json_object" },
+    max_completion_tokens: 16000,
+    seed: JOB_FIT_DEFAULTS.lmStudio.seed,
+    // Reasoning models only accept the default temperature.
+    ...(reasoning ? {} : { temperature: 0.2 }),
+    ...(reasoning && settings.reasoningEffort ? { reasoning_effort: settings.reasoningEffort } : {}),
+  };
+}
+
 // The timeout, not max_tokens, is what actually bounds how long the user
 // waits — a bigger max_tokens costs nothing for a request that finishes
 // normally (the model stops itself via its own stop token), it only matters
@@ -202,22 +263,24 @@ function keepAlive(intervalMs = 20000) {
 // minutes, and a Cancel button that only hid the spinner would leave LM
 // Studio busy generating an answer nobody is waiting for.
 async function callLmStudio(systemPrompt, userPrompt, { signal } = {}) {
-  const stored = await chrome.storage.local.get("lmStudio");
-  const defaults = JOB_FIT_DEFAULTS.lmStudio;
-  const url = (stored.lmStudio && stored.lmStudio.url) || defaults.url;
-  const model = (stored.lmStudio && stored.lmStudio.model) || undefined;
-  const timeoutSeconds = (stored.lmStudio && stored.lmStudio.timeoutSeconds) || defaults.timeoutSeconds;
+  // Named for where it started; it now calls whichever provider is selected
+  // (see provider.js). Both speak the OpenAI chat-completions format, so only
+  // the URL, the auth header and the accepted parameters differ.
+  const settings = await JOB_FIT_PROVIDER.load();
+  const { url, provider, label, timeoutSeconds } = settings;
+  const model = settings.model || undefined;
   const timeoutMs = timeoutSeconds * 1000;
-  const reasoningEffort =
-    stored.lmStudio && stored.lmStudio.reasoningEffort !== undefined
-      ? stored.lmStudio.reasoningEffort
-      : defaults.reasoningEffort;
-  const enableThinking =
-    stored.lmStudio && typeof stored.lmStudio.enableThinking === "boolean"
-      ? stored.lmStudio.enableThinking
-      : defaults.enableThinking;
-  const seed =
-    stored.lmStudio && typeof stored.lmStudio.seed === "number" ? stored.lmStudio.seed : defaults.seed;
+
+  if (provider === "openai") {
+    // Caught here rather than sent: OpenAI would answer 401/400, and "config"
+    // pauses the queue with a message that says what to fix.
+    if (!settings.apiKey) {
+      return { ok: false, failure: "config", error: "No OpenAI API key is set. Add it in the popup under Model, or switch the provider back to LM Studio." };
+    }
+    if (!model) {
+      return { ok: false, failure: "config", error: "No OpenAI model is selected. Pick one in the popup under Model." };
+    }
+  }
 
   const startedAt = Date.now();
   const controller = new AbortController();
@@ -228,43 +291,16 @@ async function callLmStudio(systemPrompt, userPrompt, { signal } = {}) {
   try {
     resp = await fetch(url, {
       method: "POST",
-      headers: { "Content-Type": "application/json" },
+      headers: {
+        "Content-Type": "application/json",
+        ...(provider === "openai" ? { Authorization: `Bearer ${settings.apiKey}` } : {}),
+      },
       signal: controller.signal,
-      body: JSON.stringify({
-        model,
-        messages: [
-          { role: "system", content: systemPrompt },
-          // "/no_think" is an older Qwen3 convention for skipping the
-          // reasoning phase entirely; harmless no-op for models that don't
-          // recognize it, kept as a fallback alongside reasoning_effort
-          // below for models that use the graduated-effort API instead.
-          { role: "user", content: `${userPrompt}\n\n/no_think` },
-        ],
-        temperature: 0.2,
-        // Reproducibility, not determinism-at-any-cost: the same posting and
-        // profile give the same score twice, while temperature stays where it
-        // produces better output than greedy decoding.
-        ...(typeof seed === "number" ? { seed } : {}),
-        max_tokens: 16000,
-        frequency_penalty: 0.3,
-        presence_penalty: 0.3,
-        // Newer reasoning models (e.g. this Qwen3 variant) expose graduated
-        // reasoning_effort levels (low/medium/high/xhigh) instead of a
-        // binary think/no-think toggle. Three different "thinking" models
-        // have now shown extremely verbose reasoning before ever reaching
-        // real output — on one model/hardware combo, ~10 tok/s, making a
-        // 16000-token ceiling a 25-minute worst case — so defaulting to
-        // "low" targets the actual cause instead of just raising timeout/
-        // token budgets further. Omitted entirely if unset, since it's
-        // meaningless (and possibly rejected) by non-reasoning models.
-        ...(reasoningEffort ? { reasoning_effort: reasoningEffort } : {}),
-        // The model's own LM Studio page confirmed the real root cause:
-        // it defaults to reasoning_effort "xhigh" with thinking enabled.
-        // This is a direct, stronger override of that default — disable
-        // thinking outright rather than just requesting a lower effort
-        // level, which may still produce a non-trivial reasoning pass.
-        ...(typeof enableThinking === "boolean" ? { enable_thinking: enableThinking } : {}),
-      }),
+      body: JSON.stringify(
+        provider === "openai"
+          ? openAiRequestBody(systemPrompt, userPrompt, settings)
+          : lmStudioRequestBody(systemPrompt, userPrompt, settings)
+      ),
     });
   } catch (err) {
     if (err.name === "AbortError" && signal && signal.aborted) {
@@ -274,13 +310,19 @@ async function callLmStudio(systemPrompt, userPrompt, { signal } = {}) {
       return {
         ok: false,
         failure: "timeout",
-        error: `Local model didn't respond within ${timeoutSeconds}s. If LM Studio's own console shows it was still making progress (not stuck repeating itself), raise the timeout in the popup settings — this model may just need longer. If it looked stuck looping, a longer timeout won't help.`,
+        error:
+          provider === "openai"
+            ? `OpenAI didn't respond within ${timeoutSeconds}s. Try again, or raise the timeout in the popup settings.`
+            : `Local model didn't respond within ${timeoutSeconds}s. If LM Studio's own console shows it was still making progress (not stuck repeating itself), raise the timeout in the popup settings — this model may just need longer. If it looked stuck looping, a longer timeout won't help.`,
       };
     }
     return {
       ok: false,
       failure: "unreachable",
-      error: `Could not reach LM Studio at ${url} — is it running? (${err.message})`,
+      error:
+        provider === "openai"
+          ? `Could not reach OpenAI — check the internet connection. (${err.message})`
+          : `Could not reach LM Studio at ${url} — is it running? (${err.message})`,
     };
   } finally {
     clearTimeout(timeoutId);
@@ -293,7 +335,15 @@ async function callLmStudio(systemPrompt, userPrompt, { signal } = {}) {
     // without the name there's no way to tell whether it's about the model
     // configured now or one you've since switched away from.
     const which = model ? ` for model "${model}"` : "";
-    return { ok: false, failure: "http", error: `LM Studio returned HTTP ${resp.status}${which}: ${body.slice(0, 300)}` };
+    // OpenAI wraps its reason in {"error":{"message"}}; show just that.
+    let detail = body.slice(0, 300);
+    try {
+      const parsed = JSON.parse(body);
+      if (parsed && parsed.error && parsed.error.message) detail = parsed.error.message;
+    } catch (err) {
+      /* not JSON — keep the raw text */
+    }
+    return { ok: false, failure: "http", error: `${label} returned HTTP ${resp.status}${which}: ${detail}` };
   }
 
   const data = await resp.json().catch(() => null);
@@ -659,9 +709,7 @@ function buildSummarizePrompt(postingText) {
 const QUEUE_ALARM = "jobfit-queue-watchdog";
 
 async function configuredTimeoutMs() {
-  const stored = await chrome.storage.local.get("lmStudio");
-  const seconds = (stored.lmStudio && stored.lmStudio.timeoutSeconds) || JOB_FIT_DEFAULTS.lmStudio.timeoutSeconds;
-  return seconds * 1000;
+  return (await JOB_FIT_PROVIDER.load()).timeoutSeconds * 1000;
 }
 
 async function setBadge(count, state) {
@@ -932,10 +980,18 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
 let settingsResumeTimer = null;
 
 chrome.storage.onChanged.addListener((changes, area) => {
-  if (area !== "local" || !changes.lmStudio) return;
-  const before = changes.lmStudio.oldValue || {};
-  const after = changes.lmStudio.newValue || {};
-  if (before.model === after.model && before.url === after.url) return;
+  if (area !== "local") return;
+  // Any of: provider switched, model or endpoint changed, API key added.
+  const touched = ["modelProvider", "lmStudio", "openai"].some((key) => {
+    if (!changes[key]) return false;
+    const before = changes[key].oldValue;
+    const after = changes[key].newValue;
+    if (key === "modelProvider") return before !== after;
+    const b = before || {};
+    const a = after || {};
+    return b.model !== a.model || b.url !== a.url || b.apiKey !== a.apiKey;
+  });
+  if (!touched) return;
   clearTimeout(settingsResumeTimer);
   settingsResumeTimer = setTimeout(resumeAfterSettingsChange, 1500);
 });
@@ -943,11 +999,10 @@ chrome.storage.onChanged.addListener((changes, area) => {
 async function resumeAfterSettingsChange() {
   const snapshot = await JOB_FIT_QUEUE.snapshot();
   if (snapshot.state !== "paused") return;
-  const stored = await chrome.storage.local.get("lmStudio");
-  const settings = stored.lmStudio || {};
-  const probe = await probeModels(settings.url || JOB_FIT_DEFAULTS.lmStudio.url);
+  const settings = await JOB_FIT_PROVIDER.load();
+  const probe = await probeModels(settings);
   if (!probe.ok) return;
-  const model = (settings.model || "").trim();
+  const model = settings.model;
   if (model && probe.models.length && !probe.models.includes(model)) return;
   await JOB_FIT_QUEUE.resume();
   kick();

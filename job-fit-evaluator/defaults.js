@@ -65,6 +65,13 @@ Target: the roles, seniority and locations you actually want.`,
     // without forcing greedy decoding.
     seed: 7,
   },
+  // Used only when the model provider is set to OpenAI (see provider.js). No
+  // model is preselected: the list comes from the account's own /v1/models.
+  openai: {
+    apiKey: "",
+    model: "",
+    reasoningEffort: "low",
+  },
   expectedSalary: {
     USD: { min: null, max: null },
     CAD: { min: null, max: null },

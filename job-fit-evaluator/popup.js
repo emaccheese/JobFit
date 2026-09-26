@@ -8,6 +8,10 @@ const els = {
   lmStudioTimeout: document.getElementById("lmStudioTimeout"),
   lmStudioReasoningEffort: document.getElementById("lmStudioReasoningEffort"),
   lmStudioEnableThinking: document.getElementById("lmStudioEnableThinking"),
+  modelProvider: document.getElementById("modelProvider"),
+  openAiKey: document.getElementById("openAiKey"),
+  openAiModel: document.getElementById("openAiModel"),
+  openAiReasoningEffort: document.getElementById("openAiReasoningEffort"),
   profile: document.getElementById("profile"),
   salaryUsdMin: document.getElementById("salaryUsdMin"),
   salaryUsdMax: document.getElementById("salaryUsdMax"),
@@ -190,8 +194,14 @@ function captureForm() {
 }
 
 async function loadSettings() {
-  const stored = await chrome.storage.local.get(["lmStudio", "uiOpenSections"]);
+  const stored = await chrome.storage.local.get([...JOB_FIT_PROVIDER.KEYS, "uiOpenSections"]);
   const lmStudio = stored.lmStudio || JOB_FIT_DEFAULTS.lmStudio;
+  const openai = { ...JOB_FIT_DEFAULTS.openai, ...(stored.openai || {}) };
+  els.modelProvider.value = stored.modelProvider === "openai" ? "openai" : "lmstudio";
+  els.openAiKey.value = openai.apiKey || "";
+  els.openAiModel.value = openai.model || "";
+  els.openAiReasoningEffort.value = openai.reasoningEffort || "";
+  showProviderFields();
   els.lmStudioUrl.value = lmStudio.url || JOB_FIT_DEFAULTS.lmStudio.url;
   els.lmStudioModel.value = lmStudio.model || "";
   els.lmStudioTimeout.value = lmStudio.timeoutSeconds || JOB_FIT_DEFAULTS.lmStudio.timeoutSeconds;
@@ -231,8 +241,11 @@ function flushAutoSave() {
   return persistSettings();
 }
 
-async function persistSettings() {
-  await chrome.storage.local.set({
+// The model settings as the form holds them. One builder for autosave and the
+// Save button, which used to each spell the object out and could drift.
+function modelSettingsFromForm() {
+  return {
+    modelProvider: els.modelProvider.value === "openai" ? "openai" : "lmstudio",
     lmStudio: {
       url: els.lmStudioUrl.value.trim() || JOB_FIT_DEFAULTS.lmStudio.url,
       model: els.lmStudioModel.value.trim(),
@@ -241,8 +254,39 @@ async function persistSettings() {
       reasoningEffort: els.lmStudioReasoningEffort.value,
       enableThinking: els.lmStudioEnableThinking.checked,
     },
-  });
+    openai: {
+      apiKey: els.openAiKey.value.trim(),
+      model: els.openAiModel.value.trim(),
+      reasoningEffort: els.openAiReasoningEffort.value,
+    },
+  };
+}
+
+async function persistSettings() {
+  await chrome.storage.local.set(modelSettingsFromForm());
   await JOB_FIT_PROFILES.save(store);
+}
+
+function showProviderFields() {
+  const openai = els.modelProvider.value === "openai";
+  document.getElementById("lmStudioFields").hidden = openai;
+  document.getElementById("openAiFields").hidden = !openai;
+}
+
+// Fills the model suggestions from the account's own model list, so the name
+// is picked rather than typed from memory.
+async function loadOpenAiModels() {
+  const key = els.openAiKey.value.trim();
+  if (!key) return;
+  const probe = await probeModels({ provider: "openai", apiKey: key });
+  const list = document.getElementById("openAiModelList");
+  list.innerHTML = "";
+  if (!probe.ok) return;
+  probe.models.forEach((id) => {
+    const opt = document.createElement("option");
+    opt.value = id;
+    list.appendChild(opt);
+  });
 }
 
 // Every field that belongs to a profile or to the LM Studio settings. The
@@ -252,6 +296,7 @@ function watchSettingsFields() {
   const fields = [
     els.profile, els.lmStudioUrl, els.lmStudioModel, els.lmStudioTimeout,
     els.lmStudioReasoningEffort, els.lmStudioEnableThinking,
+    els.modelProvider, els.openAiKey, els.openAiModel, els.openAiReasoningEffort,
     els.hardRejectsPhrases, els.hardRejectsPatterns,
     els.softWarningsPhrases, els.softWarningsPatterns,
     els.domainFlagsPhrases, els.domainFlagsPatterns,
@@ -275,16 +320,7 @@ function watchSettingsFields() {
 
 async function saveSettings() {
   captureForm();
-  await chrome.storage.local.set({
-    lmStudio: {
-      url: els.lmStudioUrl.value.trim() || JOB_FIT_DEFAULTS.lmStudio.url,
-      model: els.lmStudioModel.value.trim(),
-      timeoutSeconds:
-        els.lmStudioTimeout.value === "" ? JOB_FIT_DEFAULTS.lmStudio.timeoutSeconds : Number(els.lmStudioTimeout.value),
-      reasoningEffort: els.lmStudioReasoningEffort.value,
-      enableThinking: els.lmStudioEnableThinking.checked,
-    },
-  });
+  await chrome.storage.local.set(modelSettingsFromForm());
   await JOB_FIT_PROFILES.save(store);
   setStatus(`Saved "${activeProfile().name}".`);
 }
@@ -445,7 +481,8 @@ function applyForcedSections() {
   // An unfinished wizard profile gets the banner instead: the wizard is the
   // better place to finish, and opening sections underneath it would compete.
   if (activeProfile() && activeProfile().setupIncomplete) return;
-  if (!els.lmStudioModel.value.trim()) document.getElementById("sec-lmstudio").open = true;
+  const modelField = els.modelProvider.value === "openai" ? els.openAiModel : els.lmStudioModel;
+  if (!modelField.value.trim()) document.getElementById("sec-lmstudio").open = true;
   if (!els.profile.value.trim()) document.getElementById("sec-profile").open = true;
 }
 
@@ -476,10 +513,27 @@ function setReady(dotId, textId, state, text, title) {
 }
 
 async function checkModel() {
-  const stored = await chrome.storage.local.get("lmStudio");
-  const settings = stored.lmStudio || JOB_FIT_DEFAULTS.lmStudio;
-  const wanted = (settings.model || "").trim();
-  const probe = await probeModels(settings.url || JOB_FIT_DEFAULTS.lmStudio.url);
+  const settings = await JOB_FIT_PROVIDER.load();
+  const wanted = settings.model;
+  const probe = await probeModels(settings);
+
+  if (settings.provider === "openai") {
+    if (probe.reason === "no-key") {
+      setReady("modelDot", "modelState", "bad", "OpenAI is selected but no API key is set.");
+    } else if (probe.reason === "unauthorized") {
+      setReady("modelDot", "modelState", "bad", "OpenAI rejected the API key — check it under Model.");
+    } else if (!probe.ok) {
+      setReady("modelDot", "modelState", "bad", "Couldn't reach OpenAI — check the connection.");
+    } else if (!wanted) {
+      setReady("modelDot", "modelState", "warn", "OpenAI connected — pick a model under Model.");
+    } else if (probe.models.length && !probe.models.includes(wanted)) {
+      setReady("modelDot", "modelState", "warn", `"${wanted}" isn't available on this OpenAI account.`, probe.models.join("\n"));
+    } else {
+      setReady("modelDot", "modelState", "ok", `OpenAI — ${wanted}`);
+    }
+    return;
+  }
+
   if (probe.reason === "invalid-url") {
     setReady("modelDot", "modelState", "bad", "The endpoint isn't a valid URL.");
     return;
@@ -774,6 +828,7 @@ async function evaluateCurrentTab() {
   }
   const files = [
     "defaults.js",
+    "provider.js",
     "keywords.js",
     "profiles.js",
     "evalstore.js",
@@ -844,6 +899,7 @@ async function summarizeCurrentTab() {
   }
   const files = [
     "defaults.js",
+    "provider.js",
     "keywords.js",
     "profiles.js",
     "evalstore.js",
@@ -1026,6 +1082,16 @@ async function copySummary() {
 }
 
 document.getElementById("save").addEventListener("click", saveSettings);
+els.modelProvider.addEventListener("change", () => {
+  showProviderFields();
+  flushAutoSave().then(checkModel);
+  if (els.modelProvider.value === "openai") loadOpenAiModels();
+});
+els.openAiKey.addEventListener("change", () => {
+  loadOpenAiModels();
+  flushAutoSave().then(checkModel);
+});
+els.openAiModel.addEventListener("change", () => flushAutoSave().then(checkModel));
 document.getElementById("reset").addEventListener("click", resetKeywordLists);
 els.profileSelect.addEventListener("change", (e) => switchProfile(e.target.value));
 // New profiles go through the setup wizard: a blank profile has no CV, no
@@ -1074,7 +1140,10 @@ document.getElementById("viewHistory").addEventListener("click", () => {
 document.addEventListener("visibilitychange", flushOnHide);
 window.addEventListener("pagehide", flushAutoSave);
 
-loadSettings().then(restoreLastSummary);
+loadSettings().then(() => {
+  restoreLastSummary();
+  if (els.modelProvider.value === "openai") loadOpenAiModels();
+});
 renderQueueStatus();
 checkModel();
 checkPage();

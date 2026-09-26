@@ -8,7 +8,7 @@
   h1 { font-size: 14px; margin: 0 0 8px; }
   section { margin-bottom: 14px; }
   label { display: block; font-weight: 600; margin-bottom: 4px; }
-  textarea, input[type="text"], input[type="number"], select { width: 100%; box-sizing: border-box; font-family: inherit; font-size: 12px; padding: 6px; border: 1px solid #ccc; border-radius: 4px; }
+  textarea, input[type="text"], input[type="password"], input[type="number"], select { width: 100%; box-sizing: border-box; font-family: inherit; font-size: 12px; padding: 6px; border: 1px solid #ccc; border-radius: 4px; }
   textarea { resize: vertical; }
   .row { display: flex; gap: 8px; }
   /* A class that sets `display` beats the user agent's [hidden] rule, so
@@ -48,6 +48,10 @@
   .presets input[type="checkbox"] { width: auto; margin: 2px 0 0; flex: 0 0 auto; }
   details.advanced { border: none; border-top: 1px solid #e3e3e3; border-radius: 0; padding: 8px 0 0; margin: 10px 0 0; }
   details.advanced summary { font-size: 11px; font-weight: 600; color: #777; }
+  .privacy-note {
+    background: #fdf3e2; border: 1px solid #e8cfa0; color: #6b4a12; border-radius: 4px;
+    padding: 7px 9px; margin-bottom: 10px; font-size: 11px; line-height: 1.45;
+  }
   .setup-banner {
     display: flex; align-items: center; gap: 8px; justify-content: space-between;
     background: #fdf3e2; border: 1px solid #e8cfa0; border-radius: 4px;
@@ -109,9 +113,18 @@
   </section>
 
   <details id="sec-lmstudio">
-    <summary>Local model (LM Studio)</summary>
-    <div class="hint" style="margin-bottom:8px;">Shared by every profile — one LM Studio on this machine.</div>
+    <summary>Model</summary>
+    <div class="hint" style="margin-bottom:8px;">Shared by every profile.</div>
 
+  <section>
+    <label for="modelProvider">Provider</label>
+    <select id="modelProvider">
+      <option value="lmstudio">LM Studio (local, private, free)</option>
+      <option value="openai">OpenAI API (ChatGPT models)</option>
+    </select>
+  </section>
+
+  <div id="lmStudioFields">
   <section>
     <label for="lmStudioUrl">LM Studio endpoint</label>
     <input id="lmStudioUrl" type="text" placeholder="http://localhost:1234/v1/chat/completions">
@@ -120,12 +133,6 @@
   <section>
     <label for="lmStudioModel">LM Studio model name</label>
     <input id="lmStudioModel" type="text" placeholder="whatever's loaded, e.g. qwen2.5-coder-7b-instruct">
-  </section>
-
-  <section>
-    <label for="lmStudioTimeout">Response timeout (seconds)</label>
-    <input id="lmStudioTimeout" type="number" placeholder="300">
-    <div class="hint" id="timingHint"></div>
   </section>
 
   <section>
@@ -145,6 +152,41 @@
       Enable model thinking/reasoning
     </label>
     <div style="font-size: 11px; color: #555; margin-top: 4px;">Off by default for speed. Some models expose this directly (stronger than just lowering reasoning effort) — check LM Studio's model page for a "Enable Thinking" custom field to confirm it's supported.</div>
+  </section>
+  </div>
+
+  <div id="openAiFields" hidden>
+  <div class="privacy-note">
+    Postings, your candidate profile and salary expectations are sent to OpenAI to be scored, and each request is billed to your API key. Choose LM Studio to keep everything on this computer.
+  </div>
+  <section>
+    <label for="openAiKey">OpenAI API key</label>
+    <input id="openAiKey" type="password" autocomplete="off" spellcheck="false" placeholder="sk-…">
+    <div class="hint">Stored in this browser's extension storage only. Never included in backups.</div>
+  </section>
+
+  <section>
+    <label for="openAiModel">Model</label>
+    <input id="openAiModel" type="text" list="openAiModelList" spellcheck="false" placeholder="pick from the list once the key is set">
+    <datalist id="openAiModelList"></datalist>
+  </section>
+
+  <section>
+    <label for="openAiReasoningEffort">Reasoning effort (o-series and GPT-5 models only)</label>
+    <select id="openAiReasoningEffort">
+      <option value="">(model default)</option>
+      <option value="minimal">minimal</option>
+      <option value="low">low</option>
+      <option value="medium">medium</option>
+      <option value="high">high</option>
+    </select>
+  </section>
+  </div>
+
+  <section>
+    <label for="lmStudioTimeout">Response timeout (seconds)</label>
+    <input id="lmStudioTimeout" type="number" placeholder="300">
+    <div class="hint" id="timingHint"></div>
   </section>
   </details>
 
@@ -233,6 +275,7 @@
   <div id="status"></div>
 
   <script src="defaults.js"></script>
+  <script src="provider.js"></script>
   <script src="keywords.js"></script>
   <script src="profiles.js"></script>
   <script src="evalstore.js"></script>

@@ -1010,7 +1010,7 @@ function watchForChanges() {
     }
 
     // Swapping the model or editing the CV changes which scores are out of date.
-    if (changes.profiles || changes.lmStudio) {
+    if (changes.profiles || changes.lmStudio || changes.modelProvider || changes.openai) {
       loadCurrentScoring().then(safeRender);
     }
 
@@ -1246,7 +1246,7 @@ function showBackupStatus(text, isError = false) {
 }
 
 async function exportData() {
-  const stored = await chrome.storage.local.get(["profiles", "activeProfileId", "lmStudio"]);
+  const stored = await chrome.storage.local.get(["profiles", "activeProfileId", "lmStudio", "modelProvider", "openai"]);
   // The queue and lastSummary are deliberately left out: both are transient
   // working state, and the queue holds tab ids that mean nothing on restore.
   const payload = {
@@ -1256,6 +1256,10 @@ async function exportData() {
     profiles: stored.profiles || [],
     activeProfileId: stored.activeProfileId || null,
     lmStudio: stored.lmStudio || null,
+    modelProvider: stored.modelProvider || "lmstudio",
+    // The API key is deliberately left out: a backup file gets copied around,
+    // and a leaked key is billed to its owner.
+    openai: stored.openai ? { model: stored.openai.model || "", reasoningEffort: stored.openai.reasoningEffort || "" } : null,
     records: await JOB_FIT_EVALSTORE.exportRecords(),
   };
 
@@ -1340,6 +1344,16 @@ async function importData(file) {
   } else if (payload.lmStudio) {
     settingsNote = "\nLM Studio settings left alone — you already have a model configured.";
   }
+  // Only the OpenAI model choice is in a backup, never the key, and it's
+  // restored only if none is set here. The provider switch itself is left as
+  // it is: restoring onto a machine without a key would just break scoring.
+  const currentOpenAi = (await chrome.storage.local.get("openai")).openai || {};
+  if (payload.openai && payload.openai.model && !currentOpenAi.model) {
+    await chrome.storage.local.set({
+      openai: { ...currentOpenAi, model: String(payload.openai.model), reasoningEffort: String(payload.openai.reasoningEffort || "") },
+    });
+    settingsNote += "\nOpenAI model choice restored (the API key is never in a backup).";
+  }
 
   const lines = [
     `Restored from ${payload.exportedAt ? payload.exportedAt.slice(0, 10) : "backup"}.`,
@@ -1355,9 +1369,8 @@ async function importData(file) {
 
 async function loadCurrentScoring() {
   const profile = store.profiles.find((p) => p.id === viewProfileId);
-  const settings = await chrome.storage.local.get("lmStudio");
   current = {
-    model: (settings.lmStudio && settings.lmStudio.model) || "",
+    model: JOB_FIT_PROVIDER.currentModel(await chrome.storage.local.get(JOB_FIT_PROVIDER.KEYS)),
     fingerprint: profile ? JOB_FIT_PROFILES.fingerprint(profile) : null,
   };
 }
