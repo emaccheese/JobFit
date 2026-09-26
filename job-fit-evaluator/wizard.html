@@ -195,13 +195,30 @@
   .done-card { text-align: center; padding: 40px 28px; }
   .done-card .big { font-size: 42px; }
   .done-card ol { text-align: left; display: inline-block; margin: 10px auto 20px; }
+
+  /* language + location */
+  .lang-row { display: flex; align-items: center; gap: 8px; margin-bottom: 18px; }
+  .lang-row select { width: auto; min-width: 200px; }
+  .rail .lang-mini { margin: -12px 0 18px; }
+  .rail .lang-mini select { font-size: 12px; padding: 4px 6px; }
+  .detect { display: flex; flex-wrap: wrap; align-items: center; gap: 10px; }
+  .detect .grow { flex: 1; min-width: 220px; }
+  .choices.multi label:has(input:checked)::before { content: "✓ "; }
+  .auth-country { border: 1px solid var(--line); border-radius: 8px; padding: 10px 12px; margin-bottom: 8px; }
+  .auth-country .field-label { margin-bottom: 8px; }
+  .added-countries { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 8px; }
+  .country-add { margin-top: 10px; max-width: 320px; }
+  .tz-line { font-size: 13px; color: var(--muted); }
+  .salary-row { grid-template-columns: 48px 1fr 1fr 110px; }
+  .computed-note { font-size: 11.5px; color: var(--muted); margin-top: 2px; }
 </style>
 </head>
 <body>
   <div class="shell">
     <aside class="rail">
-      <div class="brand">JobFit setup</div>
+      <div class="brand" data-i18n="wiz.brand">JobFit setup</div>
       <div class="brand-sub" id="railSub"></div>
+      <div class="lang-mini"><select id="railLanguage" aria-label="Language" data-i18n-aria-label="wiz.where.language"></select></div>
       <ol id="rail"></ol>
     </aside>
 
@@ -212,31 +229,125 @@
 
       <div class="card" id="card">
 
-        <!-- 0. Welcome -->
+        <!-- Welcome -->
         <section class="step" data-step="welcome" hidden>
-          <h1>Welcome to JobFit</h1>
-          <p class="lede">JobFit reads a job posting and tells you how well it fits you, with a score, what you match, what you're missing, and whether the pay is in your range.</p>
-          <div class="callout info">
+          <h1 data-i18n="wiz.welcome.title">Welcome to JobFit</h1>
+          <p class="lede" data-i18n="wiz.welcome.lede">JobFit reads a job posting and tells you how well it fits you, with a score, what you match, what you're missing, and whether the pay is in your range.</p>
+          <div class="callout info" data-i18n-html="wiz.welcome.privacy">
             <strong>You choose where postings are scored.</strong> With LM Studio, a model runs on this computer and nothing is sent anywhere. With the OpenAI API, there's nothing to install, but postings and your profile are sent to OpenAI.
           </div>
-          <p>Setup takes about five minutes. You'll need:</p>
+          <p data-i18n="wiz.welcome.needs">Setup takes about five minutes. You'll need:</p>
           <ul>
-            <li><strong>LM Studio</strong> running with a model loaded, <em>or</em> an <strong>OpenAI API key</strong> (the next step checks either for you)</li>
-            <li><strong>Your CV or LinkedIn profile</strong>, as text to paste</li>
+            <li data-i18n-html="wiz.welcome.need1"><strong>LM Studio</strong> running with a model loaded, <em>or</em> an <strong>OpenAI API key</strong> (a later step checks either for you)</li>
+            <li data-i18n-html="wiz.welcome.need2"><strong>Your CV or LinkedIn profile</strong>, as text to paste</li>
           </ul>
-          <p class="hint">Moving from another computer? <button type="button" class="link" id="openRestore">Restore a backup instead</button> (Tracked jobs → Data).</p>
+          <p class="hint"><span data-i18n="wiz.welcome.moving">Moving from another computer?</span> <button type="button" class="link" id="openRestore" data-i18n="wiz.welcome.restore">Restore a backup instead</button> <span data-i18n="wiz.welcome.restoreWhere">(Tracked jobs → Data).</span></p>
         </section>
 
-        <!-- 1. Model -->
+        <!-- Language and location -->
+        <section class="step" data-step="where" hidden>
+          <h1 data-i18n="wiz.where.title">Language and location</h1>
+          <p class="lede" data-i18n="wiz.where.lede">JobFit works in your language, and where you are fills in the next steps for you. Both are optional and stay on this computer.</p>
+
+          <label class="field">
+            <span data-i18n="wiz.where.language">Language</span>
+            <div class="lang-row"><select id="uiLanguage"></select></div>
+            <div class="hint" data-i18n="wiz.where.languageHint">Detected from your browser. You can change it here or in the popup at any time.</div>
+          </label>
+
+          <span class="field-label" data-i18n="wiz.where.location">Where you live</span>
+          <div id="detectBox"></div>
+          <div id="locationFields" hidden>
+            <label class="field">
+              <span data-i18n="wiz.where.country">Country</span>
+              <select id="homeCountry"></select>
+            </label>
+            <label class="field" id="homeRegionField">
+              <span data-i18n="wiz.where.region">State or province</span>
+              <select id="homeRegion"></select>
+            </label>
+            <label class="field">
+              <span data-i18n="wiz.where.city">City (optional)</span>
+              <input id="homeCity" type="text" maxlength="80" autocomplete="address-level2">
+            </label>
+          </div>
+          <p class="hint" data-i18n="wiz.where.privacy">Stored only in this browser. The model is told your city only if you allow it on the Work preferences step.</p>
+        </section>
+
+        <!-- About you: name, countries, work authorization -->
+        <section class="step" data-step="about" hidden>
+          <h1 data-i18n="wiz.about.title">About you</h1>
+          <p class="lede" data-i18n="wiz.about.lede">A profile is one person's settings. The countries you apply in and your right to work in each decide which postings are rejected automatically — you can review that on the Hard rejects step.</p>
+
+          <label class="field">
+            <span data-i18n="wiz.about.name">Profile name</span>
+            <input id="profileName" type="text" placeholder="e.g. Alex — backend roles" data-i18n-placeholder="wiz.about.namePlaceholder" maxlength="60">
+            <div class="hint" data-i18n="wiz.about.nameHint">Useful when you keep more than one profile (for another person, or another kind of role).</div>
+          </label>
+
+          <div class="question">
+            <span class="field-label" data-i18n="wiz.about.countries">Which countries are you applying in?</span>
+            <div class="choices multi" id="targetQuick"></div>
+            <div class="added-countries" id="targetExtra"></div>
+            <select id="addCountry" class="country-add"></select>
+            <div class="hint" data-i18n="wiz.about.countriesHint">Only the Americas for now. Postings elsewhere are still scored; they just don't get country-specific rules.</div>
+          </div>
+
+          <div id="authRows"></div>
+        </section>
+
+        <!-- Work preferences -->
+        <section class="step" data-step="work" hidden>
+          <h1 data-i18n="wiz.work.title">Work preferences</h1>
+          <p class="lede" data-i18n="wiz.work.lede">These never reject a posting. They add warnings you can judge for yourself, like an on-site job in another city or working hours far from your time zone.</p>
+
+          <div class="question">
+            <span class="field-label" data-i18n="wiz.work.arrangements">Which work arrangements would you accept?</span>
+            <div class="choices multi" id="arrangementChoices">
+              <label><input type="checkbox" name="arrangement" value="remote"><span data-i18n="arrangement.remote">Remote</span></label>
+              <label><input type="checkbox" name="arrangement" value="hybrid"><span data-i18n="arrangement.hybrid">Hybrid</span></label>
+              <label><input type="checkbox" name="arrangement" value="onsite"><span data-i18n="arrangement.onsite">On-site</span></label>
+            </div>
+          </div>
+
+          <div class="question">
+            <span class="field-label" data-i18n="wiz.work.relocate">Would you relocate at your own cost?</span>
+            <div class="choices" id="relocateChoices">
+              <label><input type="radio" name="relocate" value="yes"><span data-i18n="common.yes">Yes</span></label>
+              <label><input type="radio" name="relocate" value="no"><span data-i18n="common.no">No</span></label>
+            </div>
+          </div>
+
+          <div class="question">
+            <span class="field-label" data-i18n="wiz.work.languages">Which languages can you work in?</span>
+            <div class="choices multi" id="languageChoices"></div>
+            <div class="hint" data-i18n="wiz.work.languagesHint">A posting that requires another language gets a warning.</div>
+          </div>
+
+          <div class="question">
+            <span class="field-label" data-i18n="wiz.work.timeZone">Your time zone</span>
+            <div class="tz-line" id="tzLine"></div>
+          </div>
+
+          <label class="row" style="gap:8px; align-items:flex-start;">
+            <input id="shareLocation" type="checkbox" style="width:auto; margin-top:3px;">
+            <span>
+              <span data-i18n="wiz.work.share">Tell the model my city and region when it scores a posting</span>
+              <span class="hint" style="display:block; margin-top:2px;" data-i18n="wiz.work.shareHint">Helps it judge commute and time zone. Off by default. Your countries, work authorization and preferences are always included; they don't identify you.</span>
+            </span>
+          </label>
+        </section>
+
+        <!-- Model -->
         <section class="step" data-step="model" hidden>
-          <h1>Choose the model</h1>
-          <p class="lede">Which model scores your postings. This setting is shared by every profile.</p>
+          <h1 data-i18n="wiz.model.title">Choose the model</h1>
+          <p class="lede" data-i18n="wiz.model.lede">Which model scores your postings. This setting is shared by every profile.</p>
 
           <div id="modelCompact" class="callout ok" hidden>
             <div class="compact-model">
               <span class="dot"></span>
-              <span class="grow">Connected. Using <strong id="compactModelName"></strong>.</span>
-              <button type="button" class="link" id="modelChange">Change</button>
+              <span class="grow"><span data-i18n="wiz.model.connectedUsing">Connected. Using</span> <strong id="compactModelName"></strong>.</span>
+              <button type="button" class="link" id="modelChange" data-i18n="common.change">Change</button>
             </div>
           </div>
 
@@ -245,251 +356,214 @@
               <label class="provider-card">
                 <input type="radio" name="provider" value="lmstudio">
                 <span class="provider-name">LM Studio</span>
-                <span class="provider-desc">Runs on this computer. Private and free, but needs a reasonably capable machine.</span>
+                <span class="provider-desc" data-i18n="wiz.model.lmDesc">Runs on this computer. Private and free, but needs a reasonably capable machine.</span>
               </label>
               <label class="provider-card">
                 <input type="radio" name="provider" value="openai">
                 <span class="provider-name">OpenAI API</span>
-                <span class="provider-desc">Nothing to install and fast. Postings and your profile are sent to OpenAI and billed to your API key.</span>
+                <span class="provider-desc" data-i18n="wiz.model.oaDesc">Nothing to install and fast. Postings and your profile are sent to OpenAI and billed to your API key.</span>
               </label>
             </div>
 
             <label class="field" id="openAiKeyField" hidden>
-              <span>OpenAI API key</span>
+              <span data-i18n="popup.openAiKey">OpenAI API key</span>
               <div class="row">
                 <input id="oaKey" class="grow" type="password" autocomplete="off" spellcheck="false" placeholder="sk-…">
-                <button type="button" id="testOpenAi">Connect</button>
+                <button type="button" id="testOpenAi" data-i18n="wiz.model.connect">Connect</button>
               </div>
-              <div class="hint">Create one at platform.openai.com under API keys. It's stored only in this browser's extension storage and never included in backups.</div>
+              <div class="hint" data-i18n="wiz.model.keyHint">Create one at platform.openai.com under API keys. It's stored only in this browser's extension storage and never included in backups.</div>
             </label>
 
             <label class="field" id="lmUrlField">
-              <span>LM Studio endpoint</span>
+              <span data-i18n="popup.lmEndpoint">LM Studio endpoint</span>
               <div class="row">
                 <input id="lmUrl" class="grow" type="text" spellcheck="false">
-                <button type="button" id="testConnection">Test connection</button>
+                <button type="button" id="testConnection" data-i18n="wiz.model.test">Test connection</button>
               </div>
-              <div class="hint">The default is right unless you changed LM Studio's server port.</div>
+              <div class="hint" data-i18n="wiz.model.urlHint">The default is right unless you changed LM Studio's server port.</div>
             </label>
 
             <div id="modelStatus"></div>
 
             <div id="modelPicker" hidden>
-              <span class="field-label">Which model should score postings?</span>
+              <span class="field-label" data-i18n="wiz.model.which">Which model should score postings?</span>
               <div class="model-list" id="modelList"></div>
-              <div class="hint" id="modelPickerHint">These are the models LM Studio has loaded right now.</div>
+              <div class="hint" id="modelPickerHint"></div>
             </div>
 
             <details class="advanced" id="modelAdvanced">
-              <summary>Advanced</summary>
+              <summary data-i18n="wiz.advanced">Advanced</summary>
               <label class="field">
-                <span>Response timeout (seconds)</span>
+                <span data-i18n="popup.timeout">Response timeout (seconds)</span>
                 <input id="lmTimeout" type="number" min="30" step="30">
-                <div class="hint">How long to wait for one evaluation. Slower models on modest hardware can need several minutes.</div>
+                <div class="hint" data-i18n="wiz.model.timeoutHint">How long to wait for one evaluation. Slower models on modest hardware can need several minutes.</div>
               </label>
               <div id="oaCostFields" hidden>
                 <label class="field" id="oaReasoningField" hidden>
-                  <span>Reasoning effort</span>
+                  <span data-i18n="popup.reasoning">Reasoning effort</span>
                   <select id="oaReasoning"></select>
-                  <div class="hint">Reasoning tokens are billed as output. Lower is faster and cheaper; low is usually enough to score a posting.</div>
+                  <div class="hint" data-i18n="wiz.model.reasoningHint">Reasoning tokens are billed as output. Lower is faster and cheaper; low is usually enough to score a posting.</div>
                 </label>
                 <label class="field">
-                  <span>Max output tokens per request</span>
+                  <span data-i18n="popup.maxOutput">Max output tokens per request</span>
                   <input id="oaMaxOutput" type="number" min="500" max="64000" step="500">
-                  <div class="hint">A ceiling on what one request can cost, reasoning included. Too low and answers get cut off.</div>
+                  <div class="hint" data-i18n="popup.maxOutputHint">A ceiling on what one request can cost, reasoning included. Too low and answers get cut off.</div>
                 </label>
                 <label class="field">
-                  <span>Flex processing (half price, slower)</span>
+                  <span data-i18n="popup.flex">Flex processing (half price, slower)</span>
                   <select id="oaFlex">
-                    <option value="bulk">For bulk re-evaluations only</option>
-                    <option value="always">Always</option>
-                    <option value="never">Never</option>
+                    <option value="bulk" data-i18n="popup.flexBulk">For bulk re-evaluations only</option>
+                    <option value="always" data-i18n="popup.flexAlways">Always</option>
+                    <option value="never" data-i18n="popup.flexNever">Never</option>
                   </select>
-                  <div class="hint">When Flex has no capacity, that job runs at the standard price instead.</div>
+                  <div class="hint" data-i18n="wiz.model.flexHint">When Flex has no capacity, that job runs at the standard price instead.</div>
                 </label>
                 <label class="field">
-                  <span>Daily token budget</span>
-                  <input id="oaBudget" type="number" min="0" step="10000" placeholder="no limit">
-                  <div class="hint">When today's usage reaches it, the queue pauses until you raise it or resume tomorrow. A scoring request is typically a few thousand tokens.</div>
+                  <span data-i18n="popup.budget">Daily token budget</span>
+                  <input id="oaBudget" type="number" min="0" step="10000" placeholder="no limit" data-i18n-placeholder="popup.noLimit">
+                  <div class="hint" data-i18n="wiz.model.budgetHint">When today's usage reaches it, the queue pauses until you raise it or resume tomorrow. A scoring request is typically a few thousand tokens.</div>
                 </label>
               </div>
               <div id="lmOnlyAdvanced">
               <label class="field">
-                <span>Reasoning effort</span>
+                <span data-i18n="popup.reasoning">Reasoning effort</span>
                 <select id="lmReasoning">
-                  <option value="">(none, use the model's default)</option>
+                  <option value="" data-i18n="wiz.model.effortNone">(none, use the model's default)</option>
                   <option value="low">low</option>
                   <option value="medium">medium</option>
                   <option value="high">high</option>
                   <option value="xhigh">xhigh</option>
                 </select>
-                <div class="hint">Only for models that support it. Low is much faster and scores almost as well.</div>
+                <div class="hint" data-i18n="wiz.model.lmReasoningHint">Only for models that support it. Low is much faster and scores almost as well.</div>
               </label>
-              <label class="row" style="gap:8px;"><input id="lmThinking" type="checkbox" style="width:auto;"> Enable model thinking/reasoning</label>
-              <div class="hint">Off by default for speed.</div>
+              <label class="row" style="gap:8px;"><input id="lmThinking" type="checkbox" style="width:auto;"> <span data-i18n="popup.thinking">Enable model thinking/reasoning</span></label>
+              <div class="hint" data-i18n="wiz.model.thinkingHint">Off by default for speed.</div>
               </div>
             </details>
           </div>
         </section>
 
-        <!-- 2. About you -->
-        <section class="step" data-step="about" hidden>
-          <h1>About you</h1>
-          <p class="lede">A profile is one person's settings. Your answers below decide which postings get rejected automatically. You can review that on the Hard rejects step.</p>
-
-          <label class="field">
-            <span>Profile name</span>
-            <input id="profileName" type="text" placeholder="e.g. Alex — backend roles" maxlength="60">
-            <div class="hint">Useful when you keep more than one profile (for another person, or another kind of role).</div>
-          </label>
-
-          <div class="question">
-            <span class="field-label">Are you a US citizen or permanent resident?</span>
-            <div class="choices" data-answer="citizen">
-              <label><input type="radio" name="citizen" value="yes">Yes</label>
-              <label><input type="radio" name="citizen" value="no">No</label>
-            </div>
-          </div>
-          <div class="question">
-            <span class="field-label">Will you need visa sponsorship?</span>
-            <div class="choices" data-answer="sponsorship">
-              <label><input type="radio" name="sponsorship" value="yes">Yes</label>
-              <label><input type="radio" name="sponsorship" value="depends">Depends on the country</label>
-              <label><input type="radio" name="sponsorship" value="no">No</label>
-            </div>
-          </div>
-          <div class="question">
-            <span class="field-label">Would you relocate at your own cost?</span>
-            <div class="choices" data-answer="relocate">
-              <label><input type="radio" name="relocate" value="yes">Yes</label>
-              <label><input type="radio" name="relocate" value="no">No</label>
-            </div>
-          </div>
-        </section>
-
-        <!-- 3. Candidate profile -->
+        <!-- Candidate profile -->
         <section class="step" data-step="profile" hidden>
-          <h1>Your candidate profile</h1>
-          <p class="lede">A short summary of your experience. Every posting is scored against it, so it needs to be specific and honest, including what you <em>haven't</em> done.</p>
+          <h1 data-i18n="wiz.profile.title">Your candidate profile</h1>
+          <p class="lede" data-i18n-html="wiz.profile.lede">A short summary of your experience. Every posting is scored against it, so it needs to be specific and honest, including what you <em>haven't</em> done.</p>
 
           <div class="tabs" role="tablist">
-            <button type="button" role="tab" id="tabCv" aria-selected="true">Paste my CV</button>
-            <button type="button" role="tab" id="tabEdit" aria-selected="false">Edit profile</button>
+            <button type="button" role="tab" id="tabCv" aria-selected="true" data-i18n="wiz.profile.tabCv">Paste my CV</button>
+            <button type="button" role="tab" id="tabEdit" aria-selected="false" data-i18n="wiz.profile.tabEdit">Edit profile</button>
           </div>
 
           <div id="paneCv">
             <label class="field">
-              <span>Paste your CV or LinkedIn profile</span>
-              <textarea id="cvText" rows="12" placeholder="Paste the full text. The local model condenses it into the profile format."></textarea>
+              <span data-i18n="wiz.profile.pasteLabel">Paste your CV or LinkedIn profile</span>
+              <textarea id="cvText" rows="12" placeholder="Paste the full text. The model condenses it into the profile format." data-i18n-placeholder="wiz.profile.pastePlaceholder"></textarea>
             </label>
             <div class="row">
-              <button type="button" class="primary" id="draftProfile">Draft my profile</button>
-              <button type="button" class="link" id="skipToEdit">Or write it myself</button>
+              <button type="button" class="primary" id="draftProfile" data-i18n="wiz.profile.draft">Draft my profile</button>
+              <button type="button" class="link" id="skipToEdit" data-i18n="wiz.profile.writeMyself">Or write it myself</button>
             </div>
             <div id="draftStatus"></div>
           </div>
 
           <div id="paneEdit" hidden>
-            <div class="callout info" id="draftedNote" hidden>This is the model's draft. Read it through: correct anything it got wrong, and make sure <strong>Gaps</strong> lists what you really haven't done.</div>
+            <div class="callout info" id="draftedNote" hidden><span data-i18n-html="wiz.profile.draftedNote">This is the model's draft. Read it through: correct anything it got wrong, and make sure <strong>Gaps</strong> lists what you really haven't done.</span></div>
             <textarea id="profileText" rows="16" spellcheck="true"></textarea>
             <div class="meter" id="profileMeter"></div>
-            <div class="callout warn" id="gapsNudge" hidden>Add a <strong>Gaps:</strong> line. The evaluator uses it to tell a real gap from something you just didn't mention. Without it, most postings score too high.</div>
+            <div class="callout warn" id="gapsNudge" hidden data-i18n-html="wiz.profile.gapsNudge">Add a <strong>Gaps:</strong> line. The evaluator uses it to tell a real gap from something you just didn't mention. Without it, most postings score too high.</div>
           </div>
         </section>
 
-        <!-- 4. Salary -->
+        <!-- Salary -->
         <section class="step" data-step="salary" hidden>
-          <h1>Expected salary</h1>
-          <p class="lede">Shown next to each posting's pay. It doesn't set the score directly, but a posting whose ceiling is far below your floor is flagged as probably below your level.</p>
+          <h1 data-i18n="wiz.salary.title">Expected salary</h1>
+          <p class="lede" data-i18n="wiz.salary.lede">Shown next to each posting's pay. It doesn't set the score directly, but a posting whose ceiling is far below your floor is flagged as probably below your level.</p>
 
-          <span class="field-label">Which markets do you apply in?</span>
-          <div class="markets" id="markets">
-            <label><input type="checkbox" value="USD"> USD</label>
-            <label><input type="checkbox" value="CAD"> CAD</label>
-            <label><input type="checkbox" value="MXN"> MXN</label>
-          </div>
+          <span class="field-label" data-i18n="wiz.salary.markets">Which currencies are you paid in?</span>
+          <div class="markets" id="markets"></div>
+          <div class="hint" id="marketsHint" data-i18n="wiz.salary.marketsHint">From the countries you apply in. Remote roles for US companies are often paid in USD.</div>
 
-          <div id="salaryRows"></div>
+          <div id="salaryRows" style="margin-top:12px;"></div>
           <div class="error-text" id="salaryError" hidden></div>
           <div class="hint" id="salaryWarn" hidden></div>
 
           <div class="row" style="margin-top:12px;">
-            <button type="button" id="suggestSalary">Suggest from my profile</button>
+            <button type="button" id="suggestSalary" data-i18n="wiz.suggestFromProfile">Suggest from my profile</button>
           </div>
           <div id="salaryStatus"></div>
           <div class="hint" id="salaryReasoning"></div>
         </section>
 
-        <!-- 5. Hard rejects -->
+        <!-- Hard rejects -->
         <section class="step" data-step="rejects" hidden>
-          <h1>Hard rejects</h1>
-          <p class="lede">A posting that says any of these is rejected immediately, without asking the model. Only tick what truly rules a job out for you.</p>
+          <h1 data-i18n="wiz.rejects.title">Hard rejects</h1>
+          <p class="lede" data-i18n="wiz.rejects.lede">A posting that says any of these is rejected immediately, without asking the model. Only tick what truly rules a job out for you.</p>
+          <div class="callout info" id="gateNote" hidden data-i18n="wiz.rejects.gateNote">Citizenship, clearance and sponsorship rules follow your answers on About you: they only reject a posting in a country where they apply to you. When a posting doesn't say where it is, they become a warning instead.</div>
           <div id="hardRejectsPresets"></div>
           <label class="field" style="margin-top:14px;">
-            <span>Also reject if the posting says</span>
-            <textarea id="hardRejectsPhrases" rows="3" placeholder="One phrase per line, e.g. unpaid trial period"></textarea>
-            <div class="hint">Plain text, matched as whole words with any capitalisation.</div>
+            <span data-i18n="popup.alsoReject">Also reject if the posting says</span>
+            <textarea id="hardRejectsPhrases" rows="3" placeholder="One phrase per line, e.g. unpaid trial period" data-i18n-placeholder="wiz.rejects.placeholder"></textarea>
+            <div class="hint" data-i18n="wiz.phraseHint">Plain text, matched as whole words with any capitalisation.</div>
           </label>
           <details class="advanced">
-            <summary>Advanced: raw patterns</summary>
-            <label class="field"><span>One regular expression per line</span><textarea id="hardRejectsPatterns" rows="3" spellcheck="false"></textarea></label>
+            <summary data-i18n="wiz.rawPatterns">Advanced: raw patterns</summary>
+            <label class="field"><span data-i18n="popup.patternsLabel">One regular expression per line.</span><textarea id="hardRejectsPatterns" rows="3" spellcheck="false"></textarea></label>
           </details>
         </section>
 
-        <!-- 6. Warnings -->
+        <!-- Warnings -->
         <section class="step" data-step="warnings" hidden>
-          <h1>Warnings</h1>
-          <p class="lede">These are highlighted in amber for you to judge. Unlike hard rejects, they never block an evaluation or change the score.</p>
+          <h1 data-i18n="wiz.warnings.title">Warnings</h1>
+          <p class="lede" data-i18n="wiz.warnings.lede">These are highlighted in amber for you to judge. Unlike hard rejects, they never block an evaluation or change the score.</p>
           <div id="softWarningsPresets"></div>
           <label class="field" style="margin-top:14px;">
-            <span>Also flag if the posting says</span>
-            <textarea id="softWarningsPhrases" rows="3" placeholder="One phrase per line, e.g. on-call rotation"></textarea>
+            <span data-i18n="popup.alsoFlag">Also flag if the posting says</span>
+            <textarea id="softWarningsPhrases" rows="3" placeholder="One phrase per line, e.g. on-call rotation" data-i18n-placeholder="wiz.warnings.placeholder"></textarea>
           </label>
           <details class="advanced">
-            <summary>Advanced: raw patterns</summary>
-            <label class="field"><span>One regular expression per line</span><textarea id="softWarningsPatterns" rows="3" spellcheck="false"></textarea></label>
+            <summary data-i18n="wiz.rawPatterns">Advanced: raw patterns</summary>
+            <label class="field"><span data-i18n="popup.patternsLabel">One regular expression per line.</span><textarea id="softWarningsPatterns" rows="3" spellcheck="false"></textarea></label>
           </details>
         </section>
 
-        <!-- 7. Domain flags -->
+        <!-- Domain flags -->
         <section class="step" data-step="flags" hidden>
-          <h1>Domain flags</h1>
-          <p class="lede">Skills and fields you <em>don't</em> have. When a posting mentions one, it's shown straight away and the model has to check it. If the job really requires it, the score is capped at 50.</p>
+          <h1 data-i18n="wiz.flags.title">Domain flags</h1>
+          <p class="lede" data-i18n-html="wiz.flags.lede">Skills and fields you <em>don't</em> have. When a posting mentions one, it's shown straight away and the model has to check it. If the job really requires it, the score is capped at 50.</p>
 
-          <span class="field-label">Your flags</span>
-          <div class="chips" id="flagChips"><input id="flagInput" type="text" placeholder="Type a term and press Enter"></div>
-          <div class="hint">For example: machine learning, Kubernetes, React Native. "C++" and ".NET" work as written.</div>
+          <span class="field-label" data-i18n="wiz.flags.yours">Your flags</span>
+          <div class="chips" id="flagChips"><input id="flagInput" type="text" placeholder="Type a term and press Enter" data-i18n-placeholder="wiz.flags.placeholder"></div>
+          <div class="hint" data-i18n="wiz.flags.hint">For example: machine learning, Kubernetes, React Native. "C++" and ".NET" work as written. Add the term in each language your postings use.</div>
 
           <div class="row" style="margin-top:14px;">
-            <button type="button" id="suggestFlags">Suggest from my profile</button>
+            <button type="button" id="suggestFlags" data-i18n="wiz.suggestFromProfile">Suggest from my profile</button>
           </div>
           <div id="flagsStatus"></div>
           <div class="suggestions" id="flagSuggestions" hidden>
-            <div class="row"><span class="field-label" style="margin:0;">Suggestions: click one to add it</span><button type="button" class="link" id="addAllFlags">Add all</button></div>
+            <div class="row"><span class="field-label" style="margin:0;" data-i18n="wiz.flags.suggestions">Suggestions: click one to add it</span><button type="button" class="link" id="addAllFlags" data-i18n="wiz.flags.addAll">Add all</button></div>
             <div class="chips-plain" id="flagSuggestionChips"></div>
           </div>
 
           <details class="advanced">
-            <summary>Advanced: raw patterns</summary>
-            <label class="field"><span>One regular expression per line</span><textarea id="domainFlagsPatterns" rows="3" spellcheck="false"></textarea></label>
+            <summary data-i18n="wiz.rawPatterns">Advanced: raw patterns</summary>
+            <label class="field"><span data-i18n="popup.patternsLabel">One regular expression per line.</span><textarea id="domainFlagsPatterns" rows="3" spellcheck="false"></textarea></label>
           </details>
         </section>
 
-        <!-- 8. Review -->
+        <!-- Review -->
         <section class="step" data-step="review" hidden>
-          <h1>Review</h1>
-          <p class="lede">Everything is already saved. Change anything here, or try a test evaluation before you finish.</p>
+          <h1 data-i18n="wiz.review.title">Review</h1>
+          <p class="lede" data-i18n="wiz.review.lede">Everything is already saved. Change anything here, or try a test evaluation before you finish.</p>
           <div id="reviewCards"></div>
 
           <div class="test-box">
-            <span class="field-label">Try it out</span>
-            <p class="hint" style="margin-top:0;">Scores a sample posting with your settings, exactly like a real one. Test runs aren't added to your tracked jobs.</p>
+            <span class="field-label" data-i18n="wiz.review.tryIt">Try it out</span>
+            <p class="hint" style="margin-top:0;" data-i18n="wiz.review.tryHint">Scores a sample posting with your settings, exactly like a real one. Test runs aren't added to your tracked jobs.</p>
             <details id="ownPosting">
-              <summary style="cursor:pointer; font-size:13px;">Use a real posting instead</summary>
-              <textarea id="testPosting" rows="8" style="margin-top:8px;" placeholder="Paste the full text of a job posting"></textarea>
+              <summary style="cursor:pointer; font-size:13px;" data-i18n="wiz.review.ownPosting">Use a real posting instead</summary>
+              <textarea id="testPosting" rows="8" style="margin-top:8px;" placeholder="Paste the full text of a job posting" data-i18n-placeholder="wiz.review.ownPlaceholder"></textarea>
             </details>
             <div class="row" style="margin-top:12px;">
-              <button type="button" id="runTest">Run a test evaluation</button>
+              <button type="button" id="runTest" data-i18n="wiz.review.runTest">Run a test evaluation</button>
             </div>
             <div class="hint" id="testBlocked" hidden></div>
             <div id="testStatus"></div>
@@ -500,20 +574,20 @@
 
       <div class="card done-card" id="done" hidden>
         <div class="big">✓</div>
-        <h1 style="margin:8px 0 4px;">You're set up</h1>
+        <h1 style="margin:8px 0 4px;" data-i18n="wiz.done.title">You're set up</h1>
         <p class="lede" id="doneName"></p>
         <div class="callout warn" id="doneModelWarn" hidden style="text-align:left;">
-          The local model isn't connected yet, so evaluations won't run until it is.
-          <button type="button" class="link" id="doneFixModel">Set it up now</button>
+          <span data-i18n="wiz.done.noModel">The model isn't connected yet, so evaluations won't run until it is.</span>
+          <button type="button" class="link" id="doneFixModel" data-i18n="wiz.done.fixModel">Set it up now</button>
         </div>
         <ol>
-          <li>Open a job posting (LinkedIn, Greenhouse, Indeed, Workday and most career sites work).</li>
-          <li>Click the <strong>JobFit</strong> icon in the toolbar, then <strong>Evaluate this tab</strong>.</li>
-          <li>The score appears on the page. Every job you score is kept in <strong>Tracked jobs</strong>.</li>
+          <li data-i18n="wiz.done.step1">Open a job posting (LinkedIn, Greenhouse, Indeed, Workday and most career sites work).</li>
+          <li data-i18n-html="wiz.done.step2">Click the <strong>JobFit</strong> icon in the toolbar, then <strong>Evaluate this tab</strong>.</li>
+          <li data-i18n-html="wiz.done.step3">The score appears on the page. Every job you score is kept in <strong>Tracked jobs</strong>.</li>
         </ol>
         <div class="row" style="justify-content:center;">
-          <button type="button" id="doneHistory">Open tracked jobs</button>
-          <button type="button" class="primary" id="doneClose">Close this tab</button>
+          <button type="button" id="doneHistory" data-i18n="wiz.done.history">Open tracked jobs</button>
+          <button type="button" class="primary" id="doneClose" data-i18n="wiz.done.close">Close this tab</button>
         </div>
       </div>
     </main>
@@ -521,17 +595,24 @@
 
   <div class="nav" id="nav">
     <div class="nav-inner">
-      <button type="button" id="back">Back</button>
+      <button type="button" id="back" data-i18n="common.back">Back</button>
       <span class="save-state" id="saveState"></span>
       <span class="spacer"></span>
-      <button type="button" class="link" id="skip" hidden>Skip for now</button>
-      <button type="button" class="primary" id="next">Next</button>
+      <button type="button" class="link" id="skip" hidden data-i18n="wiz.skip">Skip for now</button>
+      <button type="button" class="primary" id="next" data-i18n="common.next">Next</button>
     </div>
   </div>
 
+  <script src="locales/en.js"></script>
+  <script src="locales/es.js"></script>
+  <script src="locales/fr.js"></script>
+  <script src="locales/pt.js"></script>
+  <script src="i18n.js"></script>
+  <script src="geo.js"></script>
   <script src="defaults.js"></script>
   <script src="provider.js"></script>
   <script src="keywords.js"></script>
+  <script src="screening.js"></script>
   <script src="profiles.js"></script>
   <script src="lmstudio-ui.js"></script>
   <script src="wizard.js"></script>

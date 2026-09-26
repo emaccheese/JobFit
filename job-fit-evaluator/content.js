@@ -16,12 +16,17 @@
   }
 
   // Screening helpers are shared with the service worker's queue (screening.js).
-  const { compileConfig, matchedLabels, cleanMatch } = JOB_FIT_SCREEN;
+  const { cleanMatch } = JOB_FIT_SCREEN;
+  const t = JOB_FIT_I18N.t;
 
   // The pattern is still worth showing for a hard reject — it's the thing
   // you'd go and edit — but labelled as a rule rather than presented as prose.
   function describeHardReject(hardReject) {
     return `"${cleanMatch(hardReject.matchedText)}" — ${hardReject.label}`;
+  }
+
+  function verdictLabel(verdict) {
+    return verdict && JOB_FIT_I18N.has(`verdict.${verdict}`) ? t(`verdict.${verdict}`) : verdict || "";
   }
 
   // --- JSON-LD probe -------------------------------------------------------
@@ -155,8 +160,21 @@
     return { result, extractorName };
   }
 
-  function runLayer1(text, hardRejects) {
-    return { hardReject: JOB_FIT_SCREEN.findHardReject(text, hardRejects) };
+  // The posting's location from its schema.org JobPosting, for sites whose
+  // extractor finds none (Greenhouse boards, the generic fallback) — the
+  // country is what makes screening per country.
+  function jsonLdLocation() {
+    const node = findJobPostingNodes()[0];
+    if (!node) return null;
+    const remote = asArray(node.jobLocationType).some((t) => /telecommute/i.test(String(t)));
+    const address = asArray(node.jobLocation).map((l) => l && l.address).find(Boolean);
+    const country = address && address.addressCountry;
+    const parts = address
+      ? [address.addressLocality, address.addressRegion, typeof country === "object" && country ? country.name : country]
+      : [];
+    const text = parts.filter((p) => typeof p === "string" && p.trim()).join(", ");
+    if (!text && !remote) return null;
+    return [text, remote ? "Remote" : null].filter(Boolean).join(" · ");
   }
 
   function removeExistingBanner() {
@@ -246,14 +264,14 @@
     // (or a long error message) gets cut off. Lead the Details panel with
     // the full text so it's always readable somewhere.
     const detailSections = [
-      summary ? { title: "Summary", items: [summary], tagClass: "jf-tag-neutral" } : null,
+      summary ? { title: t("banner.summary"), items: [summary], tagClass: "jf-tag-neutral" } : null,
       ...(sections || []),
     ].filter(Boolean);
 
     if (detailSections.length) {
       const detailsBtn = document.createElement("button");
       detailsBtn.type = "button";
-      detailsBtn.textContent = "Details";
+      detailsBtn.textContent = t("banner.details");
       detailsBtn.addEventListener("click", () => renderDetailsPanel(detailSections));
       actions.appendChild(detailsBtn);
     }
@@ -268,7 +286,7 @@
 
     const dismissBtn = document.createElement("button");
     dismissBtn.type = "button";
-    dismissBtn.textContent = "Dismiss";
+    dismissBtn.textContent = t("banner.dismiss");
     dismissBtn.addEventListener("click", removeExistingBanner);
     actions.appendChild(dismissBtn);
 
@@ -300,11 +318,9 @@
 
   function timeAgo(ts) {
     const days = Math.floor((Date.now() - ts) / 86400000);
-    if (days === 0) return "today";
-    if (days === 1) return "yesterday";
-    if (days < 30) return `${days} days ago`;
-    const months = Math.floor(days / 30);
-    return months === 1 ? "a month ago" : `${months} months ago`;
+    const rtf = new Intl.RelativeTimeFormat(JOB_FIT_I18N.locale(), { numeric: "auto" });
+    if (days < 30) return rtf.format(-days, "day");
+    return rtf.format(-Math.floor(days / 30), "month");
   }
 
   // Single renderer for both a fresh evaluation and one read back out of
@@ -333,10 +349,10 @@
       const dups = JOB_FIT_EVALSTORE.findDuplicatesOf(record, others);
       if (!dups.length) return null;
       const d = dups[0];
-      const score = d.hardReject ? "hard reject" : d.score != null ? d.score : "no score";
-      const when = new Date(JOB_FIT_EVALSTORE.activityTs(d)).toLocaleDateString(undefined, { month: "short", day: "numeric" });
+      const score = d.hardReject ? t("result.hardReject") : d.score != null ? d.score : t("result.noScore");
+      const when = JOB_FIT_I18N.formatDate(JOB_FIT_EVALSTORE.activityTs(d), { month: "short", day: "numeric" });
       const status = d.status && d.status !== "not_applied" ? `, ${JOB_FIT_EVALSTORE.statusLabel(d.status).toLowerCase()}` : "";
-      return `Looks like a job you already track from ${JOB_FIT_EVALSTORE.siteLabel(d)} (${score}, ${when}${status}). Check Tracked jobs before applying twice.`;
+      return t("banner.duplicate", { site: JOB_FIT_EVALSTORE.siteLabel(d), detail: `${score}, ${when}${status}` });
     } catch (err) {
       return null;
     }
@@ -355,32 +371,30 @@
     const warnings = [];
     if (duplicateNote) warnings.push(duplicateNote);
     if (staleNote) warnings.push(staleNote);
-    if (saveError) warnings.push(`Result shown but NOT saved to history: ${saveError}`);
+    if (saveError) warnings.push(t("banner.notSaved", { error: saveError }));
     if (record.evaluation && record.evaluation.input_truncated) {
-      warnings.push(
-        "This posting was too long to send in full — the middle was omitted. The start and end (where requirements and comp usually are) were included."
-      );
+      warnings.push(t("banner.truncated"));
     }
     const warningSection = warnings.length
-      ? [{ title: "Heads up", items: warnings, tagClass: "jf-tag-amber" }]
+      ? [{ title: t("banner.headsUp"), items: warnings, tagClass: "jf-tag-amber" }]
       : [];
 
-    const prefix = cached ? `[saved · evaluated ${timeAgo(record.lastEvaluatedAt)}] ` : "";
+    const prefix = cached ? `[${t("banner.savedPrefix", { when: timeAgo(record.lastEvaluatedAt) })}] ` : "";
     const extraActions = [
-      ...(cached ? [{ label: "Re-evaluate", onClick: onReevaluate }] : []),
-      ...(record.jobKey ? [{ label: "Tracked jobs", onClick: () => openInTrackedJobs(record) }] : []),
+      ...(cached ? [{ label: t("banner.reevaluate"), onClick: onReevaluate }] : []),
+      ...(record.jobKey ? [{ label: t("banner.trackedJobs"), onClick: () => openInTrackedJobs(record) }] : []),
     ];
 
     if (record.hardReject) {
       renderBanner({
         status: "red",
-        label: "✕ Reject",
-        summary: `${prefix}Hard reject: "${cleanMatch(record.hardReject.matchedText)}"`,
+        label: `✕ ${t("banner.reject")}`,
+        summary: `${prefix}${t("banner.hardRejectSummary", { match: cleanMatch(record.hardReject.matchedText) })}`,
         sections: [
           ...warningSection,
-          { title: "Evaluated as", items: [profileName], tagClass: "jf-tag-neutral" },
+          { title: t("banner.evaluatedAs"), items: [profileName], tagClass: "jf-tag-neutral" },
           {
-            title: "Reject reason",
+            title: t("banner.rejectReason"),
             items: [describeHardReject(record.hardReject)],
             tagClass: "jf-tag-red",
           },
@@ -393,9 +407,9 @@
     const e = record.evaluation || {};
     const salaryItems = e.salary
       ? [
-          `Posting: ${e.salary.posting_stated}`,
-          `Market estimate: ${e.salary.estimated_market_range}`,
-          `vs. your expectation: ${e.salary.vs_candidate_expectation}`,
+          `${t("result.salaryPosting")}: ${e.salary.posting_stated}`,
+          `${t("result.salaryMarket")}: ${e.salary.estimated_market_range}`,
+          `${t("result.salaryVs")}: ${JOB_FIT_EVALSTORE.salaryVerdictLabel(e.salary.vs_candidate_expectation)}`,
           e.salary.note,
         ].filter(Boolean)
       : [];
@@ -403,33 +417,33 @@
     renderBanner({
       status: statusForScore(e.score),
       score: e.score,
-      label: e.verdict || "",
+      label: verdictLabel(e.verdict),
       summary: prefix + (e.one_line || ""),
       sections: [
         ...warningSection,
-        { title: "Evaluated as", items: [profileName], tagClass: "jf-tag-neutral" },
-        { title: "Matches", items: e.matches, tagClass: "jf-tag-green" },
-        { title: "Gaps", items: e.gaps, tagClass: "jf-tag-amber" },
-        { title: "Required gaps", items: e.required_gaps, tagClass: "jf-tag-red" },
-        { title: "Seniority/comp check", items: e.seniority_flag ? [e.seniority_flag] : [], tagClass: "jf-tag-red" },
+        { title: t("banner.evaluatedAs"), items: [profileName], tagClass: "jf-tag-neutral" },
+        { title: t("result.matches"), items: e.matches, tagClass: "jf-tag-green" },
+        { title: t("result.gaps"), items: e.gaps, tagClass: "jf-tag-amber" },
+        { title: t("result.requiredGaps"), items: e.required_gaps, tagClass: "jf-tag-red" },
+        { title: t("result.seniority"), items: e.seniority_flag ? [e.seniority_flag] : [], tagClass: "jf-tag-red" },
         {
-          title: "Score cap applied",
+          title: t("result.scoreCap"),
           items: (e.score_cap_reasons || []).map((reason) =>
-            e.raw_score != null ? `${reason} (model scored ${e.raw_score}, capped to ${e.score})` : reason
+            e.raw_score != null ? `${reason} ${t("result.capDetail", { raw: e.raw_score, score: e.score })}` : reason
           ),
           tagClass: "jf-tag-amber",
         },
         {
-          title: "Warnings — worth asking about, not automatic rejects",
+          title: t("banner.warningsTitle"),
           items: record.softWarnings,
           tagClass: "jf-tag-amber",
         },
         {
-          title: "Domain flags detected (keyword scan, independent of the model)",
+          title: t("banner.domainFlagsTitle"),
           items: record.domainFlags,
           tagClass: "jf-tag-neutral",
         },
-        { title: "Salary", items: salaryItems, tagClass: "jf-tag-neutral" },
+        { title: t("result.salary"), items: salaryItems, tagClass: "jf-tag-neutral" },
       ],
       extraActions,
     });
@@ -457,6 +471,7 @@
     // these, the second with framed=true on a greenhouse.io host.
     console.log(`[Job Fit Evaluator] running on ${location.hostname} (framed=${window !== window.top})`);
 
+    await JOB_FIT_I18N.load();
     const { result, extractorName } = dispatchExtraction();
 
     // On the top frame of a page that EMBEDS a Greenhouse board, the posting is
@@ -482,14 +497,15 @@
       console.log(`[Job Fit Evaluator] extraction failed on ${location.hostname} (no usable text found)`);
       renderBanner({
         status: "amber",
-        label: "⚠ No text",
-        summary: "Couldn't extract job posting text on this page.",
+        label: `⚠ ${t("banner.noText")}`,
+        summary: t("banner.noTextSummary"),
         sections: [],
       });
       return;
     }
 
     probeJsonLd(result, extractorName);
+    if (!result.location) result.location = jsonLdLocation();
 
     const jobKey = JOB_FIT_JOBKEY.keyFor(result);
     console.log(
@@ -522,16 +538,17 @@
       if (!(cached.hardReject && profileChanged)) {
         const reasons = [
           modelChanged &&
-            `scored by ${cached.model || "a different model"}; the current model is ${currentModel || "not set"}`,
-          profileChanged && "your profile has changed since",
+            t("banner.staleModel", {
+              model: cached.model || t("banner.aDifferentModel"),
+              current: currentModel || t("banner.notSet"),
+            }),
+          profileChanged && t("banner.staleProfile"),
         ].filter(Boolean);
         renderResult(cached, {
           cached: true,
           profileName: activeProfile.name,
           onReevaluate: () => start({ ignoreCache: true }),
-          staleNote: reasons.length
-            ? `This saved score may be out of date — ${reasons.join(", and ")}. Re-evaluate to score it again; this result is kept as a previous score.`
-            : null,
+          staleNote: reasons.length ? t("banner.staleNote", { reasons: JOB_FIT_I18N.list(reasons) }) : null,
         });
         return;
       }
@@ -551,8 +568,14 @@
       profileFingerprint: fingerprint,
     };
 
-    const hardRejects = compileConfig(activeProfile.keywords.hardRejects, "hardRejects");
-    const layer1 = runLayer1(result.text, hardRejects);
+    // Layer 1, with the posting's location and the profile's work
+    // authorization, so the rules that depend on the country apply to this
+    // posting's country (screening.js).
+    const layer1 = JOB_FIT_SCREEN.screen(result.text, activeProfile.keywords, {
+      location: result.location,
+      jobSearch: activeProfile.jobSearch,
+    });
+    baseRecord.place = layer1.place;
 
     if (layer1.hardReject) {
       // Stored like any other result, and deliberately so: without it you'd
@@ -573,18 +596,12 @@
       return;
     }
 
-    const domainFlagMatches = matchedLabels(
-      compileConfig(activeProfile.keywords.domainFlags, "domainFlags"),
-      result.text
-    );
-    const softWarningMatches = matchedLabels(
-      compileConfig(activeProfile.keywords.softWarnings, "softWarnings"),
-      result.text
-    );
+    const domainFlagMatches = layer1.domainFlags;
+    const softWarningMatches = layer1.softWarnings;
 
     const flagNotes = [
-      domainFlagMatches.length ? `domain flags: ${domainFlagMatches.join(", ")}` : null,
-      softWarningMatches.length ? `warnings: ${softWarningMatches.join(", ")}` : null,
+      domainFlagMatches.length ? `${t("banner.flagsNote")}: ${domainFlagMatches.join(", ")}` : null,
+      softWarningMatches.length ? `${t("banner.warningsNote")}: ${softWarningMatches.join(", ")}` : null,
     ].filter(Boolean);
 
     // Handed to the service worker rather than run from here. Everything the
@@ -603,6 +620,7 @@
           profileSnapshot: {
             profile: activeProfile.profile,
             expectedSalary: activeProfile.expectedSalary,
+            jobSearch: activeProfile.jobSearch,
             fingerprint,
           },
           postingText: result.text,
@@ -618,8 +636,8 @@
     } catch (err) {
       renderBanner({
         status: "amber",
-        label: "⚠ Error",
-        summary: `Could not reach the extension's background service: ${err.message}`,
+        label: `⚠ ${t("banner.error")}`,
+        summary: t("banner.noWorker", { detail: err.message }),
         sections: [],
       });
       return;
@@ -628,11 +646,11 @@
     if (!response || !response.ok) {
       renderBanner({
         status: "amber",
-        label: "⚠ Queue full",
+        label: `⚠ ${t("banner.queueFull")}`,
         summary:
           response && response.full
-            ? `The queue already holds ${response.max} jobs. Let some finish, or clear them on the tracked-jobs page.`
-            : (response && response.error) || "Could not queue this posting.",
+            ? t("banner.queueFullSummary", { count: response.max })
+            : (response && response.error) || t("banner.couldNotQueue"),
         sections: [],
       });
       return;
@@ -641,22 +659,17 @@
     const flagSuffix = flagNotes.length ? ` — ${flagNotes.join(" · ")}` : "";
     const queueNote =
       response.position <= 1
-        ? "sending to the local model now"
-        : `queued — ${ordinal(response.position)} in line of ${response.total}`;
+        ? t("banner.sendingNow")
+        : t("banner.queuedPosition", { position: response.position, total: response.total });
 
     renderBanner({
       status: "neutral",
       label: "…",
       summary: response.duplicate
-        ? `[${activeProfile.name}] Already queued — ${ordinal(response.position)} in line`
-        : `[${activeProfile.name}] Passed Layer 1${flagSuffix} — ${queueNote}`,
+        ? `[${activeProfile.name}] ${t("banner.alreadyQueued", { position: response.position })}`
+        : `[${activeProfile.name}] ${t("banner.passedLayer1")}${flagSuffix} — ${queueNote}`,
       sections: [],
     });
-  }
-
-  function ordinal(n) {
-    const suffix = n % 100 >= 11 && n % 100 <= 13 ? "th" : { 1: "st", 2: "nd", 3: "rd" }[n % 10] || "th";
-    return `${n}${suffix}`;
   }
 
   // Backstop so no unexpected throw — a storage read, a malformed stored
@@ -678,8 +691,8 @@
         console.error("[Job Fit Evaluator] evaluation failed", err);
         renderBanner({
           status: "amber",
-          label: "⚠ Error",
-          summary: `Something went wrong: ${err && err.message ? err.message : String(err)}`,
+          label: `⚠ ${t("banner.error")}`,
+          summary: t("banner.somethingWrong", { detail: err && err.message ? err.message : String(err) }),
           sections: [],
         });
       })
@@ -705,7 +718,9 @@
       if (!current.result) return;
       if (JOB_FIT_JOBKEY.keyFor(current.result) !== message.jobKey) return;
 
-      renderResult(message.record, { cached: false, profileName: message.profileName });
+      JOB_FIT_I18N.load().then(() =>
+        renderResult(message.record, { cached: false, profileName: message.profileName })
+      );
     });
   }
 

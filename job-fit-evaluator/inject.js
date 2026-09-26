@@ -5,6 +5,8 @@
 // the service worker.
 
 const JOB_FIT_CONTENT_FILES = [
+  "i18n.js",
+  "geo.js",
   "defaults.js",
   "provider.js",
   "keywords.js",
@@ -23,6 +25,18 @@ const JOB_FIT_CONTENT_FILES = [
   "content.js",
 ];
 
+// The page scripts plus the messages they need: English (the fallback) and
+// the language in use, read from storage so a page never carries all four.
+async function jobFitContentFiles() {
+  let lang = "en";
+  try {
+    lang = await JOB_FIT_I18N.load();
+  } catch (err) {
+    /* English */
+  }
+  return [...JOB_FIT_I18N.localeFiles(lang), ...JOB_FIT_CONTENT_FILES];
+}
+
 // chrome.scripting refuses to inject into chrome:// pages, the Web Store,
 // PDF viewers, other extensions' pages, and any tab whose host the extension
 // can't access. Left unhandled, the rejection stranded the popup: the button
@@ -30,9 +44,9 @@ const JOB_FIT_CONTENT_FILES = [
 function injectionErrorMessage(err) {
   const raw = err && err.message ? err.message : String(err);
   if (/cannot be scripted|Cannot access|chrome:\/\/|Extension manifest|blocked/i.test(raw)) {
-    return "Chrome won't let the extension run on this page (browser pages, the Web Store and PDFs are off-limits). Open the posting on a normal web page and try again.";
+    return t("inject.forbidden");
   }
-  return `Couldn't run on this tab: ${raw}`;
+  return t("inject.failed", { detail: raw });
 }
 
 // Injects the job content script into cross-origin iframes that host a job
@@ -131,13 +145,14 @@ async function injectJobFrames(tabId, files, { withCss = true } = {}) {
 // Returns { ok: true } or { ok: false, error } with a message for a person.
 async function startEvaluation(tabId) {
   try {
+    const files = await jobFitContentFiles();
     await chrome.scripting.insertCSS({ target: { tabId }, files: ["content.css"] });
-    await chrome.scripting.executeScript({ target: { tabId }, files: JOB_FIT_CONTENT_FILES });
+    await chrome.scripting.executeScript({ target: { tabId }, files });
     // Find cross-origin iframes that host job content (e.g. embedded
     // Greenhouse boards on custom-domain career sites) and inject into those
     // specifically. allFrames: true would reject the entire call if ANY frame
     // in the tab (ads, analytics) is on a domain we lack permission for.
-    await injectJobFrames(tabId, JOB_FIT_CONTENT_FILES);
+    await injectJobFrames(tabId, files);
     return { ok: true };
   } catch (err) {
     return { ok: false, error: injectionErrorMessage(err) };

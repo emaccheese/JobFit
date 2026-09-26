@@ -12,6 +12,76 @@ var JOB_FIT_PROFILES = (function () {
     return JSON.parse(JSON.stringify(value));
   }
 
+  // Where the person is and where they can work — what makes screening per
+  // country (see screening.js) and what the model is told about location.
+  //   home           { country, region, city, timeZone } — detected or typed
+  //   targetCountries  ISO codes of the countries they apply in
+  //   workAuth       { <country>: "citizen" | "permit" | "sponsor" }
+  //   languages      languages they can work in ("en", "es", "fr", "pt")
+  //   arrangements   remote / hybrid / onsite they'd accept; empty = any
+  //   relocate       "yes" | "no" | null (at their own cost)
+  //   shareLocation  whether the model is told their city and region
+  function blankJobSearch() {
+    return {
+      home: { country: null, region: null, city: "", timeZone: null },
+      targetCountries: [],
+      workAuth: {},
+      languages: [],
+      arrangements: [],
+      relocate: null,
+      shareLocation: false,
+    };
+  }
+
+  const AUTH_VALUES = ["citizen", "permit", "sponsor"];
+  const ARRANGEMENTS = ["remote", "hybrid", "onsite"];
+
+  function normalizeJobSearch(value) {
+    const v = value && typeof value === "object" ? value : {};
+    const home = v.home && typeof v.home === "object" ? v.home : {};
+    const workAuth = {};
+    Object.entries(v.workAuth && typeof v.workAuth === "object" ? v.workAuth : {}).forEach(([country, status]) => {
+      if (AUTH_VALUES.includes(status)) workAuth[country] = status;
+    });
+    // The wizard's older "would you relocate?" answer is offered as the
+    // starting value in the wizard rather than copied here, which would change
+    // the profile's fingerprint and mark every saved score out of date.
+    const relocate = ["yes", "no"].includes(v.relocate) ? v.relocate : null;
+    return {
+      home: {
+        country: typeof home.country === "string" && home.country ? home.country : null,
+        region: typeof home.region === "string" && home.region ? home.region : null,
+        city: typeof home.city === "string" ? home.city : "",
+        timeZone: typeof home.timeZone === "string" && home.timeZone ? home.timeZone : null,
+      },
+      targetCountries: Array.isArray(v.targetCountries) ? v.targetCountries.filter((c) => typeof c === "string") : [],
+      workAuth,
+      languages: Array.isArray(v.languages) ? v.languages.filter((c) => typeof c === "string") : [],
+      arrangements: Array.isArray(v.arrangements) ? v.arrangements.filter((a) => ARRANGEMENTS.includes(a)) : [],
+      relocate,
+      shareLocation: v.shareLocation === true,
+    };
+  }
+
+  // Salary expectations per currency: { min, max, period }. period is how the
+  // figures are quoted — "year", "month" or "hour" — because most of Latin
+  // America quotes pay monthly. Older profiles have no period: those figures
+  // were entered as annual.
+  function normalizeSalary(value) {
+    const out = {};
+    const source = value && typeof value === "object" ? value : clone(JOB_FIT_DEFAULTS.expectedSalary);
+    Object.entries(source).forEach(([currency, range]) => {
+      if (!/^[A-Z]{3}$/.test(currency) || !range || typeof range !== "object") return;
+      const num = (x) => (x === null || x === undefined || x === "" || Number.isNaN(Number(x)) ? null : Number(x));
+      out[currency] = {
+        min: num(range.min),
+        max: num(range.max),
+        period: ["year", "month", "hour"].includes(range.period) ? range.period : "year",
+      };
+    });
+    return out;
+  }
+
   function newId() {
     return `p${Date.now().toString(36)}${Math.random().toString(36).slice(2, 6)}`;
   }
@@ -33,7 +103,8 @@ var JOB_FIT_PROFILES = (function () {
         softWarnings: clone(JOB_FIT_DEFAULTS.keywords.softWarnings),
         domainFlags: JOB_FIT_KEYWORDS.emptyConfig(),
       },
-      expectedSalary: clone(JOB_FIT_DEFAULTS.expectedSalary),
+      expectedSalary: normalizeSalary(JOB_FIT_DEFAULTS.expectedSalary),
+      jobSearch: blankJobSearch(),
       setupIncomplete: false,
       setupAnswers: {},
     };
@@ -65,7 +136,8 @@ var JOB_FIT_PROFILES = (function () {
           ? JOB_FIT_KEYWORDS.normalizeConfig(keywords.domainFlags, "domainFlags")
           : clone(JOB_FIT_DEFAULTS.keywords.domainFlags),
       },
-      expectedSalary: profile.expectedSalary || clone(JOB_FIT_DEFAULTS.expectedSalary),
+      expectedSalary: normalizeSalary(profile.expectedSalary),
+      jobSearch: normalizeJobSearch(profile.jobSearch),
       // Setup-wizard state. Carried through explicitly because this function
       // rebuilds the profile from known keys — anything not listed here is
       // dropped on the next load. Neither field is in fingerprint(): they
@@ -133,12 +205,32 @@ var JOB_FIT_PROFILES = (function () {
   // this, editing a keyword list and re-running a posting would silently
   // return the old score and look like the edit did nothing.
   function fingerprint(profile) {
+    // Canonical, so what's only bookkeeping doesn't mark every saved score
+    // out of date: a config's `seen` list, the computed warnings (they never
+    // change a score), a salary period that's still the old implicit "year",
+    // and jobSearch answers nobody has given yet. An untouched older profile
+    // keeps the fingerprint it had before these existed.
+    const computed = new Set(
+      JOB_FIT_KEYWORDS.presetsFor("softWarnings").filter((p) => p.computed).map((p) => p.id)
+    );
+    const keywordPart = (config, dropComputed) => {
+      if (!config || Array.isArray(config)) return config;
+      const { seen, ...rest } = config;
+      return dropComputed ? { ...rest, presets: (rest.presets || []).filter((id) => !computed.has(id)) } : rest;
+    };
+    const salaryPart = {};
+    Object.entries(profile.expectedSalary || {}).forEach(([currency, range]) => {
+      const { period, ...rest } = range || {};
+      salaryPart[currency] = period && period !== "year" ? { ...rest, period } : rest;
+    });
+    const jobSearch = profile.jobSearch && JSON.stringify(profile.jobSearch) !== JSON.stringify(blankJobSearch()) ? profile.jobSearch : undefined;
     const material = JSON.stringify({
       profile: profile.profile,
-      hardRejects: profile.keywords.hardRejects,
-      softWarnings: profile.keywords.softWarnings,
-      domainFlags: profile.keywords.domainFlags,
-      expectedSalary: profile.expectedSalary,
+      hardRejects: keywordPart(profile.keywords.hardRejects),
+      softWarnings: keywordPart(profile.keywords.softWarnings, true),
+      domainFlags: keywordPart(profile.keywords.domainFlags),
+      expectedSalary: salaryPart,
+      jobSearch,
     });
     // FNV-1a, 32-bit. Not cryptographic — it only needs to change when the
     // material changes.
@@ -150,5 +242,5 @@ var JOB_FIT_PROFILES = (function () {
     return (hash >>> 0).toString(36);
   }
 
-  return { load, getActive, save, blankProfile, normalize, clone, newId, fingerprint };
+  return { load, getActive, save, blankProfile, blankJobSearch, normalize, normalizeJobSearch, normalizeSalary, clone, newId, fingerprint };
 })();
