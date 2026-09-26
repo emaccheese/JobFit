@@ -100,8 +100,13 @@ Then open a job posting and click **Evaluate this tab**.
 
 ## Using it
 
-**Evaluate.** A banner appears in the page with the score, verdict and a one-line
-read; **Details** expands to matches, gaps, required gaps, warnings and salary.
+**Evaluate.** Open the posting and press **⌘⇧E** on a Mac, or **Alt+Shift+E** on
+Windows and Linux. It works on any site, with no clicks. You can also click the
+JobFit icon, then **Evaluate this tab**. You can change the shortcut at
+`chrome://extensions/shortcuts`, or from the popup under **Shortcuts**.
+
+A banner appears in the page with the score, verdict and a one-line read;
+**Details** expands to matches, gaps, required gaps, warnings and salary.
 
 **Queue.** Clicking Evaluate on a second posting while the first is still running
 queues it — up to 10. Click through a search page, queue everything that looks

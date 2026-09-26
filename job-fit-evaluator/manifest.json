@@ -1,7 +1,7 @@
 {
   "manifest_version": 3,
   "name": "JobFit",
-  "version": "0.5.0",
+  "version": "0.6.0",
   "description": "Evaluates a job posting on the current tab against a stored candidate profile.",
   "permissions": ["activeTab", "scripting", "storage", "unlimitedStorage", "alarms", "webNavigation"],
   "host_permissions": ["http://localhost/*", "http://127.0.0.1/*", "*://*.greenhouse.io/*", "https://api.openai.com/*"],
@@ -11,5 +11,14 @@
   "action": {
     "default_title": "JobFit",
     "default_popup": "popup.html"
+  },
+  "commands": {
+    "evaluate-tab": {
+      "suggested_key": {
+        "default": "Alt+Shift+E",
+        "mac": "Command+Shift+E"
+      },
+      "description": "Evaluate the job posting in this tab"
+    }
   }
 }

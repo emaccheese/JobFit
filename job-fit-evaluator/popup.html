@@ -97,6 +97,7 @@
 
   <section>
     <button id="evaluate" class="primary" type="button" style="width:100%;">Evaluate this tab</button>
+    <div class="hint" id="evaluateTip"></div>
   </section>
 
   <section>
@@ -111,6 +112,18 @@
   <section>
     <button id="viewHistory" type="button" style="width:100%;">View tracked jobs</button>
   </section>
+
+  <details id="sec-shortcuts">
+    <summary>Shortcuts</summary>
+    <section>
+      <label>Keyboard shortcut</label>
+      <div class="row" style="align-items:center;">
+        <span id="shortcutKey" style="font-weight:600; flex:0 0 auto;"></span>
+        <button id="changeShortcut" type="button" style="flex:0 0 auto;">Change shortcut</button>
+      </div>
+      <div class="hint">Evaluates the posting in the current tab, on any site.</div>
+    </section>
+  </details>
 
   <details id="sec-lmstudio">
     <summary>Model</summary>
@@ -301,6 +314,7 @@
   <script src="profiles.js"></script>
   <script src="evalstore.js"></script>
   <script src="lmstudio-ui.js"></script>
+  <script src="inject.js"></script>
   <script src="popup.js"></script>
 </body>
 </html>

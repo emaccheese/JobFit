@@ -636,6 +636,35 @@ Two ways the UI could strand itself, both fixed in the 2026-09-19 audit:
 
 ---
 
+## Fewer clicks per evaluation (2026-09-26)
+
+Evaluating used to be three steps: open the posting, click the icon, then click
+**Evaluate this tab**. A **keyboard shortcut** (`commands.evaluate-tab`) removes the
+last two: ⌘⇧E on a Mac (`Command+Shift+E`), Alt+Shift+E elsewhere. Chrome gives the
+shortcut access to the active tab, so it works on any page the popup could evaluate.
+The popup shows the shortcut Chrome actually assigned (`commands.getAll()`, which can
+differ if another extension had it), with a **Change shortcut** button that opens
+`chrome://extensions/shortcuts`.
+
+**Tried and removed: a one-click icon on job postings.** For a while the popup was
+removed per tab on recognised posting URLs, so a click on the icon evaluated
+directly. It came out for three reasons:
+- It took over the icon exactly where the popup matters most. Tracked jobs, Summarize,
+  settings and the queue status moved behind a right-click on the job boards
+  themselves.
+- The icon did different things on different sites, so every click needed a guess
+  first.
+- The shortcut already does it with no clicks, on every site.
+
+The icon always opens the popup.
+
+What stayed from that work:
+- **Errors** from the shortcut have no popup to appear in, so they go on the icon: a
+  red "!" for that tab, with the reason as its tooltip, cleared after 8s. The badge is
+  cleared with `text: null`, not `""`, so the queue count returns.
+- **One code path:** starting an evaluation (injecting the page scripts, including into
+  Greenhouse iframes) lives in `inject.js`, shared by the popup and the service worker.
+
 ## Popup readiness
 
 Both "why isn't it working?" moments are answered before you click. On open the

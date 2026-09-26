@@ -3,7 +3,7 @@
 // once already: reasoning_effort and enable_thinking were added to the popup
 // but not to this file, so neither was ever sent for anyone who hadn't
 // re-saved their settings.
-importScripts("defaults.js", "provider.js", "keywords.js", "profiles.js", "evalstore.js", "queue.js", "lmstudio-ui.js");
+importScripts("defaults.js", "provider.js", "keywords.js", "profiles.js", "evalstore.js", "queue.js", "lmstudio-ui.js", "inject.js");
 
 const SYSTEM_PROMPT = `You evaluate job postings against a candidate profile.
 Return ONLY a JSON object, no prose, no markdown fences.
@@ -1156,6 +1156,41 @@ chrome.runtime.onStartup.addListener(kick);
 chrome.runtime.onInstalled.addListener((details) => {
   kick();
   if (details.reason === "install") startFirstRunSetup();
+});
+
+// ---------------------------------------------------------------------------
+// Keyboard shortcut: evaluate the posting in the current tab without opening
+// the popup (manifest "commands"; Command+Shift+E on a Mac, Alt+Shift+E
+// elsewhere). The toolbar icon always opens the popup — an icon that
+// evaluated on some sites and opened the popup on others hid Tracked jobs
+// and settings on exactly the job boards where they're used most.
+// ---------------------------------------------------------------------------
+
+// Evaluating without the popup has nowhere to show an error, so it goes on
+// the icon: a red "!" for this tab, with the reason as the tooltip.
+async function evaluateTab(tab) {
+  if (!tab || tab.id == null) return;
+  const started = await startEvaluation(tab.id);
+  if (started.ok) return;
+  try {
+    await chrome.action.setBadgeBackgroundColor({ tabId: tab.id, color: "#c0392b" });
+    await chrome.action.setBadgeText({ tabId: tab.id, text: "!" });
+    await chrome.action.setTitle({ tabId: tab.id, title: `JobFit — ${started.error}` });
+    setTimeout(() => {
+      // null, not "": null drops this tab's override so the queue count shows
+      // again; "" would pin an empty badge on the tab. Same for the title.
+      chrome.action.setBadgeText({ tabId: tab.id, text: null }).catch(() => {});
+      chrome.action.setTitle({ tabId: tab.id, title: null }).catch(() => {});
+    }, 8000);
+  } catch (err) {
+    /* tab gone */
+  }
+}
+
+// Chrome grants the shortcut access to the active tab, so this works on any
+// page the extension could evaluate from the popup.
+chrome.commands.onCommand.addListener((command, tab) => {
+  if (command === "evaluate-tab") evaluateTab(tab);
 });
 
 // A fresh install gets the setup wizard, never an update: an existing user
