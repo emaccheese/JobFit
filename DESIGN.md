@@ -835,9 +835,10 @@ What stayed from that work:
 
 ### On-page button, opt-in per site (2026-09-27)
 
-A pill in the bottom-right corner of job pages (`float.js`) evaluates the posting on
-screen with one click and shows its state: **Evaluate**, **In queue · #2**,
-**Scoring…**, the saved score and verdict in the score's colour, or **✕ Reject**.
+A card in the bottom-left corner of job pages (`float.js`) evaluates the posting on
+screen with one click and shows its state: **Evaluate this job**, **In queue · #2**,
+**Scoring…**, the saved score in a coloured badge with its verdict, or **✕ Hard
+reject** with the rule that fired.
 Seeing a job's saved score the moment you open it is most of the value; the click is
 the smaller part.
 
@@ -871,16 +872,29 @@ the smaller part.
   The generic fallback counts only when the page carries a schema.org `JobPosting`,
   or the pill would sit on every page of an enabled site.
 - **Single-page boards:** LinkedIn and Eightfold change jobs without a page load, so
-  the pill polls `location.href` (an isolated world can't see the page's own
-  `history.pushState`) and re-reads the job on a short schedule after each change,
-  because the posting fills in a moment after the address does. State updates come
-  from `storage.onChanged`: the record's key, `queue`, the active profile and the
-  language.
+  the card polls `location.href` (an isolated world can't see the page's own
+  `history.pushState`) and re-reads the job on a short schedule after each change
+  (0.6s … 6s), because the posting fills in a moment after the address does.
+  **It doesn't disappear between jobs.** LinkedIn empties the detail pane while it
+  loads the next one, and removing the card on that miss made it vanish and pop
+  back on every click. A miss during the schedule shows *Reading this job…*; only a
+  page with still no job after the last retry loses the card. Overlapping re-reads
+  are sequenced, so a slow one can't paint over a newer one. State updates come
+  from `storage.onChanged`: the record's key, `queue`, the active profile, the
+  language and the minimized setting.
+- **Look and controls:** a white card with a 46px coloured badge, two lines of text
+  (what it is, and what clicking does), a spring-in entrance and a "pop" on the badge
+  only when the news changes (a score arriving, another job), not on every redraw.
+  Hovering shows **–** (minimize to just the badge, remembered per site in
+  `floatCollapsed`; clicking the badge expands it) and **×** (hide on this site), which
+  asks first: the card turns into "Hide on {site}?" and a second click within 4s
+  confirms, the same two-step pattern as deleting a tracked job. Esc or a click on
+  the card cancels. Animations are off under `prefers-reduced-motion`.
 - **Isolated from the site:** a closed shadow root, so no site CSS reaches it. The host
   id starts with `job-fit-`, so `textFrom` never reads the pill into a posting.
   Pointer events stop at the host, for the same Radix-dialog reason as the banner.
-  It sits 96px up from the bottom, clear of LinkedIn's messaging bar and Indeed's chat
-  bubble.
+  **Bottom-left**, beside LinkedIn's job list: the bottom-right corner belongs to
+  LinkedIn's messaging bar and Indeed's chat bubble.
 
 ## Popup readiness
 

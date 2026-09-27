@@ -122,10 +122,11 @@ JobFit icon, then **Evaluate this tab**. You can change the shortcut at
 
 **On-page button (optional).** On a job board you use a lot, tick **Show the JobFit
 button on {site}** in the popup. Chrome asks for access to that one site; after that,
-a small button sits in the corner of its job postings. One click evaluates the posting,
-and if you've scored it before, the button already shows the score when you open the
-page. It never evaluates on its own. Hover it and click **×**, or remove the site
-under **Shortcuts and on-page button**, to turn it off and give the access back.
+a card sits in the bottom-left corner of its job postings. One click evaluates the
+posting, and if you've scored it before, the card already shows the score when you open
+the page. It never evaluates on its own. Hover it for **–** to shrink it to just the
+score, or **×** (twice) to turn it off for the site and give the access back — or
+remove the site under **Shortcuts and on-page button** in the popup.
 
 A banner appears in the page with the score, verdict and a one-line read;
 **Details** expands to matches, gaps, required gaps, warnings and salary.
