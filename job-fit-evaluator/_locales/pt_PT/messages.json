@@ -1,0 +1,11 @@
+{
+  "extName": {
+    "message": "JobFit"
+  },
+  "extDescription": {
+    "message": "Avalia a vaga do separador atual com base num perfil de candidato guardado."
+  },
+  "cmdEvaluate": {
+    "message": "Avaliar a vaga deste separador"
+  }
+}

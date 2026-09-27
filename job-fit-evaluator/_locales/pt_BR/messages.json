@@ -1,0 +1,11 @@
+{
+  "extName": {
+    "message": "JobFit"
+  },
+  "extDescription": {
+    "message": "Avalia a vaga da aba atual com base em um perfil de candidato salvo."
+  },
+  "cmdEvaluate": {
+    "message": "Avaliar a vaga desta aba"
+  }
+}

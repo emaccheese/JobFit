@@ -186,11 +186,12 @@ var JOB_FIT_SCREEN = (function () {
 
   // Business-hours zones postings name. Bare "PT"/"ET" are left out: "PT
   // hours" is as often part-time as Pacific.
+  // Names in any capitalisation; the abbreviations only in capitals.
   const NAMED_ZONES = [
-    { id: "ET", offset: -5, re: /\b(eastern (standard )?time|east coast hours|EST|EDT|hora(rio)? del este|heure de l'est|hor[áa]rio do leste)\b/ },
-    { id: "CT", offset: -6, re: /\b(central (standard )?time|CST|CDT|hora(rio)? del centro|heure du centre|hor[áa]rio central)\b/ },
-    { id: "MT", offset: -7, re: /\b(mountain (standard )?time|MST|MDT|hora(rio)? de la monta[ñn]a|heure des rocheuses)\b/ },
-    { id: "PT", offset: -8, re: /\b(pacific (standard )?time|PST|PDT|hora(rio)? del pac[íi]fico|heure du pacifique|hor[áa]rio do pac[íi]fico)\b/ },
+    { id: "ET", offset: -5, name: /\b(eastern (standard )?time|east coast hours|hora(rio)? del este|heure de l'est|hor[áa]rio do leste)/i, abbr: /\b(EST|EDT)\b/ },
+    { id: "CT", offset: -6, name: /\b(central (standard )?time|hora(rio)? del centro|heure du centre|hor[áa]rio central)/i, abbr: /\b(CST|CDT)\b/ },
+    { id: "MT", offset: -7, name: /\b(mountain (standard )?time|hora(rio)? de la monta[ñn]a|heure des rocheuses)/i, abbr: /\b(MST|MDT)\b/ },
+    { id: "PT", offset: -8, name: /\b(pacific (standard )?time|hora(rio)? del pac[íi]fico|heure du pacifique|hor[áa]rio do pac[íi]fico)/i, abbr: /\b(PST|PDT)\b/ },
   ];
   const HOURS_CONTEXT_RE = /(hours|time ?zone|overlap|business day|working day|horario|horas|zona horaria|fuseau|heures|hor[áa]rio|fuso)/i;
 
@@ -200,7 +201,7 @@ var JOB_FIT_SCREEN = (function () {
     const sentences = String(text).split(/[.\n;]/);
     for (const sentence of sentences) {
       if (!HOURS_CONTEXT_RE.test(sentence)) continue;
-      const zone = NAMED_ZONES.find((z) => z.re.test(sentence));
+      const zone = NAMED_ZONES.find((z) => z.name.test(sentence) || z.abbr.test(sentence));
       if (!zone) continue;
       const hours = Math.round(Math.abs(own - zone.offset));
       return hours >= 3 ? { zone: zone.id, hours } : null;
@@ -256,7 +257,10 @@ var JOB_FIT_SCREEN = (function () {
       out.push(
         tr(
           "screen.arrangement",
-          { arrangement: arrangementName(place.arrangement), wanted: JOB_FIT_I18N.list(wanted.map(arrangementName), "disjunction") },
+          {
+            arrangement: arrangementName(place.arrangement),
+            wanted: JOB_FIT_I18N.list(wanted.map((a) => arrangementName(a).toLocaleLowerCase(JOB_FIT_I18N.locale())), "disjunction"),
+          },
           `${arrangementName(place.arrangement)}, and you asked for ${wanted.join(" or ")}`
         )
       );
