@@ -1,0 +1,11 @@
+{
+  "extName": {
+    "message": "JobFit"
+  },
+  "extDescription": {
+    "message": "Evalúa la vacante de la pestaña actual según un perfil de candidato guardado."
+  },
+  "cmdEvaluate": {
+    "message": "Evaluar la vacante de esta pestaña"
+  }
+}

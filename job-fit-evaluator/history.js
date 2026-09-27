@@ -68,7 +68,7 @@ function usageText(usage) {
   if (!usage) return "";
   const k = (n) => (n >= 1000 ? `${(n / 1000).toFixed(1)}k` : String(n));
   const total = (usage.input || 0) + (usage.output || 0);
-  return ` · ${k(total)} tokens${usage.reasoning ? ` (${k(usage.reasoning)} reasoning)` : ""}`;
+  return ` · ${t("history.tokens", { tokens: k(total) })}${usage.reasoning ? ` ${t("history.reasoningTokens", { tokens: k(usage.reasoning) })}` : ""}`;
 }
 
 function scoreClass(score) {
@@ -81,8 +81,11 @@ function scoreClass(score) {
 }
 
 function formatDate(ts) {
-  if (!ts) return "—";
-  return new Date(ts).toLocaleDateString(undefined, { year: "numeric", month: "short", day: "numeric" });
+  return JOB_FIT_I18N.formatDate(ts);
+}
+
+function verdictLabel(verdict) {
+  return verdict && JOB_FIT_I18N.has(`verdict.${verdict}`) ? t(`verdict.${verdict}`) : verdict || "";
 }
 
 function daysSince(ts) {
@@ -203,14 +206,15 @@ function buildBriefActions(record) {
   const note = el("span", "brief-note", "");
 
   if (!record.text) {
-    note.textContent = "No stored posting text for this job, so a brief can't be generated.";
+    note.textContent = t("history.noTextBrief");
     wrap.appendChild(note);
     return wrap;
   }
 
-  const summarize = el("button", null, record.summary ? "Re-summarize" : "Summarize this job");
+  const summarizeLabel = record.summary ? t("history.resummarize") : t("history.summarizeJob");
+  const summarize = el("button", null, summarizeLabel);
   summarize.className = "summarize-btn";
-  summarize.dataset.label = record.summary ? "Re-summarize" : "Summarize this job";
+  summarize.dataset.label = summarizeLabel;
   // Status comes from the queue itself (see renderBriefStatus), refreshed on
   // every queue change — not from the enqueue reply, which only says the job
   // was accepted, not that anything is running.
@@ -218,7 +222,7 @@ function buildBriefActions(record) {
   wrap.dataset.jobKey = record.jobKey;
   summarize.addEventListener("click", async () => {
     summarize.disabled = true;
-    summarize.textContent = "Queueing…";
+    summarize.textContent = t("history.queueing");
     const response = await queueMessage({
       type: "JOB_FIT_ENQUEUE",
       priority: true,
@@ -237,10 +241,8 @@ function buildBriefActions(record) {
 
     if (!response || !response.ok) {
       summarize.disabled = false;
-      summarize.textContent = record.summary ? "Re-summarize" : "Summarize this job";
-      note.textContent = response && response.full
-        ? `Queue is full (${response.max}) — let some finish first.`
-        : "Couldn't queue it.";
+      summarize.textContent = summarizeLabel;
+      note.textContent = response && response.full ? t("history.queueFull", { count: response.max }) : t("history.couldntQueue");
       return;
     }
 
@@ -249,16 +251,16 @@ function buildBriefActions(record) {
   wrap.appendChild(summarize);
 
   if (record.summary) {
-    const copy = el("button", null, "Copy brief");
+    const copy = el("button", null, t("history.copyBrief"));
     copy.addEventListener("click", async () => {
       // Same builder the popup's text comes from: header line, brief, then
       // this profile's evaluations, one per model.
       const text = JOB_FIT_EVALSTORE.briefText(record, profileDisplayName(record));
       try {
         await navigator.clipboard.writeText(text);
-        note.textContent = "Copied — ready to paste into your other assistant.";
+        note.textContent = t("history.briefCopied");
       } catch (err) {
-        note.textContent = "Couldn't copy automatically.";
+        note.textContent = t("history.couldntCopy");
       }
       setTimeout(() => (note.textContent = ""), 3000);
     });
@@ -287,7 +289,13 @@ function renderBriefStatus(wrap) {
   const item = briefQueueItem(wrap.dataset.jobKey);
   const busy = item && item.state !== "failed";
   button.disabled = Boolean(busy);
-  button.textContent = !item ? button.dataset.label : item.state === "processing" ? "Summarizing…" : item.state === "pending" ? "Queued" : button.dataset.label;
+  button.textContent = !item
+    ? button.dataset.label
+    : item.state === "processing"
+      ? t("history.summarizingBtn")
+      : item.state === "pending"
+        ? t("history.queued")
+        : button.dataset.label;
   if (!item) {
     // Leave a transient message (e.g. "Copied") alone; clear only our own.
     if (note.dataset.queueStatus) {
@@ -301,10 +309,10 @@ function renderBriefStatus(wrap) {
   note.textContent = "";
   const items = latestQueue.items;
   if (item.state === "processing") {
-    note.textContent = "Summarizing now — the brief appears here when it's done.";
+    note.textContent = t("history.summarizingNow");
   } else if (item.state === "failed") {
-    note.textContent = `Couldn't summarize: ${item.error || "unknown error"} `;
-    const retry = el("button", null, "Retry");
+    note.textContent = `${t("history.summarizeFailed", { error: item.error || t("common.unknownError") })} `;
+    const retry = el("button", null, t("queue.retry"));
     retry.addEventListener("click", async () => {
       await queueMessage({ type: "JOB_FIT_QUEUE_RETRY", id: item.id });
       refreshQueue();
@@ -312,8 +320,8 @@ function renderBriefStatus(wrap) {
     note.appendChild(retry);
   } else if (latestQueue.state === "paused") {
     // The case that used to say "Running now" while nothing ran.
-    note.textContent = `Queued, but the queue is paused: ${latestQueue.pauseReason || "the local model was unreachable"} `;
-    const resume = el("button", null, "Resume queue");
+    note.textContent = `${t("history.queuedPaused", { reason: latestQueue.pauseReason || t("queue.unreachable") })} `;
+    const resume = el("button", null, t("queue.resumeQueue"));
     resume.addEventListener("click", async () => {
       await queueMessage({ type: "JOB_FIT_QUEUE_RESUME" });
       refreshQueue();
@@ -322,9 +330,7 @@ function renderBriefStatus(wrap) {
   } else {
     const ahead = items.filter((i) => i.state === "processing").length +
       items.slice(0, items.indexOf(item)).filter((i) => i.state === "pending").length;
-    note.textContent = ahead
-      ? `Queued — waiting for ${ahead} job${ahead === 1 ? "" : "s"} ahead of it. The brief appears here on its own.`
-      : "Queued — starting now. The brief appears here on its own.";
+    note.textContent = ahead ? t("history.briefWaiting", { count: ahead }) : t("history.briefStarting");
   }
 }
 
@@ -345,26 +351,28 @@ function renderQueuePill() {
   if (pill.hidden) return;
   pill.className = `queue-pill${paused ? " paused" : ""}`;
   pill.textContent = paused
-    ? `Queue paused · ${waiting} waiting`
-    : [running ? "Queue running" : "Queue", waiting ? `${waiting} waiting` : null].filter(Boolean).join(" · ");
+    ? `${t("queue.paused")} · ${t("queue.waitingCount", { count: waiting })}`
+    : [running ? t("queue.running") : t("queue.title"), waiting ? t("queue.waitingCount", { count: waiting }) : null]
+        .filter(Boolean)
+        .join(" · ");
 }
 
 // The model's reasoning for one evaluation. Shared by the current result and
 // the previous ones, so an old score reads exactly like a current one.
 function evaluationTags(parent, e) {
-  tagList(parent, "Matches", e.matches, "tag-green");
-  tagList(parent, "Gaps", e.gaps, "tag-amber");
-  tagList(parent, "Required gaps", e.required_gaps, "tag-red");
-  tagList(parent, "Seniority / comp check", e.seniority_flag ? [e.seniority_flag] : [], "tag-red");
-  tagList(parent, "Score cap applied", e.score_cap_reasons, "tag-amber");
+  tagList(parent, t("result.matches"), e.matches, "tag-green");
+  tagList(parent, t("result.gaps"), e.gaps, "tag-amber");
+  tagList(parent, t("result.requiredGaps"), e.required_gaps, "tag-red");
+  tagList(parent, t("result.seniority"), e.seniority_flag ? [e.seniority_flag] : [], "tag-red");
+  tagList(parent, t("result.scoreCap"), e.score_cap_reasons, "tag-amber");
   if (e.salary) {
     tagList(
       parent,
-      "Salary",
+      t("result.salary"),
       [
-        `Posting: ${e.salary.posting_stated}`,
-        `Market estimate: ${e.salary.estimated_market_range}`,
-        `vs. expectation: ${e.salary.vs_candidate_expectation}`,
+        `${t("result.salaryPosting")}: ${e.salary.posting_stated}`,
+        `${t("result.salaryMarket")}: ${e.salary.estimated_market_range}`,
+        `${t("result.salaryVs")}: ${JOB_FIT_EVALSTORE.salaryVerdictLabel(e.salary.vs_candidate_expectation)}`,
         e.salary.note,
       ],
       "tag-neutral"
@@ -380,19 +388,19 @@ function appendPreviousResults(body, record) {
   const previous = record.previous || [];
   if (!previous.length) return;
 
-  body.appendChild(el("h3", null, `Previous scores (${previous.length})`));
+  body.appendChild(el("h3", null, t("history.previousScores", { count: previous.length })));
   const list = el("div", "previous-list");
   previous.forEach((p) => {
     const item = document.createElement("details");
     item.className = "previous";
     const summary = document.createElement("summary");
     summary.appendChild(el("span", `qscore ${p.hardReject ? "red" : scoreClass(p.score)}`, String(p.score ?? "—")));
-    const verdict = p.hardReject ? "hard reject" : (p.evaluation && p.evaluation.verdict) || p.verdict;
+    const verdict = p.hardReject ? t("result.hardReject") : verdictLabel((p.evaluation && p.evaluation.verdict) || p.verdict);
     const parts = [
       verdict,
-      p.model || "unknown model",
+      p.model || t("brief.unknownModel"),
       p.evaluatedAt ? formatDate(p.evaluatedAt) : null,
-      p.profileFingerprint && p.profileFingerprint !== record.profileFingerprint ? "older profile" : null,
+      p.profileFingerprint && p.profileFingerprint !== record.profileFingerprint ? t("history.olderProfile") : null,
     ].filter(Boolean);
     summary.appendChild(el("span", "previous-meta", parts.join(" · ")));
     item.appendChild(summary);
@@ -402,10 +410,10 @@ function appendPreviousResults(body, record) {
       detail.appendChild(el("div", null, `${p.hardReject.label}: "${p.hardReject.matchedText}"`));
     } else if (p.evaluation) {
       if (p.evaluation.one_line) detail.appendChild(el("div", null, p.evaluation.one_line));
-      if (p.durationMs) detail.appendChild(el("div", "meta-line", `Scored in ${Math.round(p.durationMs / 1000)}s${usageText(p.usage)}`));
+      if (p.durationMs) detail.appendChild(el("div", "meta-line", `${t("history.scoredIn", { seconds: Math.round(p.durationMs / 1000) })}${usageText(p.usage)}`));
       evaluationTags(detail, p.evaluation);
     } else {
-      detail.appendChild(el("div", "meta-line", "No reasoning was stored for this run."));
+      detail.appendChild(el("div", "meta-line", t("history.noReasoning")));
     }
     item.appendChild(detail);
     list.appendChild(item);
@@ -419,10 +427,10 @@ function appendPreviousResults(body, record) {
 function buildEvaluateActions(record) {
   const wrap = el("div", "brief-actions");
   const note = el("span", "brief-note", "");
-  const label = record.score == null ? "Evaluate this job" : "Re-evaluate";
+  const label = record.score == null ? t("history.evaluateJob") : t("banner.reevaluate");
 
   if (!record.text) {
-    note.textContent = "No stored posting text for this job, so it can't be re-scored from here.";
+    note.textContent = t("history.noTextScore");
     wrap.appendChild(note);
     return wrap;
   }
@@ -431,11 +439,11 @@ function buildEvaluateActions(record) {
   button.addEventListener("click", async () => {
     const profile = store.profiles.find((p) => p.id === viewProfileId);
     if (!profile) {
-      note.textContent = "This profile no longer exists.";
+      note.textContent = t("history.profileGone");
       return;
     }
     button.disabled = true;
-    button.textContent = "Queueing…";
+    button.textContent = t("history.queueing");
     const response = await queueMessage({
       type: "JOB_FIT_ENQUEUE",
       priority: true,
@@ -445,16 +453,12 @@ function buildEvaluateActions(record) {
     if (!response || !response.ok) {
       button.disabled = false;
       button.textContent = label;
-      note.textContent = response && response.full
-        ? `Queue is full (${response.max}) — let some finish first.`
-        : "Couldn't queue it.";
+      note.textContent = response && response.full ? t("history.queueFull", { count: response.max }) : t("history.couldntQueue");
       return;
     }
 
-    button.textContent = response.duplicate ? "Already queued" : "Queued";
-    note.textContent =
-      (response.position > 1 ? "Running after the job in progress" : "Running now") +
-      " — the new score appears here on its own; the current one is kept as a previous result.";
+    button.textContent = response.duplicate ? t("history.alreadyQueued") : t("history.queued");
+    note.textContent = response.position > 1 ? t("history.reevalAfter") : t("history.reevalNow");
     refreshQueue();
   });
   wrap.appendChild(button);
@@ -466,7 +470,7 @@ function buildEvaluateActions(record) {
 // renamed profile is named correctly in a brief copied from an old job.
 function profileDisplayName(record) {
   const live = store.profiles.find((p) => p.id === record.profileId);
-  return (live && live.name) || record.profileName || "unknown";
+  return (live && live.name) || record.profileName || t("common.unknown");
 }
 
 // One line, not two. Once you've applied, "applied 3d ago" is the fact that
@@ -475,12 +479,12 @@ function buildWhen(record) {
   const when = el("div", "when");
   const activity = JOB_FIT_EVALSTORE.activityTs(record);
   if (record.appliedAt) {
-    when.textContent = `applied ${daysSince(record.appliedAt)}d ago`;
-    when.title = `Applied ${formatDate(record.appliedAt)} · evaluated ${formatDate(activity)}`;
+    when.textContent = t("history.appliedAgo", { count: daysSince(record.appliedAt) });
+    when.title = t("history.appliedTitle", { applied: formatDate(record.appliedAt), evaluated: formatDate(activity) });
   } else {
     const days = daysSince(activity);
-    when.textContent = days === 0 ? "today" : `${days}d ago`;
-    when.title = `Evaluated ${formatDate(activity)}`;
+    when.textContent = days === 0 ? t("history.today") : t("history.daysAgo", { count: days });
+    when.title = t("history.evaluatedTitle", { date: formatDate(activity) });
   }
   return when;
 }
@@ -493,23 +497,23 @@ function statusGroupOf(record) {
 // For pasting the job into a tracker, an email or a search box: position
 // first, then company, in one click.
 function buildCopyNameButton(record) {
-  const btn = el("button", "copy-name", "copy");
+  const btn = el("button", "copy-name", t("history.copyShort"));
   btn.type = "button";
   const text = [record.title, record.company].filter(Boolean).join(" — ");
-  btn.title = text ? `Copy "${text}"` : "Nothing to copy";
+  btn.title = text ? t("history.copyTitle", { text }) : t("history.nothingToCopy");
   btn.disabled = !text;
   btn.addEventListener("click", async (event) => {
     // The row header toggles the card; copying shouldn't.
     event.stopPropagation();
     try {
       await navigator.clipboard.writeText(text);
-      btn.textContent = "copied";
+      btn.textContent = t("history.copiedShort");
     } catch (err) {
-      btn.textContent = "failed";
+      btn.textContent = t("history.failedShort");
     }
     btn.classList.add("done");
     setTimeout(() => {
-      btn.textContent = "copy";
+      btn.textContent = t("history.copyShort");
       btn.classList.remove("done");
     }, 1500);
   });
@@ -517,7 +521,7 @@ function buildCopyNameButton(record) {
 }
 
 function duplicateSummary(d) {
-  const score = d.hardReject ? "hard reject" : d.score != null ? String(d.score) : "no score";
+  const score = d.hardReject ? t("result.hardReject") : d.score != null ? String(d.score) : t("result.noScore");
   const when = formatDate(JOB_FIT_EVALSTORE.activityTs(d));
   return `${JOB_FIT_EVALSTORE.siteLabel(d)} — ${score}, ${when}, ${JOB_FIT_EVALSTORE.statusLabel(d.status || "not_applied")}`;
 }
@@ -526,25 +530,18 @@ function duplicateSummary(d) {
 // know which one holds the status and notes that matter.
 function buildDuplicateSection(record, dups) {
   const box = el("div", "dup-box");
-  box.appendChild(el("h3", null, "Possible duplicate"));
-  box.appendChild(
-    el(
-      "div",
-      "meta-line",
-      `The same posting seems to be tracked from another site too (this one: ${JOB_FIT_EVALSTORE.siteLabel(record)}). ` +
-        "Keep the copy with your status and notes, and remove the other with “Delete this entry”."
-    )
-  );
+  box.appendChild(el("h3", null, t("history.possibleDuplicate")));
+  box.appendChild(el("div", "meta-line", t("history.duplicateExplain", { site: JOB_FIT_EVALSTORE.siteLabel(record) })));
   dups.forEach((d) => {
     const row = el("div", "dup-row");
     row.appendChild(el("span", "dup-what", duplicateSummary(d)));
     if (d.notes) row.appendChild(el("span", "dup-notes", `“${d.notes.slice(0, 60)}${d.notes.length > 60 ? "…" : ""}”`));
-    const show = el("button", null, "Show it");
+    const show = el("button", null, t("history.showIt"));
     show.type = "button";
     show.addEventListener("click", () => revealJob(d.jobKey));
-    const notDup = el("button", null, "Not a duplicate");
+    const notDup = el("button", null, t("history.notDuplicate"));
     notDup.type = "button";
-    notDup.title = "These are different openings — stop flagging this pair";
+    notDup.title = t("history.notDuplicateTitle");
     notDup.addEventListener("click", async () => {
       notDup.disabled = true;
       // Recorded on both sides, so deleting either one can't resurrect the flag
@@ -592,9 +589,9 @@ function renderDupChip() {
   chip.setAttribute("aria-pressed", String(groupFilter === "duplicates"));
   const open = el("button", "stale-open");
   open.type = "button";
-  open.title = "Jobs that look like the same posting tracked from two sites. Click to list them side by side.";
+  open.title = t("history.dupChipTitle");
   open.appendChild(el("strong", null, String(affected)));
-  open.appendChild(document.createTextNode(`possible duplicate${affected === 1 ? "" : "s"}`));
+  open.appendChild(document.createTextNode(t("history.dupChip", { count: affected })));
   open.addEventListener("click", () => {
     groupFilter = groupFilter === "duplicates" ? null : "duplicates";
     els.statusFilter.value = "all";
@@ -627,10 +624,10 @@ function renderJob(record) {
   const strong = el("strong");
   // Only the title text truncates; the copy button and badges after it stay
   // visible however long the title is.
-  strong.appendChild(el("span", "title-text", record.title || "(untitled posting)"));
+  strong.appendChild(el("span", "title-text", record.title || t("history.untitled")));
   strong.appendChild(buildCopyNameButton(record));
-  if (record.hardReject) strong.appendChild(el("span", "badge", "hard reject"));
-  else if (record.score == null) strong.appendChild(el("span", "badge badge-muted", "summary only"));
+  if (record.hardReject) strong.appendChild(el("span", "badge", t("result.hardReject")));
+  else if (record.score == null) strong.appendChild(el("span", "badge badge-muted", t("history.summaryOnly")));
   // Shown on every qualifying row, not only when the filter is on, so the
   // actionable jobs stand out while scanning the ordinary list.
   const reason = attentionReason(record);
@@ -639,8 +636,8 @@ function renderJob(record) {
   if (outOfDate) strong.appendChild(el("span", "badge badge-muted badge-stale", outOfDate));
   const dups = dupGroups.get(record.jobKey);
   if (dups) {
-    const badge = el("span", "badge badge-dup", "possible duplicate");
-    badge.title = dups.map((d) => `Also tracked from ${duplicateSummary(d)}`).join("\n");
+    const badge = el("span", "badge badge-dup", t("history.possibleDuplicateBadge"));
+    badge.title = dups.map((d) => t("history.alsoTracked", { what: duplicateSummary(d) })).join("\n");
     strong.appendChild(badge);
   }
   titleWrap.appendChild(strong);
@@ -675,7 +672,7 @@ function renderJob(record) {
 
   if (dups) body.appendChild(buildDuplicateSection(record, dups));
 
-  body.appendChild(el("h3", null, "Link"));
+  body.appendChild(el("h3", null, t("history.link")));
   const link = document.createElement("a");
   link.href = record.url;
   link.textContent = record.url;
@@ -684,32 +681,36 @@ function renderJob(record) {
   body.appendChild(link);
 
   if (record.hardReject) {
-    tagList(body, "Reject reason", [`${record.hardReject.label}: "${record.hardReject.matchedText}"`], "tag-red");
+    tagList(body, t("banner.rejectReason"), [`${record.hardReject.label}: "${record.hardReject.matchedText}"`], "tag-red");
   }
 
   const e = record.evaluation;
   if (e) {
-    body.appendChild(el("h3", null, "Verdict"));
+    body.appendChild(el("h3", null, t("history.verdict")));
     const headline = el("div", "verdict-line");
     headline.appendChild(el("strong", null, `${record.score ?? "—"}/100`));
-    if (e.verdict) headline.appendChild(el("span", "verdict-word", e.verdict));
-    if (record.hardReject) headline.appendChild(el("span", "badge", "hard reject"));
+    if (e.verdict) headline.appendChild(el("span", "verdict-word", verdictLabel(e.verdict)));
+    if (record.hardReject) headline.appendChild(el("span", "badge", t("result.hardReject")));
     body.appendChild(headline);
     if (e.one_line) body.appendChild(el("div", null, e.one_line));
     if (record.durationMs) {
       body.appendChild(
-        el("div", "meta-line", `Scored in ${Math.round(record.durationMs / 1000)}s${record.model ? ` by ${record.model}` : ""}${usageText(record.usage)}`)
+        el(
+          "div",
+          "meta-line",
+          `${record.model ? t("history.scoredInBy", { seconds: Math.round(record.durationMs / 1000), model: record.model }) : t("history.scoredIn", { seconds: Math.round(record.durationMs / 1000) })}${usageText(record.usage)}`
+        )
       );
     }
     evaluationTags(body, e);
-    tagList(body, "Warnings", record.softWarnings, "tag-amber");
-    tagList(body, "Domain flags", record.domainFlags, "tag-neutral");
+    tagList(body, t("history.warnings"), record.softWarnings, "tag-amber");
+    tagList(body, t("history.domainFlags"), record.domainFlags, "tag-neutral");
   }
 
   if (!record.hardReject) body.appendChild(buildEvaluateActions(record));
   appendPreviousResults(body, record);
 
-  body.appendChild(el("h3", null, "Condensed brief"));
+  body.appendChild(el("h3", null, t("history.condensedBrief")));
   // Shown exactly as it's copied — the posting AND every model's score and
   // reasoning. Showing only record.summary made the evaluations look missing
   // from the brief, when they were being appended at copy time.
@@ -717,20 +718,20 @@ function renderJob(record) {
     body.appendChild(el("div", "desc", JOB_FIT_EVALSTORE.briefText(record, profileDisplayName(record))));
     if (!record.lastEvaluatedAt && !(record.previous || []).length) {
       body.appendChild(
-        el("div", "meta-line", "No score yet under this profile — evaluate the job and its score and reasoning are added to the brief.")
+        el("div", "meta-line", t("history.noScoreYet"))
       );
     }
   }
   body.appendChild(buildBriefActions(record));
 
-  body.appendChild(el("h3", null, "Full posting as extracted"));
-  body.appendChild(el("div", "desc", record.text || "(not stored)"));
+  body.appendChild(el("h3", null, t("history.fullPosting")));
+  body.appendChild(el("div", "desc", record.text || t("history.notStored")));
 
-  body.appendChild(el("h3", null, "Notes"));
+  body.appendChild(el("h3", null, t("history.notes")));
   const notes = document.createElement("textarea");
   notes.className = "notes";
   notes.value = record.notes || "";
-  notes.placeholder = "Recruiter, comp discussed, follow-up dates…";
+  notes.placeholder = t("history.notesPlaceholder");
   body.appendChild(notes);
 
   const actions = el("div", "row-actions");
@@ -741,20 +742,20 @@ function renderJob(record) {
     markSelfWrite(record.jobKey);
     await JOB_FIT_EVALSTORE.update(viewProfileId, record.jobKey, { notes: notes.value });
     record.notes = notes.value;
-    savedMsg.textContent = "Notes saved";
+    savedMsg.textContent = t("history.notesSaved");
     setTimeout(() => (savedMsg.textContent = ""), 1800);
   });
   actions.appendChild(savedMsg);
 
-  const del = el("button", "danger", "Delete this entry");
+  const del = el("button", "danger", t("history.deleteEntry"));
   let armed = false;
   del.addEventListener("click", async () => {
     if (!armed) {
       armed = true;
-      del.textContent = "Click again to delete";
+      del.textContent = t("history.deleteAgain");
       setTimeout(() => {
         armed = false;
-        del.textContent = "Delete this entry";
+        del.textContent = t("history.deleteEntry");
       }, 4000);
       return;
     }
@@ -789,22 +790,22 @@ const SILENCE_DAYS = 14;
 const ATTENTION_RULES = [
   {
     test: (r) => r.status === "offer",
-    label: () => "offer — decide",
+    label: () => t("attention.offer"),
   },
   {
     test: (r) => r.status === "interviewing",
-    label: () => "interview scheduled",
+    label: () => t("attention.interview"),
   },
   {
     // Deliberately reuses the banner's green threshold: if the tool calls it a
     // strong match, and you haven't acted, that is the thing to act on.
     test: (r) => (!r.status || r.status === "not_applied") && r.score != null && r.score >= 75,
-    label: (r) => `strong match (${r.score}) — not applied`,
+    label: (r) => t("attention.strongMatch", { score: r.score }),
   },
   {
     // Only "applied": ghosted means you have already decided it went quiet.
     test: (r) => r.status === "applied" && r.appliedAt && daysSince(r.appliedAt) >= SILENCE_DAYS,
-    label: (r) => `no reply in ${daysSince(r.appliedAt)} days`,
+    label: (r) => t("attention.noReply", { count: daysSince(r.appliedAt) }),
   },
 ];
 
@@ -816,21 +817,22 @@ function attentionReason(record) {
 
 // The buckets a search actually moves through. Finer-grained filtering stays
 // on the Status dropdown; these answer "what should I do next?".
+// Labels are getters so they follow the interface language.
 const STATUS_GROUPS = {
-  none: { label: "Not applied", match: (r) => !r.status || r.status === "not_applied" },
-  waiting: { label: "Waiting", match: (r) => r.status === "applied" },
-  active: { label: "In play", match: (r) => r.status === "interviewing" || r.status === "offer" },
+  none: { get label() { return t("group.none"); }, match: (r) => !r.status || r.status === "not_applied" },
+  waiting: { get label() { return t("group.waiting"); }, match: (r) => r.status === "applied" },
+  active: { get label() { return t("group.active"); }, match: (r) => r.status === "interviewing" || r.status === "offer" },
   closed: {
-    label: "Closed",
+    get label() { return t("group.closed"); },
     match: (r) => r.status === "rejected" || r.status === "ghosted" || r.status === "withdrawn",
   },
 };
 
 const FILTERS = Object.assign(
   {
-    attention: { label: "Needs attention", match: (r) => Boolean(attentionReason(r)) },
-    stale: { label: "Out of date", match: (r) => Boolean(staleReason(r)) },
-    duplicates: { label: "Possible duplicates", match: (r) => dupGroups.has(r.jobKey) },
+    attention: { get label() { return t("group.attention"); }, match: (r) => Boolean(attentionReason(r)) },
+    stale: { get label() { return t("group.stale"); }, match: (r) => Boolean(staleReason(r)) },
+    duplicates: { get label() { return t("group.duplicates"); }, match: (r) => dupGroups.has(r.jobKey) },
   },
   STATUS_GROUPS
 );
@@ -839,13 +841,9 @@ const FILTERS = Object.assign(
 // other, so the list is never filtered by two controls at once.
 let groupFilter = null;
 
-const QUEUE_STATE_LABEL = {
-  pending: "waiting",
-  processing: "running",
-  done: "done",
-  failed: "failed",
-  cancelled: "cancelled",
-};
+function queueStateLabel(state) {
+  return JOB_FIT_I18N.has(`qstate.${state}`) ? t(`qstate.${state}`) : state;
+}
 
 async function queueMessage(message) {
   try {
@@ -882,11 +880,11 @@ function renderQueue(queue) {
   const failedCount = items.filter((i) => i.state === "failed").length;
   const running = items.find((i) => i.state === "processing");
   document.getElementById("queueTitle").textContent = [
-    "Queue",
-    running ? "running" : null,
-    `${waiting} waiting`,
-    doneCount ? `${doneCount} done` : null,
-    failedCount ? `${failedCount} failed` : null,
+    t("queue.title"),
+    running ? t("qstate.processing") : null,
+    t("queue.waitingCount", { count: waiting }),
+    doneCount ? t("queue.doneCount", { count: doneCount }) : null,
+    failedCount ? t("queue.failedCount", { count: failedCount }) : null,
   ]
     .filter(Boolean)
     .join(" · ");
@@ -895,7 +893,7 @@ function renderQueue(queue) {
   pauseEl.hidden = !paused;
   resumeBtn.hidden = !paused;
   if (paused) {
-    pauseEl.textContent = `Paused: ${queue.pauseReason || "the local model was unreachable"} — switching the model or endpoint in the popup resumes it automatically; for anything else, fix it and hit Resume. Nothing was lost.`;
+    pauseEl.textContent = t("queue.pausedExplain", { reason: queue.pauseReason || t("queue.unreachable") });
   }
 
   // The list runs oldest to newest, so new work lands at the bottom: follow it
@@ -911,9 +909,9 @@ function renderQueue(queue) {
   itemsEl.innerHTML = "";
   items.forEach((item) => {
     const row = el("div", "qrow");
-    row.appendChild(el("span", `qstate ${item.state}`, QUEUE_STATE_LABEL[item.state] || item.state));
+    row.appendChild(el("span", `qstate ${item.state}`, queueStateLabel(item.state)));
     row.appendChild(
-      el("span", "qtitle", `${item.title || item.url || item.jobKey}${item.kind === "summarize" ? "  (brief)" : ""}`)
+      el("span", "qtitle", `${item.title || item.url || item.jobKey}${item.kind === "summarize" ? `  ${t("queue.briefTag")}` : ""}`)
     );
 
     // Read from the record rather than stored on the queue item: the score
@@ -927,7 +925,7 @@ function renderQueue(queue) {
     }
 
     if (item.state === "failed") {
-      const retry = el("button", null, "Retry");
+      const retry = el("button", null, t("queue.retry"));
       retry.addEventListener("click", async () => {
         await queueMessage({ type: "JOB_FIT_QUEUE_RETRY", id: item.id });
         refreshQueue();
@@ -935,7 +933,7 @@ function renderQueue(queue) {
       row.appendChild(retry);
     }
     if (item.state === "pending" || item.state === "processing") {
-      const cancel = el("button", null, "Cancel");
+      const cancel = el("button", null, t("common.cancel"));
       cancel.addEventListener("click", async () => {
         await queueMessage({ type: "JOB_FIT_QUEUE_CANCEL", id: item.id });
         refreshQueue();
@@ -1072,14 +1070,10 @@ function render() {
   els.list.innerHTML = "";
   if (!records.length) {
     els.list.appendChild(
-      el(
-        "div",
-        "empty",
-        "Nothing tracked under this profile yet. Open a job posting and hit “Evaluate this tab” or “Summarize this tab”."
-      )
+      el("div", "empty", t("history.empty"))
     );
   } else if (!visible.length) {
-    els.list.appendChild(el("div", "empty", "No jobs match these filters."));
+    els.list.appendChild(el("div", "empty", t("history.noMatches")));
   } else {
     shown.forEach((record) => els.list.appendChild(renderJob(record)));
   }
@@ -1090,7 +1084,9 @@ function render() {
 
   const profileName = (store.profiles.find((p) => p.id === viewProfileId) || {}).name || "";
   els.subtitle.textContent =
-    visible.length === records.length ? profileName : `${profileName} — showing ${visible.length} of ${records.length}`;
+    visible.length === records.length
+      ? profileName
+      : t("history.showingOf", { name: profileName, shown: visible.length, total: records.length });
 }
 
 function goToPage(n) {
@@ -1112,12 +1108,12 @@ function renderPager(host, total, pages, { withSize }) {
 
   if (withSize) {
     const label = el("label", "per-page");
-    label.appendChild(document.createTextNode("Per page "));
+    label.appendChild(document.createTextNode(`${t("history.perPage")} `));
     const select = document.createElement("select");
     PAGE_SIZES.forEach((n) => {
       const opt = document.createElement("option");
       opt.value = String(n);
-      opt.textContent = n ? String(n) : "All";
+      opt.textContent = n ? String(n) : t("history.all");
       select.appendChild(opt);
     });
     select.value = String(ui.pageSize);
@@ -1136,12 +1132,12 @@ function renderPager(host, total, pages, { withSize }) {
   if (pages > 1) {
     const prev = el("button", null, "‹");
     prev.type = "button";
-    prev.title = "Previous page";
+    prev.title = t("history.prevPage");
     prev.disabled = page === 0;
     prev.addEventListener("click", () => goToPage(page - 1));
     const next = el("button", null, "›");
     next.type = "button";
-    next.title = "Next page";
+    next.title = t("history.nextPage");
     next.disabled = page >= pages - 1;
     next.addEventListener("click", () => goToPage(page + 1));
     pager.appendChild(prev);
@@ -1159,8 +1155,8 @@ function renderFunnel() {
   const chips = [
     // First, and only when there is something in it: an empty "needs attention"
     // is the best possible state and should not occupy the eye.
-    ...(attention ? [{ key: "attention", label: "Needs attention", count: attention, urgent: true }] : []),
-    { key: null, label: "All", count: records.length },
+    ...(attention ? [{ key: "attention", label: t("group.attention"), count: attention, urgent: true }] : []),
+    { key: null, label: t("history.all"), count: records.length },
     ...Object.entries(STATUS_GROUPS).map(([key, group]) => ({
       key,
       label: group.label,
@@ -1197,13 +1193,25 @@ function csvCell(value) {
 
 function exportCsv() {
   const rows = [
-    ["Title", "Company", "Location", "Score", "Verdict", "Hard reject", "Status", "Evaluated", "Applied", "URL", "Notes"],
+    [
+      t("csv.title"),
+      t("csv.company"),
+      t("csv.location"),
+      t("csv.score"),
+      t("csv.verdict"),
+      t("csv.hardReject"),
+      t("csv.status"),
+      t("csv.evaluated"),
+      t("csv.applied"),
+      "URL",
+      t("csv.notes"),
+    ],
     ...visibleRecords().map((r) => [
       r.title,
       r.company,
       r.location,
       r.score == null ? "" : r.score,
-      r.verdict || (r.summary ? "summary only" : ""),
+      r.verdict ? (r.hardReject ? t("result.hardReject") : verdictLabel(r.verdict)) : r.summary ? t("history.summaryOnly") : "",
       r.hardReject ? r.hardReject.matchedText : "",
       JOB_FIT_EVALSTORE.statusLabel(r.status || "not_applied"),
       r.lastEvaluatedAt ? new Date(r.lastEvaluatedAt).toISOString().slice(0, 10) : "",
@@ -1281,10 +1289,7 @@ async function exportData() {
   link.click();
   URL.revokeObjectURL(url);
 
-  showBackupStatus(
-    `Backed up ${payload.profiles.length} profile(s) and ${payload.records.length} tracked job(s). ` +
-      `Keep the file somewhere outside this folder — uninstalling the extension erases its storage.`
-  );
+  showBackupStatus(t("backup.done", { profiles: payload.profiles.length, jobs: payload.records.length }));
 }
 
 // Everything here comes from a file on disk, so it is treated as untrusted:
@@ -1295,16 +1300,16 @@ async function importData(file) {
   try {
     payload = JSON.parse(await file.text());
   } catch (err) {
-    showBackupStatus(`That file isn't valid JSON: ${err.message}`, true);
+    showBackupStatus(t("backup.badJson", { error: err.message }), true);
     return;
   }
 
   if (!payload || payload.format !== BACKUP_FORMAT) {
-    showBackupStatus("That doesn't look like a JobFit backup file.", true);
+    showBackupStatus(t("backup.notBackup"), true);
     return;
   }
   if (payload.version > BACKUP_VERSION) {
-    showBackupStatus(`That backup was written by a newer version (v${payload.version}).`, true);
+    showBackupStatus(t("backup.newer", { version: payload.version }), true);
     return;
   }
 
@@ -1351,9 +1356,9 @@ async function importData(file) {
   let settingsNote = "";
   if (payload.lmStudio && !(current.lmStudio && current.lmStudio.model)) {
     await chrome.storage.local.set({ lmStudio: payload.lmStudio });
-    settingsNote = "\nLM Studio settings restored.";
+    settingsNote = `\n${t("backup.lmRestored")}`;
   } else if (payload.lmStudio) {
-    settingsNote = "\nLM Studio settings left alone — you already have a model configured.";
+    settingsNote = `\n${t("backup.lmKept")}`;
   }
   // Only the OpenAI model choice is in a backup, never the key, and it's
   // restored only if none is set here. The provider switch itself is left as
@@ -1363,14 +1368,14 @@ async function importData(file) {
     await chrome.storage.local.set({
       openai: { ...currentOpenAi, model: String(payload.openai.model), reasoningEffort: String(payload.openai.reasoningEffort || "") },
     });
-    settingsNote += "\nOpenAI model choice restored (the API key is never in a backup).";
+    settingsNote += `\n${t("backup.oaRestored")}`;
   }
 
   const lines = [
-    `Restored from ${payload.exportedAt ? payload.exportedAt.slice(0, 10) : "backup"}.`,
-    `Profiles: ${profilesAdded} added${profilesSkipped ? `, ${profilesSkipped} already here` : ""}.`,
-    `Jobs: ${added} added${skipped ? `, ${skipped} already here` : ""}${invalid ? `, ${invalid} unusable` : ""}.`,
-    "Nothing existing was overwritten.",
+    t("backup.restoredFrom", { date: payload.exportedAt ? payload.exportedAt.slice(0, 10) : "—" }),
+    t("backup.profilesLine", { added: profilesAdded, skipped: profilesSkipped }),
+    t("backup.jobsLine", { added, skipped, invalid }),
+    t("backup.nothingOverwritten"),
   ];
   showBackupStatus(lines.join("\n") + settingsNote);
 
@@ -1401,8 +1406,8 @@ function staleReason(record) {
   if (record.score == null || !canReevaluate(record) || !current.fingerprint) return null;
   const byModel = (record.model || "") !== current.model;
   const byProfile = record.profileFingerprint !== current.fingerprint;
-  if (byModel) return record.model ? `scored by ${record.model}` : "scored by another model";
-  if (byProfile) return "older profile";
+  if (byModel) return record.model ? t("history.scoredBy", { model: record.model }) : t("history.scoredByAnother");
+  if (byProfile) return t("history.olderProfile");
   return null;
 }
 
@@ -1425,17 +1430,15 @@ function renderStaleChip() {
 
   const byModel = stale.some((r) => (r.model || "") !== current.model);
   const byProfile = stale.some((r) => r.profileFingerprint !== current.fingerprint);
-  const why = [byProfile && "the profile has changed", byModel && "a different model is configured"]
-    .filter(Boolean)
-    .join(" and ");
+  const why = JOB_FIT_I18N.list([byProfile && t("history.staleWhyProfile"), byModel && t("history.staleWhyModel")].filter(Boolean));
 
   const chip = el("div", "stale-chip");
   chip.setAttribute("aria-pressed", String(groupFilter === "stale"));
   const open = el("button", "stale-open");
   open.type = "button";
-  open.title = `Scores that aren't comparable with the rest because ${why}. Click to list them.`;
+  open.title = t("history.staleTitle", { why });
   open.appendChild(el("strong", null, String(stale.length)));
-  open.appendChild(document.createTextNode("out of date"));
+  open.appendChild(document.createTextNode(t("history.outOfDate"))); 
   open.addEventListener("click", () => {
     groupFilter = groupFilter === "stale" ? null : "stale";
     els.statusFilter.value = "all";
@@ -1444,8 +1447,8 @@ function renderStaleChip() {
   });
   const dismiss = el("button", "stale-dismiss", "×");
   dismiss.type = "button";
-  dismiss.title = "Dismiss — comes back if more jobs go out of date";
-  dismiss.setAttribute("aria-label", "Dismiss out-of-date notice");
+  dismiss.title = t("history.staleDismissTitle");
+  dismiss.setAttribute("aria-label", t("history.staleDismissAria"));
   dismiss.addEventListener("click", () => {
     ui.staleDismissed = staleSignature(stale);
     saveUi();
@@ -1461,11 +1464,11 @@ function buildSelectBox(record) {
   const box = document.createElement("input");
   box.type = "checkbox";
   box.className = "select-box";
-  box.title = "Select for re-evaluation";
+  box.title = t("history.selectTitle");
   if (!canReevaluate(record)) {
     // Kept in the row, disabled, so the columns still line up.
     box.disabled = true;
-    box.title = record.hardReject ? "Hard rejects aren't re-scored" : "No stored posting text";
+    box.title = record.hardReject ? t("history.selectRejected") : t("history.selectNoText");
     return box;
   }
   box.checked = selectedKeys.has(record.jobKey);
@@ -1499,7 +1502,7 @@ function renderToolbar(visible, shown) {
   const all = document.createElement("input");
   all.type = "checkbox";
   all.className = "select-all";
-  all.title = "Select this page for re-evaluation";
+  all.title = t("history.selectPage");
   all.disabled = !pageSelectable.length;
   all.checked = pageSelectable.length > 0 && pageSelected === pageSelectable.length;
   all.indeterminate = pageSelected > 0 && pageSelected < pageSelectable.length;
@@ -1513,15 +1516,20 @@ function renderToolbar(visible, shown) {
   if (!count) {
     const from = ui.pageSize ? page * ui.pageSize + 1 : 1;
     const to = from + shown.length - 1;
-    const noun =
-      groupFilter === "stale" ? "out-of-date job" : groupFilter === "duplicates" ? "possible duplicate job" : "job";
-    const what = ` ${noun}${visible.length === 1 ? "" : "s"}`;
+    const noun = groupFilter === "stale" ? "countStale" : groupFilter === "duplicates" ? "countDup" : "countJobs";
+    const what = t(`history.${noun}`, { count: visible.length });
     host.appendChild(
-      el("span", "count", shown.length === visible.length ? `${visible.length}${what}` : `${from}–${to} of ${visible.length}${what}`)
+      el(
+        "span",
+        "count",
+        shown.length === visible.length
+          ? `${visible.length} ${what}`
+          : t("history.rangeOf", { from, to, total: visible.length, what })
+      )
     );
     // The action the old full-width notice carried, now where the list is.
     if (groupFilter === "stale" && allSelectable.length) {
-      const pick = el("button", null, `Select all ${allSelectable.length}`);
+      const pick = el("button", null, t("history.selectAllN", { count: allSelectable.length }));
       pick.type = "button";
       pick.addEventListener("click", () => {
         allSelectable.forEach((r) => selectedKeys.add(r.jobKey));
@@ -1532,12 +1540,12 @@ function renderToolbar(visible, shown) {
     return;
   }
 
-  host.appendChild(el("span", "count selected", `${count} selected`));
-  const run = el("button", "primary", `Re-evaluate ${count}`);
+  host.appendChild(el("span", "count selected", t("history.selectedCount", { count })));
+  const run = el("button", "primary", t("history.reevaluateN", { count }));
   run.type = "button";
   run.addEventListener("click", () => requeueSelected(run));
   host.appendChild(run);
-  const clear = el("button", null, "Clear");
+  const clear = el("button", null, t("history.clear"));
   clear.type = "button";
   clear.addEventListener("click", () => {
     selectedKeys.clear();
@@ -1548,7 +1556,7 @@ function renderToolbar(visible, shown) {
   // Offered once this page is fully ticked and there's more beyond it.
   const unselectedElsewhere = allSelectable.filter((r) => !selectedKeys.has(r.jobKey)).length;
   if (pageSelected === pageSelectable.length && unselectedElsewhere) {
-    const more = el("button", "link", `Select all ${allSelectable.length} matching`);
+    const more = el("button", "link", t("history.selectAllMatching", { count: allSelectable.length }));
     more.type = "button";
     more.addEventListener("click", () => {
       allSelectable.forEach((r) => selectedKeys.add(r.jobKey));
@@ -1566,7 +1574,7 @@ function evaluateItem(record, profile, fingerprint) {
     jobKey: record.jobKey,
     profileId: profile.id,
     profileName: profile.name,
-    profileSnapshot: { profile: profile.profile, expectedSalary: profile.expectedSalary, fingerprint },
+    profileSnapshot: { profile: profile.profile, expectedSalary: profile.expectedSalary, jobSearch: profile.jobSearch, fingerprint },
     postingText: record.text,
     title: record.title,
     company: record.company,
@@ -1585,7 +1593,7 @@ async function requeueSelected(btn) {
   const profile = store.profiles.find((p) => p.id === viewProfileId);
   if (!profile) return;
   btn.disabled = true;
-  btn.textContent = "Queueing…";
+  btn.textContent = t("history.queueing");
 
   const fingerprint = JOB_FIT_PROFILES.fingerprint(profile);
   const chosen = records.filter((r) => selectedKeys.has(r.jobKey) && canReevaluate(r));
@@ -1607,11 +1615,7 @@ async function requeueSelected(btn) {
   }
 
   const left = selectedKeys.size;
-  showBackupStatus(
-    full
-      ? `Queued ${queued}. The queue is full, so ${left} ${left === 1 ? "is" : "are"} still selected — run it again once some finish.`
-      : `Queued ${queued} job${queued === 1 ? "" : "s"} for re-scoring. Each one's current result is kept as a previous score.`
-  );
+  showBackupStatus(full ? t("history.bulkQueuedFull", { queued, count: left }) : t("history.bulkQueued", { count: queued }));
   render();
   refreshQueue();
 }
@@ -1628,7 +1632,7 @@ async function showProbeReport() {
   box.hidden = false;
 
   if (!samples.length) {
-    box.textContent = "No pages sampled yet. Evaluate a few postings and check back.";
+    box.textContent = t("history.probeEmpty");
     return;
   }
 
@@ -1679,6 +1683,12 @@ async function loadProfile(profileId) {
 }
 
 async function init() {
+  await JOB_FIT_I18N.load();
+  JOB_FIT_I18N.translatePage();
+  document.title = `${t("history.title")} — JobFit`;
+  // Another page switched the language: this one follows on its next load
+  // rather than half-translating itself now.
+  JOB_FIT_I18N.watch(() => location.reload());
   JOB_FIT_EVALSTORE.STATUSES.forEach(({ value, label }) => {
     const opt = document.createElement("option");
     opt.value = value;
@@ -1687,7 +1697,7 @@ async function init() {
   });
   const all = document.createElement("option");
   all.value = "all";
-  all.textContent = "All statuses";
+  all.textContent = t("history.allStatuses");
   els.statusFilter.insertBefore(all, els.statusFilter.firstChild);
   els.statusFilter.value = "all";
 

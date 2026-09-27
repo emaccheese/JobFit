@@ -1,0 +1,11 @@
+{
+  "extName": {
+    "message": "JobFit"
+  },
+  "extDescription": {
+    "message": "Evaluates a job posting on the current tab against a stored candidate profile."
+  },
+  "cmdEvaluate": {
+    "message": "Evaluate the job posting in this tab"
+  }
+}

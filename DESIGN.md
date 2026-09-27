@@ -30,7 +30,7 @@ A Chrome/Edge extension that reads a job posting on the current tab, applies det
     - **Reasoning effort per model.** `reasoningEffortsFor()` returns the levels a model accepts: GPT-5 adds `minimal`, o-series starts at `low`, other models take none. The menu shows only those levels, and `effectiveReasoningEffort()` maps a saved preference onto them, so a switch of model never sends a value the model rejects.
     - **`max_output_tokens`** comes from a user setting (default 4,000, clamped to 500–64,000) rather than a hard-coded 16,000.
     - **Usage** from each reply (`usage.input_tokens`/`output_tokens`, including reasoning and cached tokens, or chat-completions' `prompt_tokens`/`completion_tokens`) is stored on the record and summed per local day and provider in `usageByDay` (62 days kept). A reply that fails to parse still counts, because it was still billed.
-    - **Reset** (next to the budget field) starts today's budget count from zero, for example after switching to a model or effort level that costs a different amount per request. It stores `openaiBudgetReset: { day, tokens }`, a starting point, rather than deleting usage, so the day's and month's totals stay accurate. A reset from another day is ignored. Resetting also resumes a queue that paused because the budget ran out.
+    - **Reset** (next to the budget field) starts today's budget count from zero, for example after switching to a model or effort level that costs a different amount per request. It stores `openaiBudgetReset: { day, tokens }`, a starting point, rather than deleting usage, so the day's and month's totals stay accurate. A reset from another day is ignored. Resetting also resumes a queue that paused because the budget ran out. That's decided by the queue's `pauseFailure` (`"budget"`), not by the pause message, which is in the user's language.
     - **The daily budget** is checked before each OpenAI request. When it's spent, the request fails as `budget`, which pauses the queue like a connection error; raising the budget resumes it. It's measured in tokens, not dollars, because prices differ per model and change. The popup turns the budget into a number of requests at the month's average.
   - **Tiers, not raw model ids** (`JOB_FIT_DEFAULTS.openaiTiers`): Economy gpt-6-luna, **Balanced gpt-6-sol (default)**, Best gpt-6-astra, plus Custom (any chat model on the key).
     - Balanced is the default because scoring is a judgment task: required vs preferred, "or" lists, domain flags. At about $1 per 100 evaluations, a stronger model is worth more than the savings of the cheapest.
@@ -71,8 +71,13 @@ job-fit-evaluator/
 ├── content.js           # DOM extraction + banner injection
 ├── content.css          # banner styles
 ├── defaults.js          # JOB_FIT_DEFAULTS — shipped defaults
+├── i18n.js              # JOB_FIT_I18N — interface language, t(), dates/numbers
+├── locales/             # en.js, es.js, fr.js, pt.js — every visible string
+├── _locales/            # Chrome's own name/description/shortcut label only
+├── geo.js               # JOB_FIT_GEO — countries, regions, location parsing/detection
 ├── profiles.js          # multi-profile store + migration
 ├── keywords.js          # screening categories + phrase→regex compiler
+├── screening.js         # Layer 1, shared by the page and the queue; per-country gates
 ├── queue.js             # serial work queue (service worker)
 ├── evalstore.js         # evaluated-job history records
 ├── jobkey.js            # canonical job identity per page
@@ -131,6 +136,99 @@ job-fit-evaluator/
 Run regex against the extracted text. On any **hard reject** hit, show a red banner with the matched phrase and **stop** — do not call the local model.
 
 ### Hard rejects
+
+> **Sponsorship phrasings widened** (2026-09-26). A GE HealthCare posting said
+> "We will not sponsor individuals for employment visas, now or in the future",
+> which matched none of the three original patterns. It was scored (78 by one
+> model) and sponsorship only surfaced in the reasoning. The category now covers
+> "will/do/does not sponsor", "cannot/unable to sponsor", "not (currently)
+> offering/providing … sponsorship", "sponsorship is not available/provided",
+> "not eligible for sponsorship", and "without the need for / requiring …
+> sponsorship". These were tested against 15 refusals that must match and 8
+> phrasings that must not.
+> - **"Now or in the future" is deliberately not a pattern on its own:** it's
+>   also the application question "Will you now or in the future require
+>   sponsorship?".
+> - **"Only employ those who are legally authorized to work" became a Warning,
+>   not a reject** (the `workauth` category). Many employers write it and still
+>   sponsor or transfer existing visas.
+>
+> Improvements to a category reach every profile that has it ticked. The new
+> Warnings category is ticked by default only for new profiles.
+>
+> **Re-evaluations are screened too** (same day). Layer 1 used to run only in
+> the page script. A re-evaluation queued from Tracked jobs sent the saved text
+> straight to the model, so a rule added or fixed later never caught a job
+> already saved, and on a paid provider a dead posting was paid for again.
+> - The screening helpers moved from `content.js` into a shared `screening.js`
+>   (`JOB_FIT_SCREEN`), used by the page and by `runQueuedEvaluation`.
+> - The queue screens with the profile's **current** keyword settings. A match
+>   is filed as a hard reject (score 0, no model call), and the job's previous
+>   score moves to its earlier results as usual.
+> - A job that passes gets its domain flags and warnings recomputed rather than
+>   reused from when it was first saved.
+> - A job whose profile was deleted falls back to the stored flags.
+
+### Per-country rules and four languages (2026-09-27)
+
+A profile now says where the person lives and, for each country they apply
+in, whether they are a **citizen or permanent resident**, **already allowed to
+work** (permit or visa), or **would need sponsorship** (`profile.jobSearch`,
+set in the wizard). Screening reads the posting's own location with
+`JOB_FIT_GEO.postingPlace()` and applies the categories that depend on it only
+where they apply to this person:
+
+| `gate` | Categories | Fires when |
+|---|---|---|
+| `sponsorship` | sponsorship; `workauth` warning | you'd need sponsorship in the posting's country |
+| `citizenship` | citizenship, clearance | you're not a citizen/PR of the posting's country |
+| `usPerson` | ITAR; export-control warning | you're not a US citizen/PR, wherever the job is |
+
+- **"No sponsorship" on a Tijuana posting no longer rejects it for a Mexican
+  citizen**; on a San Diego posting it still does for someone who needs a US
+  visa. That was the reason for the whole change: adding countries without it
+  would have made screening wrong for everyone outside the US.
+- **Unknown country → warning, not reject.** When the posting doesn't say where
+  it is and the rule applies in some of your target countries but not others,
+  the match is shown as a warning that says so. It's never silently dropped.
+- **No answers → the old behaviour.** A profile with no work-authorization
+  answers fires every ticked category everywhere, exactly as before.
+- **A country with no answer counts as needing sponsorship and not being a
+  citizen** — the cautious reading.
+- **Location parsing** reads the extractor's location, then JSON-LD, then a
+  labelled "Location:/Ubicación:/Localisation:" line in the posting. Names are
+  matched longest-first ("New Mexico" before "Mexico", "Baja California Sur"
+  before "Baja California"); two-letter US/Canadian codes only after a comma
+  ("Austin, TX"); Brazilian state codes only when the text says Brazil, because
+  PA, MA, SC, MS and MT collide with US states. Country names in all four
+  languages come from `Intl.DisplayNames`.
+
+Every category's patterns now include **Spanish, French and Portuguese**
+phrasings, and all of them run on every posting whatever the interface
+language: a Spanish posting saying "no ofrecemos patrocinio de visa" has to be
+caught for someone browsing in English. Tested against 38 must-match and
+must-not-match phrasings across the four languages.
+
+**Computed warnings** have no patterns (`computed: true` in `keywords.js`); they
+come from the profile and the posting's place: *outside your target countries*
+(skipped for remote roles), *needs you to live somewhere else* (on-site/hybrid
+outside your country or region when you won't relocate, or remote but
+"residents only"), *an arrangement you didn't ask for*, *hours in a far time
+zone* (named US zones in the same sentence as "hours/overlap/time zone", 3+
+hours from yours; bare "PT"/"ET" are ignored because they're as often
+part-time), and *a language you don't speak* (a required language, not one
+marked as a plus).
+
+**New categories reach existing profiles once.** Each keyword config records
+the categories it has been shown (`seen`). A category added later is ticked
+once for configs that haven't seen it, and a category someone unticked stays
+unticked. Configs saved before `seen` existed count as having seen the original
+ten. `fingerprint()` ignores `seen`, the computed warnings (they never change a
+score), an implicit "year" salary period, and unanswered `jobSearch`, so an
+untouched older profile keeps its fingerprint and its saved scores aren't all
+marked out of date by the upgrade.
+
+The original list (see `keywords.js` for the current patterns):
 ```
 /without (current or future )?sponsorship/i
 /not (able|available) to sponsor/i
@@ -421,16 +519,34 @@ install (`onInstalled`, `reason === "install"` only, never on update), from
 
 - **A tab, not the popup.** Same reason as the history page: the popup destroys
   itself on blur, and the CV step asks you to paste from another window.
-- **Model first.** Drafting the profile, suggesting salary and suggesting domain
+- **Order: welcome → language and location → about you (name, countries, work
+  authorization) → work preferences → model → profile → salary → rejects →
+  warnings → domain flags → review.** Location comes first because it pre-fills
+  the next two steps: your home country is pre-ticked with "allowed to work"
+  selected (shown, so it's confirmed rather than assumed), and the languages you
+  work in start from that country's language plus the interface language.
+- **Location is detected, never assumed.** `JOB_FIT_GEO.detectHome()` reads the
+  browser's time zone (then the region in its language tag). No permission
+  prompt, no IP lookup, nothing sent anywhere. The wizard offers the guess with
+  Yes / Change / Skip. The model is told the city and region only if
+  `shareLocation` is on (off by default); countries, work authorization and
+  preferences are always included because they don't identify anyone.
+- **Language switches reload the page** on the same step (`?step=`), because
+  every string is drawn at load. A new profile that has no name yet isn't in
+  storage, so it rides the reload in `sessionStorage`.
+- **Model before the CV.** Drafting the profile, suggesting salary and suggesting domain
   flags all need the model, so it's checked before anything that depends on it.
   The model list comes from `/v1/models`, which removes the "model name isn't
   loaded" failure by construction. For a second profile the step collapses to
   one line, because the model is global.
-- **Hard rejects are derived from answers, not ticked cold.** Each
-  work-authorization answer owns a fixed set of reject categories
-  (`ANSWER_RULES` in `wizard.js`) and only re-ticks those, so a category you
-  changed by hand survives edits to unrelated answers. Each tick shows the
-  answer that caused it.
+- **Hard rejects are derived from answers, not ticked cold.** Each rule in
+  `AUTH_RULES` (`wizard.js`) owns a fixed set of reject categories and is
+  recomputed when the answers change; only rules whose outcome changed re-tick
+  or untick their categories, so a category you changed by hand survives edits
+  to unrelated answers. Each tick says why, per country ("Because you'd need
+  sponsorship in the United States"). Older profiles' US-only answers
+  (`setupAnswers.citizen/sponsorship/relocate`) seed the per-country answers
+  the first time.
 - **The profile draft is assembled in code.** The model returns one JSON field
   per template section and `assembleDraftProfile()` writes the text, so the
   labels the evaluator depends on (`Gaps:`, `Work authorisation:`, `Target:`)
@@ -462,6 +578,48 @@ The shipped default for the first profile, kept under ~400 words:
 (See `defaults.js` for the shipped template. A real profile lives in
 chrome.storage.local and is never committed.)
 ```
+
+---
+
+## Languages (2026-09-27)
+
+Everything JobFit shows is translated into English, Spanish (Latin American),
+French (Canadian-friendly) and Brazilian Portuguese — the languages of the
+Americas.
+
+- **Why not `chrome.i18n`:** it always follows the browser and can't be switched
+  from inside the extension. Messages live in `locales/<code>.js` as plain
+  objects (scripts, so they load the same way in pages, content scripts and the
+  service worker). `chrome.i18n` / `_locales/` is kept only for what Chrome
+  shows on its own pages: the name, description and shortcut label.
+- **The setting** is `uiLanguage` in storage: `"auto"` (follow the browser,
+  falling back to English) or a code. It's changed in the wizard's first step,
+  its sidebar, and the popup's header. Pages reload to switch; the service
+  worker and open banners follow via `storage.onChanged`.
+- **`t(key, vars)`** fills `{placeholders}` and picks plural forms with
+  `Intl.PluralRules`, so French treats 0 as singular. Missing keys fall back to
+  English, then to the key. Dates, numbers, country and language names use
+  `Intl` in the chosen locale (`es-MX`, `fr-CA`, `pt-BR` unless the browser
+  names a better regional form).
+- **Job pages only get what they need:** `jobFitContentFiles()` injects English
+  plus the language in use, not all four.
+- **The model's prompts stay in English**, which models follow most reliably.
+  Only what they write back follows the user: `one_line`, the location and the
+  salary text, the brief's fields, the profile draft (with section labels in
+  the user's language) and the salary reasoning. `matches`, `gaps` and
+  `required_gaps` stay in the posting's own words, because they're phrases from
+  it and the domain-flag score cap compares them with the flags found in it.
+- **Profile section labels are recognised in every language** (`labelPattern()`
+  in `wizard.js`), so a profile drafted in Spanish and one written in English
+  both pass the meter and the Gaps check.
+- **Salaries have a period.** Each currency is `{ min, max, period }` with
+  `period` one of year/month/hour; most of Latin America quotes monthly pay.
+  Comparisons convert to annual (×12, ×2080) because the model reports annual
+  figures. Figures saved before this have no period and are read as annual.
+- **`node tools/check-locales.js`** checks that every key the code and HTML use
+  exists in English, that the other three catalogs have exactly the English
+  keys, and that each translation uses the same `{placeholders}`. Run it after
+  adding or renaming a string; keys built at runtime are listed in the script.
 
 ---
 

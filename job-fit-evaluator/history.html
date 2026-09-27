@@ -269,15 +269,15 @@
 </head>
 <body>
   <div class="wrap">
-    <h1>Tracked jobs</h1>
+    <h1 data-i18n="history.title">Tracked jobs</h1>
     <div class="sub" id="subtitle"></div>
 
     <div id="queuePanel" class="queue" hidden>
       <div class="queue-head">
-        <strong id="queueTitle">Queue</strong>
+        <strong id="queueTitle" data-i18n="queue.title">Queue</strong>
         <div class="queue-actions">
-          <button id="queueResume" type="button" hidden>Resume</button>
-          <button id="queueClear" type="button">Clear finished</button>
+          <button id="queueResume" type="button" hidden data-i18n="queue.resume">Resume</button>
+          <button id="queueClear" type="button" data-i18n="queue.clearFinished">Clear finished</button>
         </div>
       </div>
       <div id="queuePause" class="queue-pause" hidden></div>
@@ -295,40 +295,40 @@
 
     <div class="controls">
       <label class="field">
-        <span>Profile</span>
+        <span data-i18n="history.profile">Profile</span>
         <select id="profileSelect"></select>
       </label>
       <label class="field">
-        <span>Sort by</span>
+        <span data-i18n="history.sortBy">Sort by</span>
         <select id="sortSelect">
-          <option value="score-desc">Score — high to low</option>
-          <option value="score-asc">Score — low to high</option>
-          <option value="viewed-desc">Last activity — newest</option>
-          <option value="viewed-asc">Last activity — oldest</option>
-          <option value="applied-desc">Date applied — newest</option>
-          <option value="company-asc">Company A–Z</option>
-          <option value="status">Application status</option>
+          <option value="score-desc" data-i18n="history.sortScoreDesc">Score — high to low</option>
+          <option value="score-asc" data-i18n="history.sortScoreAsc">Score — low to high</option>
+          <option value="viewed-desc" data-i18n="history.sortViewedDesc">Last activity — newest</option>
+          <option value="viewed-asc" data-i18n="history.sortViewedAsc">Last activity — oldest</option>
+          <option value="applied-desc" data-i18n="history.sortApplied">Date applied — newest</option>
+          <option value="company-asc" data-i18n="history.sortCompany">Company A–Z</option>
+          <option value="status" data-i18n="history.sortStatus">Application status</option>
         </select>
       </label>
       <label class="field">
-        <span>Status</span>
+        <span data-i18n="history.status">Status</span>
         <select id="statusFilter"></select>
       </label>
       <label class="field field-grow">
-        <span>Search</span>
-        <input id="search" type="text" placeholder="title, company, or anything in the posting">
+        <span data-i18n="history.search">Search</span>
+        <input id="search" type="text" placeholder="title, company, or anything in the posting" data-i18n-placeholder="history.searchPlaceholder">
       </label>
-      <label class="checkfield"><input id="hideRejects" type="checkbox"> Hide hard rejects</label>
+      <label class="checkfield"><input id="hideRejects" type="checkbox"> <span data-i18n="history.hideRejects">Hide hard rejects</span></label>
       <details class="data-menu" id="dataMenu">
-        <summary>Data</summary>
+        <summary data-i18n="history.data">Data</summary>
         <div class="data-menu-body">
-          <button id="exportCsv" type="button">Export CSV</button>
-          <button id="exportData" type="button">Back up all data</button>
-          <button id="importData" type="button">Restore from backup…</button>
-          <button id="probeReport" type="button">Extraction coverage</button>
-          <button id="runWizard" type="button">Run setup wizard…</button>
+          <button id="exportCsv" type="button" data-i18n="history.exportCsv">Export CSV</button>
+          <button id="exportData" type="button" data-i18n="history.backup">Back up all data</button>
+          <button id="importData" type="button" data-i18n="history.restore">Restore from backup…</button>
+          <button id="probeReport" type="button" data-i18n="history.probe">Extraction coverage</button>
+          <button id="runWizard" type="button" data-i18n="history.runWizard">Run setup wizard…</button>
           <input id="importFile" type="file" accept="application/json,.json" hidden>
-          <p class="hint">A backup holds profiles, model settings (never your OpenAI API key) and every tracked job — everything the CSV leaves out. Uninstalling the extension erases all of it.</p>
+          <p class="hint" data-i18n="history.backupHint">A backup holds profiles, model settings (never your OpenAI API key) and every tracked job — everything the CSV leaves out. Uninstalling the extension erases all of it.</p>
         </div>
       </details>
     </div>
@@ -348,6 +348,12 @@
     <div class="pager-bottom" id="pagerBottom"></div>
   </div>
 
+  <script src="locales/en.js"></script>
+  <script src="locales/es.js"></script>
+  <script src="locales/fr.js"></script>
+  <script src="locales/pt.js"></script>
+  <script src="i18n.js"></script>
+  <script src="geo.js"></script>
   <script src="defaults.js"></script>
   <script src="provider.js"></script>
   <script src="keywords.js"></script>
