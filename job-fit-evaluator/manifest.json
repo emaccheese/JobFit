@@ -1,7 +1,7 @@
 {
   "manifest_version": 3,
   "name": "__MSG_extName__",
-  "version": "0.7.0",
+  "version": "0.8.0",
   "description": "__MSG_extDescription__",
   "default_locale": "en",
   "permissions": [
@@ -17,6 +17,10 @@
     "http://127.0.0.1/*",
     "*://*.greenhouse.io/*",
     "https://api.openai.com/*"
+  ],
+  "optional_host_permissions": [
+    "https://*/*",
+    "http://*/*"
   ],
   "background": {
     "service_worker": "background.js"

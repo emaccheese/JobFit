@@ -120,6 +120,13 @@ Windows and Linux. It works on any site, with no clicks. You can also click the
 JobFit icon, then **Evaluate this tab**. You can change the shortcut at
 `chrome://extensions/shortcuts`, or from the popup under **Shortcuts**.
 
+**On-page button (optional).** On a job board you use a lot, tick **Show the JobFit
+button on {site}** in the popup. Chrome asks for access to that one site; after that,
+a small button sits in the corner of its job postings. One click evaluates the posting,
+and if you've scored it before, the button already shows the score when you open the
+page. It never evaluates on its own. Hover it and click **×**, or remove the site
+under **Shortcuts and on-page button**, to turn it off and give the access back.
+
 A banner appears in the page with the score, verdict and a one-line read;
 **Details** expands to matches, gaps, required gaps, warnings and salary.
 
@@ -154,6 +161,8 @@ posting evaluated for two people is two records.
 
 - **No posting or CV is sent anywhere except your own `localhost`.** There is no
   cloud mode and no telemetry.
+- The on-page button is off everywhere by default. Each site you switch it on for is a
+  separate Chrome permission you grant (and can revoke) for that site alone.
 - Host permissions are `localhost`, `127.0.0.1`, and `*://*.greenhouse.io/*`. The
   last one exists only so the extension can read a Greenhouse job board that a
   company career site embeds in a cross-origin iframe — without it Chrome won't

@@ -1392,9 +1392,14 @@ chrome.alarms.onAlarm.addListener((alarm) => {
 
 // Resume automatically after a browser restart or an extension reload: a batch
 // left running overnight should still be running in the morning.
-chrome.runtime.onStartup.addListener(kick);
+chrome.runtime.onStartup.addListener(() => {
+  kick();
+  syncFloatScripts();
+});
 chrome.runtime.onInstalled.addListener((details) => {
   kick();
+  // An update ships new files; re-register so the button runs the new ones.
+  syncFloatScripts();
   if (details.reason === "install") startFirstRunSetup();
 });
 
@@ -1434,6 +1439,102 @@ chrome.commands.onCommand.addListener((command, tab) => {
   if (command === "evaluate-tab") evaluateTab(tab);
 });
 
+// ---------------------------------------------------------------------------
+// On-page button (float.js), opt-in per site.
+//
+// JobFit reads nothing on a page until asked, and installs with no access to
+// job boards. The button needs to run on a site before anyone clicks, so each
+// site is switched on in the popup, which asks Chrome for that site alone
+// (optional_host_permissions). The sites live in `floatingButtonSites`
+// (origins), and one dynamically registered content script covers exactly
+// the ones whose permission is still held — revoking it in Chrome's own
+// settings takes the button away too.
+// ---------------------------------------------------------------------------
+
+const FLOAT_SCRIPT_ID = "jobfit-float";
+
+// The extractors and job identity (to know which job is on screen), the
+// stores (to show its saved score), and the messages. content.js is left out:
+// it starts an evaluation the moment it loads, and the button only does that
+// on a click.
+function floatFiles() {
+  const pageFiles = JOB_FIT_CONTENT_FILES.filter((f) => f !== "content.js" && f !== "screening.js" && f !== "geo.js");
+  return ["locales/en.js", "locales/es.js", "locales/fr.js", "locales/pt.js", ...pageFiles, "float.js"];
+}
+
+function sitePattern(origin) {
+  return `${origin}/*`;
+}
+
+async function floatSites() {
+  const { floatingButtonSites } = await chrome.storage.local.get("floatingButtonSites");
+  return Array.isArray(floatingButtonSites) ? floatingButtonSites : [];
+}
+
+// Serialized: registering while an earlier call is still unregistering would
+// fail on the duplicate id.
+let floatSync = Promise.resolve();
+
+function syncFloatScripts() {
+  floatSync = floatSync
+    .then(async () => {
+      const sites = await floatSites();
+      const granted = [];
+      for (const origin of sites) {
+        if (await chrome.permissions.contains({ origins: [sitePattern(origin)] })) granted.push(origin);
+      }
+      if (granted.length !== sites.length) await chrome.storage.local.set({ floatingButtonSites: granted });
+      try {
+        await chrome.scripting.unregisterContentScripts({ ids: [FLOAT_SCRIPT_ID] });
+      } catch (err) {
+        /* wasn't registered */
+      }
+      if (!granted.length) return;
+      await chrome.scripting.registerContentScripts([
+        {
+          id: FLOAT_SCRIPT_ID,
+          matches: granted.map(sitePattern),
+          js: floatFiles(),
+          runAt: "document_idle",
+          allFrames: false,
+          persistAcrossSessions: true,
+        },
+      ]);
+    })
+    .catch((err) => console.warn("[Job Fit Evaluator] on-page button registration failed", err));
+  return floatSync;
+}
+
+async function setFloatSite(origin, enabled, tabId) {
+  if (!/^https?:\/\/[^/]+$/.test(String(origin || ""))) return { ok: false };
+  const sites = await floatSites();
+  const next = enabled ? Array.from(new Set([...sites, origin])) : sites.filter((s) => s !== origin);
+  await chrome.storage.local.set({ floatingButtonSites: next, floatPending: null });
+  await syncFloatScripts();
+  if (enabled && tabId != null) {
+    // Shown straight away, without reloading the tab.
+    chrome.scripting.executeScript({ target: { tabId }, files: floatFiles() }).catch(() => {});
+  }
+  if (!enabled) {
+    // Give the access back. Fails harmlessly for a site the manifest itself
+    // needs (greenhouse.io).
+    chrome.permissions.remove({ origins: [sitePattern(origin)] }).catch(() => {});
+  }
+  return { ok: true, sites: next };
+}
+
+// The popup asks for the permission; if Chrome's prompt closes the popup
+// before it hears the answer, this finishes the job.
+chrome.permissions.onAdded.addListener(async (added) => {
+  const { floatPending } = await chrome.storage.local.get("floatPending");
+  if (!floatPending || Date.now() - floatPending.ts > 5 * 60 * 1000) return;
+  if ((added.origins || []).includes(sitePattern(floatPending.origin))) {
+    setFloatSite(floatPending.origin, true, floatPending.tabId);
+  }
+});
+
+chrome.permissions.onRemoved.addListener(() => syncFloatScripts());
+
 // A fresh install gets the setup wizard, never an update: an existing user
 // already has a working profile and shouldn't be interrupted. load() creates
 // the seed profile; it's marked unfinished so the popup keeps offering to
@@ -1456,6 +1557,17 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
       sendResponse(result);
       if (result.ok) kick();
     });
+    return true;
+  }
+  // The on-page button's click: exactly what the keyboard shortcut does.
+  if (message?.type === "JOB_FIT_EVALUATE_TAB") {
+    if (sender.tab) evaluateTab(sender.tab);
+    sendResponse({ ok: Boolean(sender.tab) });
+    return false;
+  }
+  if (message?.type === "JOB_FIT_FLOAT_SITE") {
+    const origin = message.origin || (sender.tab && sender.tab.url ? new URL(sender.tab.url).origin : null);
+    setFloatSite(origin, Boolean(message.enabled), message.tabId ?? (sender.tab && sender.tab.id)).then(sendResponse);
     return true;
   }
   if (message?.type === "JOB_FIT_PROBE") {
