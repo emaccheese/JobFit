@@ -14,15 +14,28 @@ var JOB_FIT_EVALSTORE = (function () {
   // A single lifecycle field rather than an "applied?" checkbox plus a status,
   // which could disagree with each other (unchecked + "interview scheduled").
   // Anything past NOT_APPLIED means the application went out.
-  const STATUSES = [
-    { value: "not_applied", label: "Not applied" },
-    { value: "applied", label: "Applied — pending response" },
-    { value: "interviewing", label: "Interview scheduled" },
-    { value: "offer", label: "Offer received" },
-    { value: "rejected", label: "Rejected" },
-    { value: "ghosted", label: "Ghosted / no response" },
-    { value: "withdrawn", label: "Withdrawn" },
-  ];
+  //
+  // Labels are looked up when read, so they follow the interface language.
+  function tr(key, vars, fallback) {
+    if (typeof JOB_FIT_I18N !== "undefined" && JOB_FIT_I18N.has(key)) return JOB_FIT_I18N.t(key, vars);
+    return fallback;
+  }
+
+  const STATUS_FALLBACK = {
+    not_applied: "Not applied",
+    applied: "Applied — pending response",
+    interviewing: "Interview scheduled",
+    offer: "Offer received",
+    rejected: "Rejected",
+    ghosted: "Ghosted / no response",
+    withdrawn: "Withdrawn",
+  };
+  const STATUSES = Object.keys(STATUS_FALLBACK).map((value) => ({
+    value,
+    get label() {
+      return tr(`status.${value}`, null, STATUS_FALLBACK[value]);
+    },
+  }));
 
   function recordKey(profileId, jobKey) {
     return `${PREFIX}${profileId}:${jobKey}`;
@@ -241,7 +254,7 @@ var JOB_FIT_EVALSTORE = (function () {
     const seen = new Set();
     return runs.filter((run) => {
       if (!run.hardReject && !run.evaluation) return false;
-      const key = run.hardReject ? "keyword screen" : run.model || "unknown model";
+      const key = run.hardReject ? "\u0000keyword screen" : run.model || "\u0000unknown model";
       if (seen.has(key)) return false;
       seen.add(key);
       return true;
@@ -249,17 +262,21 @@ var JOB_FIT_EVALSTORE = (function () {
   }
 
   function formatRun(run, { isCurrent, currentFingerprint }) {
-    const date = run.evaluatedAt ? new Date(run.evaluatedAt).toISOString().slice(0, 10) : "date unknown";
+    const date = run.evaluatedAt ? new Date(run.evaluatedAt).toISOString().slice(0, 10) : tr("brief.dateUnknown", null, "date unknown");
     const staleProfile =
       !isCurrent && run.profileFingerprint && currentFingerprint && run.profileFingerprint !== currentFingerprint
-        ? " [scored against an earlier version of this profile]"
+        ? ` ${tr("brief.earlierProfile", null, "[scored against an earlier version of this profile]")}`
         : "";
-    const when = isCurrent ? "Current" : "Earlier";
+    const when = isCurrent ? tr("brief.current", null, "Current") : tr("brief.earlier", null, "Earlier");
 
     if (run.hardReject) {
       return [
-        `${when} — keyword screen (${date}): hard reject${staleProfile}`,
-        `Reason: the posting says "${run.hardReject.matchedText}"${run.hardReject.label ? ` (${run.hardReject.label})` : ""}`,
+        `${when} — ${tr("brief.keywordScreen", { date }, `keyword screen (${date}): hard reject`)}${staleProfile}`,
+        `${tr("brief.reason", null, "Reason")}: ${tr(
+          "brief.postingSays",
+          { match: run.hardReject.matchedText, label: run.hardReject.label || "" },
+          `the posting says "${run.hardReject.matchedText}" (${run.hardReject.label || ""})`
+        )}`,
       ].join("\n");
     }
 
@@ -267,18 +284,19 @@ var JOB_FIT_EVALSTORE = (function () {
     const required = (e.required_gaps || []).map(String);
     const requiredLower = required.map((g) => g.toLowerCase());
     const otherGaps = (e.gaps || []).map(String).filter((g) => !requiredLower.includes(g.toLowerCase()));
+    const verdict = tr(`verdict.${e.verdict}`, null, e.verdict);
     return [
-      `${when} — ${run.model || "unknown model"} (${date}): ${e.score}/100, ${e.verdict}${staleProfile}`,
-      e.one_line ? `Reason: ${e.one_line}` : null,
-      e.matches && e.matches.length ? `Matches: ${e.matches.join(", ")}` : null,
-      required.length ? `Required gaps: ${required.join(", ")}` : null,
-      otherGaps.length ? `Other gaps: ${otherGaps.join(", ")}` : null,
+      `${when} — ${run.model || tr("brief.unknownModel", null, "unknown model")} (${date}): ${e.score}/100, ${verdict}${staleProfile}`,
+      e.one_line ? `${tr("brief.reason", null, "Reason")}: ${e.one_line}` : null,
+      e.matches && e.matches.length ? `${tr("result.matches", null, "Matches")}: ${e.matches.join(", ")}` : null,
+      required.length ? `${tr("result.requiredGaps", null, "Required gaps")}: ${required.join(", ")}` : null,
+      otherGaps.length ? `${tr("brief.otherGaps", null, "Other gaps")}: ${otherGaps.join(", ")}` : null,
       e.score_cap_reasons && e.score_cap_reasons.length
-        ? `Score cap applied: ${e.score_cap_reasons.join(", ")}${
-            e.raw_score != null ? ` (model scored ${e.raw_score}, capped to ${e.score})` : ""
+        ? `${tr("result.scoreCap", null, "Score cap applied")}: ${e.score_cap_reasons.join(", ")}${
+            e.raw_score != null ? ` ${tr("result.capDetail", { raw: e.raw_score, score: e.score }, `(model scored ${e.raw_score}, capped to ${e.score})`)}` : ""
           }`
         : null,
-      e.seniority_flag ? `Seniority/comp check: ${e.seniority_flag}` : null,
+      e.seniority_flag ? `${tr("result.seniority", null, "Seniority/comp check")}: ${e.seniority_flag}` : null,
     ]
       .filter(Boolean)
       .join("\n");
@@ -292,8 +310,8 @@ var JOB_FIT_EVALSTORE = (function () {
 
     const heading =
       runs.length > 1
-        ? `LOCAL MODEL EVALUATIONS (profile: ${who}; ${runs.length} results, newest first)`
-        : `LOCAL MODEL EVALUATION (profile: ${who})`;
+        ? tr("brief.evalHeadingMany", { profile: who, count: runs.length }, `MODEL EVALUATIONS (profile: ${who}; ${runs.length} results, newest first)`)
+        : tr("brief.evalHeading", { profile: who }, `MODEL EVALUATION (profile: ${who})`);
     const entries = runs.map((run, i) =>
       formatRun(run, { isCurrent: i === 0 && Boolean(record.lastEvaluatedAt), currentFingerprint: record.profileFingerprint })
     );
@@ -303,17 +321,30 @@ var JOB_FIT_EVALSTORE = (function () {
     const e = record.evaluation;
     const shared = [
       record.softWarnings && record.softWarnings.length
-        ? `Warnings (worth asking about, not rejects): ${record.softWarnings.join(", ")}`
+        ? `${tr("brief.warnings", null, "Warnings (worth asking about, not rejects)")}: ${record.softWarnings.join(", ")}`
         : null,
       record.domainFlags && record.domainFlags.length
-        ? `Domain flags detected (keyword scan): ${record.domainFlags.join(", ")}`
+        ? `${tr("brief.domainFlags", null, "Domain flags detected (keyword scan)")}: ${record.domainFlags.join(", ")}`
         : null,
       e && e.salary
-        ? `Salary — posting: ${e.salary.posting_stated}; market estimate: ${e.salary.estimated_market_range}; vs. expectation: ${e.salary.vs_candidate_expectation}${e.salary.note ? " — " + e.salary.note : ""}`
+        ? tr(
+            "brief.salary",
+            {
+              posting: e.salary.posting_stated,
+              market: e.salary.estimated_market_range,
+              vs: salaryVerdictLabel(e.salary.vs_candidate_expectation),
+            },
+            `Salary — posting: ${e.salary.posting_stated}; market estimate: ${e.salary.estimated_market_range}; vs. expectation: ${e.salary.vs_candidate_expectation}`
+          ) + (e.salary.note ? ` — ${e.salary.note}` : "")
         : null,
     ].filter(Boolean);
 
     return `\n\n${heading}\n\n${entries.join("\n\n")}${shared.length ? `\n\n${shared.join("\n")}` : ""}`;
+  }
+
+  // "within" / "below" / "above" / "unknown", as words in the UI language.
+  function salaryVerdictLabel(value) {
+    return tr(`salaryVs.${value}`, null, value);
   }
 
   // The whole text that gets copied: a header line, the condensed posting,
@@ -433,7 +464,7 @@ var JOB_FIT_EVALSTORE = (function () {
     greenhouse: "Greenhouse",
     indeed: "Indeed",
     workday: "Workday",
-    jibe: "company career site",
+    jibe: null,
     content: "Greenhouse portal",
   };
 
@@ -441,11 +472,12 @@ var JOB_FIT_EVALSTORE = (function () {
     const key = String(record.jobKey || "");
     const prefix = key.split(":")[0];
     if (SITE_LABELS[prefix]) return SITE_LABELS[prefix];
-    if (prefix === "url") return key.slice(4).split("/")[0] || "another site";
+    if (prefix === "jibe") return tr("site.careerSite", null, "company career site");
+    if (prefix === "url") return key.slice(4).split("/")[0] || tr("site.another", null, "another site");
     try {
       return new URL(record.url).hostname.replace(/^www\./, "");
     } catch (err) {
-      return "another site";
+      return tr("site.another", null, "another site");
     }
   }
 
@@ -470,6 +502,7 @@ var JOB_FIT_EVALSTORE = (function () {
     exportRecords,
     importRecord,
     statusLabel,
+    salaryVerdictLabel,
     formatEvaluation,
     briefText,
     duplicateGroups,

@@ -59,99 +59,112 @@
   }
   .setup-banner button { flex: 0 0 auto; padding: 4px 10px; font-size: 12px; }
   details.advanced label { font-weight: 400; font-size: 11px; color: #555; }
+  .title-bar { display: flex; align-items: center; justify-content: space-between; gap: 8px; margin-bottom: 8px; }
+  .title-bar h1 { margin: 0; }
+  .title-bar select { width: auto; max-width: 150px; padding: 3px 4px; font-size: 11px; }
+  .salary-row { display: flex; gap: 6px; align-items: center; margin-bottom: 6px; }
+  .salary-row .currency-label { flex: 0 0 36px; font-weight: 600; text-align: right; }
+  .salary-row input { flex: 1; min-width: 0; }
+  .salary-row select { flex: 0 0 82px; width: 82px; }
+  .salary-add { display: flex; gap: 6px; align-items: center; margin-top: 2px; }
+  .salary-add select { width: auto; flex: 0 0 auto; }
 </style>
 </head>
 <body>
-  <h1>JobFit</h1>
+  <div class="title-bar">
+    <h1>JobFit</h1>
+    <select id="uiLanguage" data-i18n-title="popup.languageTitle" title="Language" aria-label="Language"></select>
+  </div>
 
   <div id="readiness" class="readiness">
-    <div class="ready-row"><span class="dot" id="modelDot"></span><span id="modelState">Checking the local model…</span></div>
-    <div class="ready-row"><span class="dot" id="pageDot"></span><span id="pageState">Checking this tab…</span></div>
+    <div class="ready-row"><span class="dot" id="modelDot"></span><span id="modelState" data-i18n="popup.checkingModel">Checking the model…</span></div>
+    <div class="ready-row"><span class="dot" id="pageDot"></span><span id="pageState" data-i18n="popup.checkingTab">Checking this tab…</span></div>
   </div>
 
   <div class="profile-bar">
-    <label for="profileSelect">Evaluating as</label>
+    <label for="profileSelect" data-i18n="popup.evaluatingAs">Evaluating as</label>
     <select id="profileSelect"></select>
+    <div class="hint" id="searchSummary"></div>
     <details id="sec-profilemanage">
-      <summary>Manage profiles</summary>
+      <summary data-i18n="popup.manageProfiles">Manage profiles</summary>
       <div class="row">
-        <button id="profileNew" type="button">New</button>
-        <button id="profileDuplicate" type="button">Duplicate</button>
-        <button id="profileRename" type="button">Rename</button>
-        <button id="profileDelete" type="button">Delete</button>
+        <button id="profileNew" type="button" data-i18n="popup.new">New</button>
+        <button id="profileDuplicate" type="button" data-i18n="popup.duplicate">Duplicate</button>
+        <button id="profileRename" type="button" data-i18n="popup.rename">Rename</button>
+        <button id="profileDelete" type="button" data-i18n="popup.delete">Delete</button>
       </div>
-      <button id="profileWizard" type="button" style="width:100%; margin-top:6px;">Run setup wizard for this profile</button>
+      <button id="profileWizard" type="button" style="width:100%; margin-top:6px;" data-i18n="popup.runWizard">Run setup wizard for this profile</button>
       <div class="row" id="profileNameRow" hidden>
-        <input id="profileNameInput" type="text" placeholder="Profile name">
-        <button id="profileNameOk" class="primary" type="button" style="flex:0 0 auto;">OK</button>
-        <button id="profileNameCancel" type="button" style="flex:0 0 auto;">Cancel</button>
+        <input id="profileNameInput" type="text" placeholder="Profile name" data-i18n-placeholder="popup.profileName">
+        <button id="profileNameOk" class="primary" type="button" style="flex:0 0 auto;" data-i18n="common.ok">OK</button>
+        <button id="profileNameCancel" type="button" style="flex:0 0 auto;" data-i18n="common.cancel">Cancel</button>
       </div>
     </details>
     <div class="hint" id="profileHint"></div>
   </div>
 
   <div id="setupBanner" class="setup-banner" hidden>
-    <span>Setup isn't finished for <strong id="setupBannerName"></strong>.</span>
-    <button id="setupContinue" class="primary" type="button">Continue setup</button>
+    <span id="setupBannerText"></span>
+    <button id="setupContinue" class="primary" type="button" data-i18n="popup.continueSetup">Continue setup</button>
   </div>
 
   <section>
-    <button id="evaluate" class="primary" type="button" style="width:100%;">Evaluate this tab</button>
+    <button id="evaluate" class="primary" type="button" style="width:100%;" data-i18n="popup.evaluate">Evaluate this tab</button>
     <div class="hint" id="evaluateTip"></div>
   </section>
 
   <section>
-    <button id="summarizeTab" type="button" style="width:100%;">Summarize this tab</button>
+    <button id="summarizeTab" type="button" style="width:100%;" data-i18n="popup.summarize">Summarize this tab</button>
     <div id="summarizeStatus" style="font-size: 11px; color: #555; margin-top: 4px; min-height: 14px;"></div>
     <textarea id="summarizeResult" rows="8" readonly hidden style="margin-top: 6px;"></textarea>
-    <button id="copySummary" type="button" hidden style="margin-top: 6px; width: 100%;">Copy</button>
+    <button id="copySummary" type="button" hidden style="margin-top: 6px; width: 100%;" data-i18n="common.copy">Copy</button>
   </section>
 
   <div id="queueStatus" class="hint" style="display:none; background:#eaf1fb; border:1px solid #cfdcf0; border-radius:4px; padding:6px 8px; margin-bottom:12px;"></div>
 
   <section>
-    <button id="viewHistory" type="button" style="width:100%;">View tracked jobs</button>
+    <button id="viewHistory" type="button" style="width:100%;" data-i18n="popup.viewHistory">View tracked jobs</button>
   </section>
 
   <details id="sec-shortcuts">
-    <summary>Shortcuts</summary>
+    <summary data-i18n="popup.shortcuts">Shortcuts</summary>
     <section>
-      <label>Keyboard shortcut</label>
+      <label data-i18n="popup.keyboardShortcut">Keyboard shortcut</label>
       <div class="row" style="align-items:center;">
         <span id="shortcutKey" style="font-weight:600; flex:0 0 auto;"></span>
-        <button id="changeShortcut" type="button" style="flex:0 0 auto;">Change shortcut</button>
+        <button id="changeShortcut" type="button" style="flex:0 0 auto;" data-i18n="popup.changeShortcut">Change shortcut</button>
       </div>
-      <div class="hint">Evaluates the posting in the current tab, on any site.</div>
+      <div class="hint" data-i18n="popup.shortcutHint">Evaluates the posting in the current tab, on any site.</div>
     </section>
   </details>
 
   <details id="sec-lmstudio">
-    <summary>Model</summary>
-    <div class="hint" style="margin-bottom:8px;">Shared by every profile.</div>
+    <summary data-i18n="popup.model">Model</summary>
+    <div class="hint" style="margin-bottom:8px;" data-i18n="popup.sharedByProfiles">Shared by every profile.</div>
 
   <section>
-    <label for="modelProvider">Provider</label>
+    <label for="modelProvider" data-i18n="popup.provider">Provider</label>
     <select id="modelProvider">
-      <option value="lmstudio">LM Studio (local, private, free)</option>
-      <option value="openai">OpenAI API (ChatGPT models)</option>
+      <option value="lmstudio" data-i18n="popup.providerLm">LM Studio (local, private, free)</option>
+      <option value="openai" data-i18n="popup.providerOpenAi">OpenAI API (ChatGPT models)</option>
     </select>
   </section>
 
   <div id="lmStudioFields">
   <section>
-    <label for="lmStudioUrl">LM Studio endpoint</label>
+    <label for="lmStudioUrl" data-i18n="popup.lmEndpoint">LM Studio endpoint</label>
     <input id="lmStudioUrl" type="text" placeholder="http://localhost:1234/v1/chat/completions">
   </section>
 
   <section>
-    <label for="lmStudioModel">LM Studio model name</label>
-    <input id="lmStudioModel" type="text" placeholder="whatever's loaded, e.g. qwen2.5-coder-7b-instruct">
+    <label for="lmStudioModel" data-i18n="popup.lmModel">LM Studio model name</label>
+    <input id="lmStudioModel" type="text" placeholder="whatever's loaded, e.g. qwen2.5-coder-7b-instruct" data-i18n-placeholder="popup.lmModelPlaceholder">
   </section>
 
   <section>
-    <label for="lmStudioReasoningEffort">Reasoning effort (for models that support it)</label>
+    <label for="lmStudioReasoningEffort" data-i18n="popup.lmReasoning">Reasoning effort (for models that support it)</label>
     <select id="lmStudioReasoningEffort">
-      <option value="">(none — model default)</option>
+      <option value="" data-i18n="popup.effortNone">(none — model default)</option>
       <option value="low">low</option>
       <option value="medium">medium</option>
       <option value="high">high</option>
@@ -162,152 +175,148 @@
   <section>
     <label style="display:flex; align-items:center; gap:6px; font-weight:600;">
       <input id="lmStudioEnableThinking" type="checkbox" style="width:auto;">
-      Enable model thinking/reasoning
+      <span data-i18n="popup.thinking">Enable model thinking/reasoning</span>
     </label>
-    <div style="font-size: 11px; color: #555; margin-top: 4px;">Off by default for speed. Some models expose this directly (stronger than just lowering reasoning effort) — check LM Studio's model page for a "Enable Thinking" custom field to confirm it's supported.</div>
+    <div style="font-size: 11px; color: #555; margin-top: 4px;" data-i18n="popup.thinkingHint">Off by default for speed. Some models expose this directly (stronger than just lowering reasoning effort) — check LM Studio's model page for a "Enable Thinking" custom field to confirm it's supported.</div>
   </section>
   </div>
 
   <div id="openAiFields" hidden>
-  <div class="privacy-note">
+  <div class="privacy-note" data-i18n="popup.openAiPrivacy">
     Postings, your candidate profile and salary expectations are sent to OpenAI to be scored, and each request is billed to your API key. Choose LM Studio to keep everything on this computer.
   </div>
   <section>
-    <label for="openAiKey">OpenAI API key</label>
+    <label for="openAiKey" data-i18n="popup.openAiKey">OpenAI API key</label>
     <input id="openAiKey" type="password" autocomplete="off" spellcheck="false" placeholder="sk-…">
-    <div class="hint">Stored in this browser's extension storage only. Never included in backups.</div>
+    <div class="hint" data-i18n="popup.openAiKeyHint">Stored in this browser's extension storage only. Never included in backups.</div>
   </section>
 
   <section>
-    <label for="openAiTier">Model</label>
+    <label for="openAiTier" data-i18n="popup.model">Model</label>
     <select id="openAiTier"></select>
     <div class="hint" id="openAiTierHint"></div>
     <div id="openAiCustomRow" hidden style="margin-top:6px;">
-      <input id="openAiModel" type="text" list="openAiModelList" spellcheck="false" placeholder="any chat model on your key, e.g. gpt-5.6-terra">
+      <input id="openAiModel" type="text" list="openAiModelList" spellcheck="false" placeholder="any chat model on your key, e.g. gpt-5.6-terra" data-i18n-placeholder="popup.customModelPlaceholder">
       <datalist id="openAiModelList"></datalist>
     </div>
   </section>
 
   <section>
-    <label for="openAiFlex">Flex processing (half price, slower)</label>
+    <label for="openAiFlex" data-i18n="popup.flex">Flex processing (half price, slower)</label>
     <select id="openAiFlex">
-      <option value="bulk">For bulk re-evaluations only</option>
-      <option value="always">Always</option>
-      <option value="never">Never</option>
+      <option value="bulk" data-i18n="popup.flexBulk">For bulk re-evaluations only</option>
+      <option value="always" data-i18n="popup.flexAlways">Always</option>
+      <option value="never" data-i18n="popup.flexNever">Never</option>
     </select>
-    <div class="hint">Bulk re-evaluations from Tracked jobs aren't watched while they run, so they're a good fit. When Flex has no capacity, that job runs at the standard price instead.</div>
+    <div class="hint" data-i18n="popup.flexHint">Bulk re-evaluations from Tracked jobs aren't watched while they run, so they're a good fit. When Flex has no capacity, that job runs at the standard price instead.</div>
   </section>
 
   <section id="openAiReasoningSection" hidden>
-    <label for="openAiReasoningEffort">Reasoning effort</label>
+    <label for="openAiReasoningEffort" data-i18n="popup.reasoning">Reasoning effort</label>
     <select id="openAiReasoningEffort"></select>
-    <div class="hint">Reasoning tokens are billed as output. Lower is cheaper and faster; low is usually enough to score a posting.</div>
+    <div class="hint" data-i18n="popup.reasoningHint">Reasoning tokens are billed as output. Lower is cheaper and faster; low is usually enough to score a posting.</div>
   </section>
 
   <section>
-    <label for="openAiMaxOutput">Max output tokens per request</label>
+    <label for="openAiMaxOutput" data-i18n="popup.maxOutput">Max output tokens per request</label>
     <input id="openAiMaxOutput" type="number" min="500" max="64000" step="500">
-    <div class="hint">A ceiling on what one request can cost, reasoning included. Too low and answers get cut off.</div>
+    <div class="hint" data-i18n="popup.maxOutputHint">A ceiling on what one request can cost, reasoning included. Too low and answers get cut off.</div>
   </section>
 
   <section>
-    <label for="openAiBudget">Daily token budget</label>
-    <input id="openAiBudget" type="number" min="0" step="10000" placeholder="no limit">
+    <label for="openAiBudget" data-i18n="popup.budget">Daily token budget</label>
+    <input id="openAiBudget" type="number" min="0" step="10000" placeholder="no limit" data-i18n-placeholder="popup.noLimit">
     <div class="hint" id="openAiUsage"></div>
   </section>
   </div>
 
   <section>
-    <label for="lmStudioTimeout">Response timeout (seconds)</label>
+    <label for="lmStudioTimeout" data-i18n="popup.timeout">Response timeout (seconds)</label>
     <input id="lmStudioTimeout" type="number" placeholder="300">
     <div class="hint" id="timingHint"></div>
   </section>
   </details>
 
   <details id="sec-profile">
-    <summary>Candidate profile</summary>
+    <summary data-i18n="popup.candidateProfile">Candidate profile</summary>
     <section>
-      <label for="profile">The CV summary this profile is scored against — keep it under ~400 words</label>
+      <label for="profile" data-i18n="popup.profileLabel">The CV summary this profile is scored against — keep it under ~400 words</label>
       <textarea id="profile" rows="8"></textarea>
     </section>
   </details>
 
   <details id="sec-salary">
-    <summary>Expected salary</summary>
+    <summary data-i18n="popup.salary">Expected salary</summary>
     <section>
-    <label>Per currency — informational: shown in Details and doesn't directly set the score, but a posting far below your floor for its currency triggers the seniority/comp check</label>
-    <div class="row" style="margin-bottom: 6px;">
-      <span class="currency-label">USD</span>
-      <input id="salaryUsdMin" type="number" placeholder="Min">
-      <input id="salaryUsdMax" type="number" placeholder="Max">
+    <label data-i18n="popup.salaryLabel">Per currency — informational: shown in Details and doesn't directly set the score, but a posting far below your floor for its currency triggers the seniority/comp check</label>
+    <div id="salaryRows"></div>
+    <div class="salary-add">
+      <select id="salaryAdd"></select>
     </div>
-    <div class="row" style="margin-bottom: 6px;">
-      <span class="currency-label">CAD</span>
-      <input id="salaryCadMin" type="number" placeholder="Min">
-      <input id="salaryCadMax" type="number" placeholder="Max">
-    </div>
-    <div class="row">
-      <span class="currency-label">MXN</span>
-      <input id="salaryMxnMin" type="number" placeholder="Min">
-      <input id="salaryMxnMax" type="number" placeholder="Max">
-    </div>
-    <button id="suggestSalary" type="button" style="width:100%; margin-top:6px;">Suggest all</button>
+    <button id="suggestSalary" type="button" style="width:100%; margin-top:6px;" data-i18n="popup.suggestAll">Suggest all</button>
     <div id="salaryReasoning" style="font-size: 11px; color: #555; margin-top: 4px;"></div>
     </section>
   </details>
 
   <details id="sec-hardrejects">
-    <summary>Hard rejects</summary>
+    <summary data-i18n="popup.hardRejects">Hard rejects</summary>
     <section>
-      <label>Reject a posting outright when it requires:</label>
+      <label data-i18n="popup.hardRejectsLabel">Reject a posting outright when it requires:</label>
       <div id="hardRejectsPresets" class="presets"></div>
-      <label for="hardRejectsPhrases" style="margin-top:10px;">Also reject if the posting says</label>
-      <textarea id="hardRejectsPhrases" rows="3" placeholder="one phrase per line&#10;e.g. unpaid trial period"></textarea>
-      <div class="hint">Plain text. Matched as whole words, any capitalisation — no special syntax needed.</div>
+      <div class="hint" data-i18n="popup.gateHint">Citizenship and sponsorship rules only apply in countries where your work authorization needs them (set in the setup wizard).</div>
+      <label for="hardRejectsPhrases" style="margin-top:10px;" data-i18n="popup.alsoReject">Also reject if the posting says</label>
+      <textarea id="hardRejectsPhrases" rows="3" placeholder="one phrase per line&#10;e.g. unpaid trial period" data-i18n-placeholder="popup.rejectPlaceholder"></textarea>
+      <div class="hint" data-i18n="popup.phraseHint">Plain text. Matched as whole words, any capitalisation — no special syntax needed.</div>
       <details class="advanced" id="adv-hardrejects">
-        <summary>Advanced — raw patterns</summary>
-        <label for="hardRejectsPatterns">One regular expression per line, for anything the options above can't express.</label>
+        <summary data-i18n="popup.advancedPatterns">Advanced — raw patterns</summary>
+        <label for="hardRejectsPatterns" data-i18n="popup.patternsLabelLong">One regular expression per line, for anything the options above can't express.</label>
         <textarea id="hardRejectsPatterns" rows="4"></textarea>
       </details>
     </section>
   </details>
 
   <details id="sec-warnings">
-    <summary>Warnings (amber)</summary>
+    <summary data-i18n="popup.warnings">Warnings (amber)</summary>
     <section>
-      <label>Flag for your judgment — never blocks the evaluation or changes the score:</label>
+      <label data-i18n="popup.warningsLabel">Flag for your judgment — never blocks the evaluation or changes the score:</label>
       <div id="softWarningsPresets" class="presets"></div>
-      <label for="softWarningsPhrases" style="margin-top:10px;">Also flag if the posting says</label>
-      <textarea id="softWarningsPhrases" rows="3" placeholder="one phrase per line"></textarea>
-      <div class="hint">Plain text. Matched as whole words, any capitalisation.</div>
+      <label for="softWarningsPhrases" style="margin-top:10px;" data-i18n="popup.alsoFlag">Also flag if the posting says</label>
+      <textarea id="softWarningsPhrases" rows="3" placeholder="one phrase per line" data-i18n-placeholder="popup.onePerLine"></textarea>
+      <div class="hint" data-i18n="popup.phraseHintShort">Plain text. Matched as whole words, any capitalisation.</div>
       <details class="advanced" id="adv-warnings">
-        <summary>Advanced — raw patterns</summary>
-        <label for="softWarningsPatterns">One regular expression per line.</label>
+        <summary data-i18n="popup.advancedPatterns">Advanced — raw patterns</summary>
+        <label for="softWarningsPatterns" data-i18n="popup.patternsLabel">One regular expression per line.</label>
         <textarea id="softWarningsPatterns" rows="3"></textarea>
       </details>
     </section>
   </details>
 
   <details id="sec-domainflags">
-    <summary>Domain flags</summary>
+    <summary data-i18n="popup.domainFlags">Domain flags</summary>
     <section>
-      <label for="domainFlagsPhrases">Skills and topics your profile doesn't cover — always flagged and cross-checked, independent of the model's own reasoning</label>
-      <textarea id="domainFlagsPhrases" rows="6" placeholder="one per line&#10;machine learning&#10;PyTorch&#10;C++"></textarea>
-      <div class="hint">Plain text, one per line. Whole words, any capitalisation — "C++" and ".NET" work as written.</div>
+      <label for="domainFlagsPhrases" data-i18n="popup.domainFlagsLabel">Skills and topics your profile doesn't cover — always flagged and cross-checked, independent of the model's own reasoning</label>
+      <textarea id="domainFlagsPhrases" rows="6" placeholder="one per line&#10;machine learning&#10;PyTorch&#10;C++" data-i18n-placeholder="popup.flagsPlaceholder"></textarea>
+      <div class="hint" data-i18n="popup.flagsHint">Plain text, one per line. Whole words, any capitalisation — "C++" and ".NET" work as written.</div>
       <details class="advanced" id="adv-domainflags">
-        <summary>Advanced — raw patterns</summary>
-        <label for="domainFlagsPatterns">One regular expression per line.</label>
+        <summary data-i18n="popup.advancedPatterns">Advanced — raw patterns</summary>
+        <label for="domainFlagsPatterns" data-i18n="popup.patternsLabel">One regular expression per line.</label>
         <textarea id="domainFlagsPatterns" rows="3"></textarea>
       </details>
     </section>
   </details>
 
   <div class="row">
-    <button id="save" class="primary" type="button" style="flex:1;">Save</button>
-    <button id="reset" type="button" title="Restores the hard-reject and warning lists for this profile. Leaves the candidate text, domain flags, salary and LM Studio settings alone.">Reset keyword lists</button>
+    <button id="save" class="primary" type="button" style="flex:1;" data-i18n="common.save">Save</button>
+    <button id="reset" type="button" title="Restores the hard-reject and warning lists for this profile. Leaves the candidate text, domain flags, salary and LM Studio settings alone." data-i18n="popup.resetKeywords" data-i18n-title="popup.resetKeywordsTitle">Reset keyword lists</button>
   </div>
   <div id="status"></div>
 
+  <script src="locales/en.js"></script>
+  <script src="locales/es.js"></script>
+  <script src="locales/fr.js"></script>
+  <script src="locales/pt.js"></script>
+  <script src="i18n.js"></script>
+  <script src="geo.js"></script>
   <script src="defaults.js"></script>
   <script src="provider.js"></script>
   <script src="keywords.js"></script>

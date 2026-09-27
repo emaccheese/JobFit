@@ -42,11 +42,19 @@ as out of date against each other in Tracked jobs, as before.
 Two layers, cheapest first.
 
 **Layer 1 — deterministic, instant, free.** A keyword scan for things that end the
-conversation regardless of fit. You configure it by ticking categories — *US
-citizenship or permanent residency*, *no visa sponsorship*, *security clearance*,
-*ITAR*, *already living locally* — and adding any plain phrases of your own. These
-are yes/no facts, so no model is involved. A hard reject resolves immediately and
-never reaches the queue.
+conversation regardless of fit. You configure it by ticking categories — *citizenship
+or permanent residency*, *no visa sponsorship*, *security clearance*, *ITAR*,
+*already living locally* — and adding any plain phrases of your own. These are
+yes/no facts, so no model is involved. A hard reject resolves immediately and never
+reaches the queue.
+
+The rules are **per country**: you say which countries you apply in and whether you
+are a citizen, already allowed to work, or would need sponsorship in each. "No visa
+sponsorship" then rejects a San Diego posting for someone who needs a US visa, and
+is ignored on a Tijuana posting for a Mexican citizen. The categories match posting
+language in English, Spanish, French and Portuguese. Warnings also flag an on-site
+job outside your area when you won't relocate, a work arrangement you didn't ask
+for, working hours far from your time zone, and a language you don't speak.
 
 Phrases are matched as whole words automatically, which is not cosmetic: a bare
 `ITAR` typed into the old regex box silently matched "mil**itar**y". Making
@@ -78,13 +86,20 @@ computed in code, because local models are unreliable at it and fail confidently
 3. Go to `chrome://extensions`, enable **Developer mode**, click **Load unpacked**,
    and select the `job-fit-evaluator/` folder.
 4. The **setup wizard** opens in a new tab on first install. It walks through, in order:
-   - **Local model**: tests the connection and lists the models LM Studio has
+   - **Language and location**: the language is detected from your browser
+     (English, Spanish, French or Portuguese) and can be changed any time. Your
+     location is guessed from the browser's time zone — offered, never assumed,
+     and never sent anywhere.
+   - **About you**: a profile name, the countries you apply in, and your right to
+     work in each. Your answers tick the matching hard rejects.
+   - **Work preferences**: remote/hybrid/on-site, relocation, the languages you
+     work in, and whether the model may be told your city.
+   - **Model**: tests the connection and lists the models LM Studio has
      loaded, so you pick one instead of typing its name.
-   - **About you**: a profile name and three work-authorization questions. Your
-     answers tick the matching hard rejects (citizenship, sponsorship, relocation).
    - **Candidate profile**: paste your CV and the local model drafts the ~400-word
      summary, or write it yourself from the template.
-   - **Expected salary**: per market, with a suggestion from your profile.
+   - **Expected salary**: per currency of the countries you apply in, each with its
+     own pay period (monthly pesos, yearly dollars), with a suggestion from your profile.
    - **Hard rejects**, **Warnings** and **Domain flags**: the flags can be
      suggested from your profile's Gaps line.
    - **Review**: every setting on one page, plus a test evaluation of a sample
@@ -145,6 +160,10 @@ posting evaluated for two people is two records.
   let a script into that frame, and the posting is invisible. It is read access
   to job-board pages, nothing more; no data leaves your machine because of it.
 - Everything is stored in `chrome.storage.local` on your machine.
+- **Your location** is detected from the browser's time zone, never from GPS or an
+  IP lookup, and is stored locally. The model is told your city and region only if
+  you turn that on in the wizard; the countries you apply in and your work
+  authorization are always included, since they don't identify you.
 - **Form subtrees are stripped before any text is sent to the model.** This is not
   incidental: job boards render the posting next to a part-filled application form,
   and an early version captured a name, email, phone number and résumé filename

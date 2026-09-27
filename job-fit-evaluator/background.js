@@ -3,7 +3,29 @@
 // once already: reasoning_effort and enable_thinking were added to the popup
 // but not to this file, so neither was ever sent for anyone who hadn't
 // re-saved their settings.
-importScripts("defaults.js", "provider.js", "keywords.js", "screening.js", "profiles.js", "evalstore.js", "queue.js", "lmstudio-ui.js", "inject.js");
+importScripts(
+  "locales/en.js",
+  "locales/es.js",
+  "locales/fr.js",
+  "locales/pt.js",
+  "i18n.js",
+  "geo.js",
+  "defaults.js",
+  "provider.js",
+  "keywords.js",
+  "screening.js",
+  "profiles.js",
+  "evalstore.js",
+  "queue.js",
+  "lmstudio-ui.js",
+  "inject.js"
+);
+
+// Messages this worker writes (errors, score-cap reasons, briefs) are in the
+// user's language, which is a setting read from storage — so everything that
+// produces text waits for it, and follows it when it changes.
+const i18nReady = JOB_FIT_I18N.load();
+JOB_FIT_I18N.watch();
 
 const SYSTEM_PROMPT = `You evaluate job postings against a candidate profile.
 Return ONLY a JSON object, no prose, no markdown fences.
@@ -52,18 +74,97 @@ Scoring guidance:
 - "distributed systems" as a requirement caps at 45.
 - Domain match (image/video/color/GPU/embedded) adds up to +15.
 - A DETECTED DOMAIN-FLAG TERM (listed below, if present) is effectively required when the posting marks it required OR when the responsibilities describe the hire doing that work themselves — regardless of where, or whether, it appears in the qualifications. Listing it only as preferred doesn't make it optional if the day-to-day job is that work. Working alongside a team that does it, or using its output, is not doing it. Appearing in the job title or company description alone does not make it required, and neither does being one alternative of an "or"/"and/or" requirement the profile satisfies another way. If any effectively required term isn't substantively covered by the candidate profile, cap the score at 50 and list it in required_gaps.
-- Salary is informational only — do not let it influence the score or verdict either way.`;
+- Salary is informational only — do not let it influence the score or verdict either way.
 
+CANDIDATE SITUATION, when given, says where the candidate lives, which countries they apply in, their work authorization in each, and the work arrangements they accept. Use it to judge practical fit in "one_line" and to read "sponsorship" correctly for the posting's country, but do NOT lower the score for location, arrangement or work authorization — those are screened separately, and the score is about qualifications.`;
+
+// The prompt stays in English, which models follow most reliably; only the
+// free text they write back follows the user's language. matches, gaps and
+// required_gaps stay in the posting's own words: they're phrases FROM the
+// posting, and applyScoreCaps compares them with the domain-flag terms found
+// in it — a translated gap would never match its flag.
+function systemPrompt() {
+  const lang = JOB_FIT_I18N.lang;
+  if (lang === "en") return SYSTEM_PROMPT;
+  return `${SYSTEM_PROMPT}
+
+Output language: write "one_line", "location", "salary.posting_stated", "salary.estimated_market_range" and "salary.note" in ${JOB_FIT_I18N.modelLanguageName(lang)}. Keep "matches", "gaps" and "required_gaps" in the posting's own language, as phrases from it. JSON keys and the "verdict" and "sponsorship" values stay exactly as specified, in English.`;
+}
+
+// For the model's prompt, in English whatever the UI language.
+function countryNameEn(code) {
+  return JOB_FIT_I18N.countryName(code, "en");
+}
+
+const AUTH_TEXT = {
+  citizen: "citizen or permanent resident",
+  permit: "already authorized to work (work permit or visa, no sponsorship needed)",
+  sponsor: "would need visa sponsorship",
+};
+const ARRANGEMENT_TEXT = { remote: "remote", hybrid: "hybrid", onsite: "on-site" };
+
+function placeEn({ city, country, region } = {}) {
+  return [city, country ? JOB_FIT_GEO.regionName(country, region) : region, country ? countryNameEn(country) : null]
+    .filter(Boolean)
+    .join(", ");
+}
+
+// The profile's jobSearch answers as plain lines for the model. The home
+// city and region are only included when the user allowed it
+// (shareLocation); the rest describes where they can work, not who they are.
+function describeSituation(jobSearch) {
+  if (!jobSearch) return "";
+  const lines = [];
+  const home = jobSearch.home || {};
+  if (home.country) {
+    lines.push(
+      jobSearch.shareLocation
+        ? `Lives in: ${placeEn(home)}${home.timeZone ? ` (time zone ${home.timeZone})` : ""}`
+        : `Lives in: ${countryNameEn(home.country)}`
+    );
+  }
+  const targets = jobSearch.targetCountries || [];
+  if (targets.length) lines.push(`Applying in: ${targets.map(countryNameEn).join(", ")}`);
+  const auth = Object.entries(jobSearch.workAuth || {}).filter(([, v]) => AUTH_TEXT[v]);
+  if (auth.length) lines.push(`Work authorization: ${auth.map(([c, v]) => `${countryNameEn(c)} — ${AUTH_TEXT[v]}`).join("; ")}`);
+  const arrangements = (jobSearch.arrangements || []).map((a) => ARRANGEMENT_TEXT[a]).filter(Boolean);
+  if (arrangements.length && arrangements.length < 3) lines.push(`Accepts: ${arrangements.join(", ")} work`);
+  if (jobSearch.relocate) lines.push(`Would relocate at own cost: ${jobSearch.relocate === "yes" ? "yes" : "no"}`);
+  const languages = (jobSearch.languages || []).map((l) => JOB_FIT_I18N.languageName(l, "en"));
+  if (languages.length) lines.push(`Works in: ${languages.join(", ")}`);
+  return lines.join("\n");
+}
+
+function describePlace(place) {
+  if (!place || (!place.country && !place.arrangement)) return "";
+  const where = place.country ? placeEn(place) : "country unclear";
+  return `${where}${place.arrangement ? ` (${ARRANGEMENT_TEXT[place.arrangement]})` : ""}`;
+}
+
+// Stated in the user's own terms ("MXN 45000–60000 per month") with the
+// annual equivalent, since the schema asks the model for annual figures.
 function formatExpectedSalary(expectedSalary) {
-  const currencies = ["USD", "CAD", "MXN"];
-  const parts = currencies.map((cur) => {
-    const r = expectedSalary && expectedSalary[cur];
-    if (!r || (r.min == null && r.max == null)) return `${cur}: not specified`;
-    if (r.min != null && r.max != null) return `${cur}: ${r.min}–${r.max}`;
-    if (r.min != null) return `${cur}: ${r.min}+`;
-    return `${cur}: up to ${r.max}`;
-  });
-  return parts.join(", ");
+  const entries = Object.entries(expectedSalary || {}).filter(([, r]) => r && (r.min != null || r.max != null));
+  if (!entries.length) return "not specified";
+  return entries
+    .map(([cur, r]) => {
+      const period = r.period || "year";
+      const range = r.min != null && r.max != null ? `${r.min}–${r.max}` : r.min != null ? `${r.min}+` : `up to ${r.max}`;
+      if (period === "year") return `${cur} ${range} per year`;
+      const lo = JOB_FIT_GEO.toAnnual(r.min, period);
+      const hi = JOB_FIT_GEO.toAnnual(r.max, period);
+      const annual = lo != null && hi != null ? `${lo}–${hi}` : lo != null ? `${lo}+` : `up to ${hi}`;
+      return `${cur} ${range} per ${period} (about ${annual} per year)`;
+    })
+    .join(", ");
+}
+
+// A currency's expectation as an annual range, for the arithmetic below.
+function annualExpectation(expectedSalary, currency) {
+  const r = expectedSalary && currency && expectedSalary[currency];
+  if (!r || (r.min == null && r.max == null)) return null;
+  const period = r.period || "year";
+  return { min: JOB_FIT_GEO.toAnnual(r.min, period), max: JOB_FIT_GEO.toAnnual(r.max, period) };
 }
 
 // Postings put company boilerplate first and the qualifications, comp and
@@ -86,7 +187,7 @@ function trimPosting(postingText) {
   return { text: postingText.slice(0, headChars) + marker + postingText.slice(-tailChars), truncated: true };
 }
 
-function buildUserPrompt(profile, postingText, expectedSalary, domainFlags) {
+function buildUserPrompt(profile, postingText, expectedSalary, domainFlags, { jobSearch, place } = {}) {
   const { text: trimmed, truncated } = trimPosting(postingText);
   const domainFlagsLine =
     domainFlags && domainFlags.length
@@ -98,7 +199,13 @@ function buildUserPrompt(profile, postingText, expectedSalary, domainFlags) {
   // bills it at a discount; LM Studio reuses its KV cache), and the domain-flag
   // line used to sit between the profile and the posting, cutting that prefix
   // short on every posting that hit a different flag.
-  const prompt = `CANDIDATE PROFILE:\n${profile}\n\nCANDIDATE EXPECTED SALARY (per year): ${formatExpectedSalary(expectedSalary)}\n\nJOB POSTING:\n${trimmed}${domainFlagsLine}`;
+  // The situation is per profile, so it sits in the cached prefix; the
+  // posting's parsed location changes per posting and goes at the end.
+  const situation = describeSituation(jobSearch);
+  const situationBlock = situation ? `\n\nCANDIDATE SITUATION:\n${situation}` : "";
+  const where = describePlace(place);
+  const placeLine = where ? `\n\nPOSTING LOCATION (as read by a keyword scan; the posting itself is authoritative): ${where}` : "";
+  const prompt = `CANDIDATE PROFILE:\n${profile}\n\nCANDIDATE EXPECTED SALARY: ${formatExpectedSalary(expectedSalary)}${situationBlock}\n\nJOB POSTING:\n${trimmed}${domainFlagsLine}${placeLine}`;
   return { prompt, truncated };
 }
 
@@ -275,14 +382,14 @@ function openAiRequestBody(systemPrompt, userPrompt, settings, { caps = {}, tier
 // failure in the same shape callLmStudio uses everywhere else.
 function readOpenAiResponse(data) {
   if (!data || !Array.isArray(data.output)) {
-    return { ok: false, failure: "shape", error: "Unexpected response shape from OpenAI." };
+    return { ok: false, failure: "shape", error: t("bg.shapeOpenAi") };
   }
   const parts = data.output
     .filter((item) => item && item.type === "message")
     .flatMap((item) => (Array.isArray(item.content) ? item.content : []));
   const refusal = parts.find((p) => p.type === "refusal");
   if (refusal) {
-    return { ok: false, failure: "refusal", error: `OpenAI declined to answer: ${refusal.refusal || "no reason given"}` };
+    return { ok: false, failure: "refusal", error: t("bg.refusal", { reason: refusal.refusal || t("bg.noReason") }) };
   }
   const text = parts
     .filter((p) => p.type === "output_text" && typeof p.text === "string")
@@ -296,13 +403,15 @@ function readOpenAiResponse(data) {
     return {
       ok: false,
       failure: "length",
-      error: "The model used its whole output budget (much of it on reasoning) before answering. Lower the reasoning effort or pick a non-reasoning model.",
+      error: t("bg.lengthOpenAi"),
     };
   }
   return {
     ok: false,
     failure: "empty",
-    error: `OpenAI returned no text${data.status && data.status !== "completed" ? ` (status: ${data.status}${reason ? `, ${reason}` : ""})` : ""}.`,
+    error: t("bg.emptyOpenAi", {
+      status: data.status && data.status !== "completed" ? ` (${data.status}${reason ? `, ${reason}` : ""})` : "",
+    }),
   };
 }
 
@@ -478,6 +587,7 @@ function wantsFlex(settings, bulk, caps) {
 // minutes, and a Cancel button that only hid the spinner would leave LM
 // Studio busy generating an answer nobody is waiting for.
 async function callLmStudio(systemPrompt, userPrompt, { signal, bulk = false } = {}) {
+  await i18nReady;
   // Named for where it started; it now calls whichever provider is selected
   // (see provider.js): LM Studio's chat-completions endpoint, or OpenAI's
   // Responses API. The request and reply shapes differ per provider; the
@@ -490,10 +600,10 @@ async function callLmStudio(systemPrompt, userPrompt, { signal, bulk = false } =
     // Caught here rather than sent: OpenAI would answer 401/400, and "config"
     // pauses the queue with a message that says what to fix.
     if (!settings.apiKey) {
-      return { ok: false, failure: "config", error: "No OpenAI API key is set. Add it in the popup under Model, or switch the provider back to LM Studio." };
+      return { ok: false, failure: "config", error: t("bg.noApiKey") };
     }
     if (!model) {
-      return { ok: false, failure: "config", error: "No OpenAI model is selected. Pick one in the popup under Model." };
+      return { ok: false, failure: "config", error: t("bg.noModel") };
     }
     // Checked before sending, so the request that would cross the line is
     // never made. "budget" pauses the queue; raising the budget resumes it.
@@ -503,7 +613,10 @@ async function callLmStudio(systemPrompt, userPrompt, { signal, bulk = false } =
         return {
           ok: false,
           failure: "budget",
-          error: `Today's OpenAI budget is used up (${used.toLocaleString()} of ${settings.dailyTokenBudget.toLocaleString()} tokens). Raise it in the popup under Model to continue now, or press Resume tomorrow.`,
+          error: t("bg.budgetUsed", {
+            used: JOB_FIT_I18N.formatNumber(used),
+            budget: JOB_FIT_I18N.formatNumber(settings.dailyTokenBudget),
+          }),
         };
       }
     }
@@ -535,15 +648,15 @@ async function callLmStudio(systemPrompt, userPrompt, { signal, bulk = false } =
     });
 
     if (sent.error) {
-      if (sent.error === "cancelled") return { ok: false, failure: "cancelled", error: "Cancelled." };
+      if (sent.error === "cancelled") return { ok: false, failure: "cancelled", error: t("bg.cancelled") };
       if (sent.error === "timeout") {
         return {
           ok: false,
           failure: "timeout",
           error:
             provider === "openai"
-              ? `OpenAI didn't respond within ${attemptTimeoutSeconds}s${tier === "flex" ? " (Flex processing is slower by design)" : ""}. Try again, or raise the timeout in the popup settings.`
-              : `Local model didn't respond within ${timeoutSeconds}s. If LM Studio's own console shows it was still making progress (not stuck repeating itself), raise the timeout in the popup settings — this model may just need longer. If it looked stuck looping, a longer timeout won't help.`,
+              ? t(tier === "flex" ? "bg.openaiTimeoutFlex" : "bg.openaiTimeout", { seconds: attemptTimeoutSeconds })
+              : t("bg.lmTimeout", { seconds: timeoutSeconds }),
         };
       }
       return {
@@ -551,8 +664,8 @@ async function callLmStudio(systemPrompt, userPrompt, { signal, bulk = false } =
         failure: "unreachable",
         error:
           provider === "openai"
-            ? `Could not reach OpenAI — check the internet connection. (${sent.message})`
-            : `Could not reach LM Studio at ${url} — is it running? (${sent.message})`,
+            ? t("bg.openaiUnreachable", { detail: sent.message })
+            : t("bg.lmUnreachable", { url, detail: sent.message }),
       };
     }
 
@@ -585,10 +698,10 @@ async function callLmStudio(systemPrompt, userPrompt, { signal, bulk = false } =
     // Names the model: a paused queue shows this message until it resumes, and
     // without the name there's no way to tell whether it's about the model
     // configured now or one you've since switched away from.
-    const which = model ? ` for model "${model}"` : "";
+    const which = model ? t("bg.forModel", { model }) : "";
     // OpenAI wraps its reason in {"error":{"message"}}; show just that.
     const detail = parseOpenAiError(body).message || body.slice(0, 300);
-    return { ok: false, failure: "http", error: `${label} returned HTTP ${resp.status}${which}: ${detail}` };
+    return { ok: false, failure: "http", error: t("bg.http", { label, status: resp.status, which, detail }) };
   }
 
   const data = await resp.json().catch(() => null);
@@ -607,7 +720,7 @@ async function callLmStudio(systemPrompt, userPrompt, { signal, bulk = false } =
     try {
       return { ok: true, data: extractJson(read.text), model: model || "", usage, durationMs: Date.now() - startedAt };
     } catch (err) {
-      return { ok: false, failure: "parse", error: "Could not parse JSON from OpenAI's response.", raw: read.text };
+      return { ok: false, failure: "parse", error: t("bg.parseOpenAi"), raw: read.text };
     }
   }
 
@@ -622,7 +735,7 @@ async function callLmStudio(systemPrompt, userPrompt, { signal, bulk = false } =
   const raw = typeof content === "string" && content.trim() !== "" ? content : reasoningContent;
 
   if (typeof raw !== "string") {
-    return { ok: false, failure: "shape", error: "Unexpected response shape from LM Studio.", raw: JSON.stringify(data) };
+    return { ok: false, failure: "shape", error: t("bg.shapeLm"), raw: JSON.stringify(data) };
   }
 
   if (raw.trim() === "") {
@@ -630,10 +743,7 @@ async function callLmStudio(systemPrompt, userPrompt, { signal, bulk = false } =
     return {
       ok: false,
       failure: finishReason === "length" ? "length" : "empty",
-      error:
-        finishReason === "length"
-          ? "The model hit the max_tokens cap before producing any output — likely stuck in its own reasoning trace. Try a smaller/faster or non-reasoning model."
-          : "The model returned an empty response.",
+      error: finishReason === "length" ? t("bg.lengthLm") : t("bg.emptyLm"),
     };
   }
 
@@ -642,7 +752,7 @@ async function callLmStudio(systemPrompt, userPrompt, { signal, bulk = false } =
     // different models are not comparable, and the history page sorts by score.
     return { ok: true, data: extractJson(raw), model: model || "", usage, durationMs: Date.now() - startedAt };
   } catch (err) {
-    return { ok: false, failure: "parse", error: "Could not parse JSON from the model's response.", raw };
+    return { ok: false, failure: "parse", error: t("bg.parseModel"), raw };
   }
 }
 
@@ -662,14 +772,16 @@ function compareSalary(salary, expectedSalary) {
     min = salary.estimated_market_min;
     max = salary.estimated_market_max;
     currency = salary.estimated_market_currency;
-    basisNote = " (posting didn't state a range — compared against the market estimate instead)";
+    basisNote = ` ${t("bg.salaryBasisNote")}`;
   }
 
   if (min == null && max == null) {
     return { ...salary, vs_candidate_expectation: "unknown" };
   }
 
-  const expectedRange = expectedSalary && currency && expectedSalary[currency];
+  // Annual on both sides: the schema asks the model for annual figures, and a
+  // monthly expectation is converted here.
+  const expectedRange = annualExpectation(expectedSalary, currency);
   if (!expectedRange || (expectedRange.min == null && expectedRange.max == null)) {
     return { ...salary, vs_candidate_expectation: "unknown" };
   }
@@ -686,7 +798,7 @@ function compareSalary(salary, expectedSalary) {
   return { ...salary, vs_candidate_expectation: verdict, note: `${salary.note || ""}${basisNote}`.trim() };
 }
 
-const SENIORITY_REGEX = /\b(senior|sr\.?|staff|lead|principal|architect)\b/i;
+const SENIORITY_REGEX = /\b(senior|sr\.?|staff|lead|principal|architect|l[íi]der|arquitect[oa]|s[êe]nior|principal|chef d'[ée]quipe|architecte|especialista)\b/i;
 
 // Computed in code for the same reason as compareSalary: this is a
 // keyword-presence check plus arithmetic, not something to leave to the
@@ -707,12 +819,15 @@ function checkSeniorityMismatch(postingText, salary, expectedSalary) {
   const currency = salary.posting_stated_currency;
   if (max == null || !currency) return null;
 
-  const expectedRange = expectedSalary && expectedSalary[currency];
+  const expectedRange = annualExpectation(expectedSalary, currency);
   if (!expectedRange || expectedRange.min == null) return null;
 
   const threshold = expectedRange.min * 0.8;
   if (max < threshold) {
-    return `Posting doesn't mention senior/staff/lead/principal, and its salary ceiling (${max} ${currency}) is below 80% of your expected floor (${expectedRange.min} ${currency}) — likely below your level.`;
+    return t("bg.seniorityFlag", {
+      max: `${JOB_FIT_I18N.formatNumber(max)} ${currency}`,
+      floor: `${JOB_FIT_I18N.formatNumber(expectedRange.min)} ${currency}`,
+    });
   }
   return null;
 }
@@ -732,13 +847,13 @@ function applyScoreCaps(data, { domainFlags, seniorityFlag }) {
     );
     if (uncoveredDomainFlag && score > 50) {
       score = 50;
-      capReasons.push("required domain-flag gap not covered by profile");
+      capReasons.push(t("bg.capDomain"));
     }
   }
 
   if (typeof score === "number" && seniorityFlag && score > 40) {
     score = 40;
-    capReasons.push("seniority/comp mismatch");
+    capReasons.push(t("bg.capSeniority"));
   }
 
   // raw_score preserves what the model actually said. The caps are heuristics,
@@ -758,9 +873,10 @@ function applyScoreCaps(data, { domainFlags, seniorityFlag }) {
 // independent read could land on a different profile if the user switched in
 // between, scoring a posting against one profile's keywords and another's
 // salary expectations.
-async function evaluateWithLmStudio({ profile, postingText, domainFlags, expectedSalary }, signal, { bulk = false } = {}) {
-  const { prompt, truncated } = buildUserPrompt(profile, postingText, expectedSalary, domainFlags);
-  const result = await callLmStudio(SYSTEM_PROMPT, prompt, { signal, bulk });
+async function evaluateWithLmStudio({ profile, postingText, domainFlags, expectedSalary, jobSearch, place }, signal, { bulk = false } = {}) {
+  await i18nReady;
+  const { prompt, truncated } = buildUserPrompt(profile, postingText, expectedSalary, domainFlags, { jobSearch, place });
+  const result = await callLmStudio(systemPrompt(), prompt, { signal, bulk });
 
   if (result.ok && result.data) {
     // Surfaced in the banner: a score produced from a partial posting is worth
@@ -777,21 +893,45 @@ async function evaluateWithLmStudio({ profile, postingText, domainFlags, expecte
   return result;
 }
 
-const SALARY_SUGGEST_PROMPT = `You estimate reasonable target salary ranges for a candidate based on their profile, for each of three currencies/markets.
+// One entry per market the user applies in — a currency, the period pay is
+// quoted in there, and the country when there is one — so a Mexican market is
+// asked for monthly pesos and the US for annual dollars.
+const DEFAULT_SALARY_MARKETS = [
+  { currency: "USD", period: "year", country: "US" },
+  { currency: "CAD", period: "year", country: "CA" },
+  { currency: "MXN", period: "year", country: "MX" },
+];
+
+function salarySuggestPrompt(markets) {
+  const describe = (m) =>
+    `${m.currency} (${m.country ? countryNameEn(m.country) : `roles paid in ${m.currency}`}), quoted per ${m.period}`;
+  const schema = markets
+    .map((m) => `  "${m.currency}": { "min": <integer, gross, per ${m.period}>, "max": <integer, gross, per ${m.period}> }`)
+    .join(",\n");
+  const lang = JOB_FIT_I18N.lang;
+  const languageLine =
+    lang === "en" ? "" : `\nWrite "reasoning" in ${JOB_FIT_I18N.modelLanguageName(lang)}.`;
+  return `You estimate reasonable target salary ranges for a candidate based on their profile, for each of these markets: ${markets.map(describe).join("; ")}.
 Return ONLY a JSON object, no prose, no markdown fences.
 
 Schema:
 {
-  "USD": { "min": <integer, annual>, "max": <integer, annual> },
-  "CAD": { "min": <integer, annual>, "max": <integer, annual> },
-  "MXN": { "min": <integer, annual>, "max": <integer, annual> },
+${schema},
   "reasoning": "<one or two sentences: role, seniority, and market basis for each estimate>"
 }
 
-Base each on the candidate's years of experience, skill level, domain, and any target location/role mentioned in the profile, adjusted for that market. These are starting points for the candidate to adjust, not precise figures.`;
+Base each on the candidate's years of experience, skill level, domain, and any target location/role mentioned in the profile or situation, adjusted for that market and quoted in the period given. These are starting points for the candidate to adjust, not precise figures.${languageLine}`;
+}
 
-async function suggestSalary({ profile }, signal) {
-  return callLmStudio(SALARY_SUGGEST_PROMPT, `CANDIDATE PROFILE:\n${profile}`, { signal });
+async function suggestSalary({ profile, markets, jobSearch }, signal) {
+  await i18nReady;
+  const list = Array.isArray(markets) && markets.length ? markets : DEFAULT_SALARY_MARKETS;
+  const situation = describeSituation(jobSearch);
+  return callLmStudio(
+    salarySuggestPrompt(list),
+    `CANDIDATE PROFILE:\n${profile}${situation ? `\n\nCANDIDATE SITUATION:\n${situation}` : ""}`,
+    { signal }
+  );
 }
 
 // Asks for one field per template section rather than the finished text, and
@@ -820,28 +960,38 @@ Rules:
 - "gaps" matters most: an evaluator uses it to tell a real gap from a silence. Name concrete things (e.g. "Kubernetes, distributed systems, mobile"), never soft skills. If the CV is too thin to judge, name the most common requirements of the target roles it doesn't mention.
 - For "work_authorisation", use the CANDIDATE ANSWERS when given; they override anything the CV implies.`;
 
+function profileDraftPrompt() {
+  const lang = JOB_FIT_I18N.lang;
+  if (lang === "en") return PROFILE_DRAFT_PROMPT;
+  return `${PROFILE_DRAFT_PROMPT}
+- Write every value in ${JOB_FIT_I18N.modelLanguageName(lang)}, keeping technology, product and standard names as they are.`;
+}
+
 function assembleDraftProfile(draft) {
   const clean = (value) => (typeof value === "string" ? value.trim() : "");
   const lines = [clean(draft.headline)];
+  // Labels in the user's language; the wizard's section meter and the
+  // evaluator recognise them in every language JobFit has.
   [
-    ["Core", draft.core],
-    ["Specialisms", draft.specialisms],
-    ["Tooling/platform", draft.tooling],
-    ["Leadership", draft.leadership],
-    ["Gaps", draft.gaps],
-    ["Work authorisation", draft.work_authorisation],
-    ["Target", draft.target],
-  ].forEach(([label, value]) => {
+    ["core", draft.core],
+    ["specialisms", draft.specialisms],
+    ["tooling", draft.tooling],
+    ["leadership", draft.leadership],
+    ["gaps", draft.gaps],
+    ["workAuth", draft.work_authorisation],
+    ["target", draft.target],
+  ].forEach(([id, value]) => {
     // Gaps is kept even when empty, so the gap in the profile is visible in
     // the editor rather than silently missing.
-    if (clean(value) || label === "Gaps") lines.push(`${label}: ${clean(value)}`);
+    if (clean(value) || id === "gaps") lines.push(`${t(`profileLabel.${id}`)}: ${clean(value)}`);
   });
   return lines.filter(Boolean).join("\n");
 }
 
 async function draftProfile({ cv, answersText }, signal) {
+  await i18nReady;
   const answers = answersText ? `\n\nCANDIDATE ANSWERS:\n${answersText}` : "";
-  const result = await callLmStudio(PROFILE_DRAFT_PROMPT, `CV:\n${String(cv).slice(0, 20000)}${answers}`, { signal });
+  const result = await callLmStudio(profileDraftPrompt(), `CV:\n${String(cv).slice(0, 20000)}${answers}`, { signal });
   if (!result.ok) return result;
   return { ok: true, profile: assembleDraftProfile(result.data || {}) };
 }
@@ -859,8 +1009,16 @@ Rules:
 - Write each term the way postings phrase it ("machine learning", "Kubernetes", "React Native"), so it can be matched as literal text.
 - Never include anything the profile says the candidate has, and nothing generic ("communication", "teamwork", "software").`;
 
-async function suggestDomainFlags({ profile }, signal) {
-  const result = await callLmStudio(DOMAIN_FLAG_SUGGEST_PROMPT, `CANDIDATE PROFILE:\n${profile}`, { signal });
+// Flags are matched as literal text, so they have to be in the language the
+// postings are written in. For someone who reads postings in more than one
+// language, both phrasings are worth having.
+async function suggestDomainFlags({ profile, languages }, signal) {
+  await i18nReady;
+  const spoken = (Array.isArray(languages) ? languages : []).filter((l) => l !== "en");
+  const extra = spoken.length
+    ? `\n- The candidate also reads postings in ${spoken.map((l) => JOB_FIT_I18N.languageName(l, "en")).join(" and ")}: where a term is usually written differently there (e.g. "machine learning" / "aprendizaje automático"), include that phrasing as a separate term too.`
+    : "";
+  const result = await callLmStudio(DOMAIN_FLAG_SUGGEST_PROMPT + extra, `CANDIDATE PROFILE:\n${profile}`, { signal });
   if (!result.ok) return result;
   const terms = Array.isArray(result.data?.terms) ? result.data.terms : [];
   const seen = new Set();
@@ -877,7 +1035,8 @@ async function suggestDomainFlags({ profile }, signal) {
 async function testEvaluate(message, signal) {
   const snapshot = await JOB_FIT_QUEUE.snapshot();
   if (snapshot.active > 0) {
-    return { ok: false, failure: "busy", error: `The queue is evaluating ${snapshot.active} job(s) — try again when it's done.` };
+    await i18nReady;
+    return { ok: false, failure: "busy", error: t("bg.queueBusy", { count: snapshot.active }) };
   }
   return evaluateWithLmStudio(
     {
@@ -885,6 +1044,8 @@ async function testEvaluate(message, signal) {
       postingText: message.postingText,
       domainFlags: message.domainFlags,
       expectedSalary: message.expectedSalary,
+      jobSearch: message.jobSearch,
+      place: message.place,
     },
     signal
   );
@@ -932,11 +1093,22 @@ Rules:
 - Keep items short but keep the specifics: years of experience, named technologies, degree level.
 - Omit company boilerplate, benefits, EEO/diversity statements, application instructions and legal disclaimers.`;
 
+function summarizePrompt() {
+  const lang = JOB_FIT_I18N.lang;
+  if (lang === "en") return SUMMARIZE_SYSTEM_PROMPT;
+  return `${SUMMARIZE_SYSTEM_PROMPT}
+- Write every value in ${JOB_FIT_I18N.modelLanguageName(lang)}, keeping technology, product, standard and company names as written. Write "not stated" as-is when something isn't stated.`;
+}
+
 function assembleSummary(data) {
   if (!data || typeof data !== "object") return "";
   const text = (value) => (typeof value === "string" ? value.trim() : "");
   const list = (value) => (Array.isArray(value) ? value.map(text).filter(Boolean) : []);
-  const stated = (value) => text(value) || "not stated";
+  const notStated = t("brief.notStated");
+  const stated = (value) => {
+    const v = text(value);
+    return !v || v.toLowerCase() === "not stated" ? notStated : v;
+  };
 
   // A model that ignored the schema and answered in the old single-field
   // shape still produces a usable brief.
@@ -945,20 +1117,20 @@ function assembleSummary(data) {
 
   const bullets = (title, items) => (items.length ? `\n\n${title}:\n${items.map((i) => `- ${i}`).join("\n")}` : "");
   const lines = [
-    "JOB POSTING (condensed)",
-    `Role: ${stated(data.role)}`,
-    `Seniority: ${stated(data.seniority)}`,
-    `Location: ${stated(data.location)}`,
-    `Compensation: ${stated(data.compensation)}`,
-    `Work authorization: ${stated(data.work_authorization)}`,
+    t("brief.heading"),
+    `${t("brief.role")}: ${stated(data.role)}`,
+    `${t("brief.seniority")}: ${stated(data.seniority)}`,
+    `${t("brief.location")}: ${stated(data.location)}`,
+    `${t("brief.compensation")}: ${stated(data.compensation)}`,
+    `${t("brief.workAuth")}: ${stated(data.work_authorization)}`,
   ].join("\n");
   const notes = text(data.other_notes);
   return (
     lines +
-    bullets("Responsibilities", list(data.responsibilities)) +
-    bullets("Required", list(data.required)) +
-    bullets("Preferred", list(data.preferred)) +
-    (notes ? `\n\nOther notes: ${notes}` : "")
+    bullets(t("brief.responsibilities"), list(data.responsibilities)) +
+    bullets(t("brief.required"), list(data.required)) +
+    bullets(t("brief.preferred"), list(data.preferred)) +
+    (notes ? `\n\n${t("brief.otherNotes")}: ${notes}` : "")
   );
 }
 
@@ -1052,10 +1224,22 @@ async function recordProbe(probe) {
 // jobs already in Tracked jobs. A deleted profile falls back to what the item
 // was queued with.
 async function screenQueuedItem(item) {
+  await i18nReady;
   const { profiles } = await JOB_FIT_PROFILES.load();
   const profile = profiles.find((p) => p.id === item.profileId);
-  if (!profile) return { hardReject: null, domainFlags: item.domainFlags || [], softWarnings: item.softWarnings || [] };
-  return JOB_FIT_SCREEN.screen(item.postingText || "", profile.keywords);
+  if (!profile) {
+    const place = JOB_FIT_GEO.postingPlace({ location: item.location, text: item.postingText || "" });
+    return {
+      hardReject: null,
+      domainFlags: item.domainFlags || [],
+      softWarnings: item.softWarnings || [],
+      place: { country: place.country, region: place.region, arrangement: place.arrangement },
+    };
+  }
+  return JOB_FIT_SCREEN.screen(item.postingText || "", profile.keywords, {
+    location: item.location,
+    jobSearch: profile.jobSearch,
+  });
 }
 
 async function runQueuedEvaluation(item) {
@@ -1073,6 +1257,7 @@ async function runQueuedEvaluation(item) {
     text: item.postingText,
     extractor: item.extractor,
     profileFingerprint: snapshot.fingerprint,
+    place: screened.place || null,
   };
 
   // A hard reject is filed the way the page files one — score 0, no model
@@ -1094,7 +1279,7 @@ async function runQueuedEvaluation(item) {
         softWarnings: [],
       });
     } catch (err) {
-      return { ok: false, failure: "storage", error: `Rejected, but could not be saved: ${err.message}` };
+      return { ok: false, failure: "storage", error: t("bg.rejectNotSaved", { error: err.message }) };
     }
     await notifyTab(item, record);
     return { ok: true };
@@ -1106,6 +1291,8 @@ async function runQueuedEvaluation(item) {
       postingText: item.postingText,
       domainFlags: screened.domainFlags,
       expectedSalary: snapshot.expectedSalary,
+      jobSearch: snapshot.jobSearch,
+      place: screened.place,
     },
     undefined,
     // Set on re-evaluations queued in bulk from Tracked jobs: eligible for Flex.
@@ -1130,7 +1317,7 @@ async function runQueuedEvaluation(item) {
       softWarnings: screened.softWarnings,
     });
   } catch (err) {
-    return { ok: false, failure: "storage", error: `Scored, but could not be saved: ${err.message}` };
+    return { ok: false, failure: "storage", error: t("bg.scoredNotSaved", { error: err.message }) };
   }
 
   await recordDuration(result.durationMs);
@@ -1139,7 +1326,8 @@ async function runQueuedEvaluation(item) {
 }
 
 async function runQueuedSummarize(item) {
-  const result = await callLmStudio(SUMMARIZE_SYSTEM_PROMPT, buildSummarizePrompt(item.postingText));
+  await i18nReady;
+  const result = await callLmStudio(summarizePrompt(), buildSummarizePrompt(item.postingText));
   if (!result.ok) return result;
 
   const summary = assembleSummary(result.data);
@@ -1161,7 +1349,16 @@ async function runQueuedSummarize(item) {
   const combined = JOB_FIT_EVALSTORE.briefText(record);
 
   await chrome.storage.local.set({
-    lastSummary: { url: item.url, ts: Date.now(), profileId: item.profileId, jobKey: item.jobKey, text: combined },
+    lastSummary: {
+      url: item.url,
+      ts: Date.now(),
+      profileId: item.profileId,
+      jobKey: item.jobKey,
+      text: combined,
+      // Whether the brief carries this profile's evaluation, for the popup's
+      // "Copied (includes …)" line — the text itself is in the user's language.
+      hasEvaluation: Boolean(JOB_FIT_EVALSTORE.formatEvaluation(record)),
+    },
   });
   return { ok: true };
 }
@@ -1213,6 +1410,7 @@ chrome.runtime.onInstalled.addListener((details) => {
 // the icon: a red "!" for this tab, with the reason as the tooltip.
 async function evaluateTab(tab) {
   if (!tab || tab.id == null) return;
+  await i18nReady;
   const started = await startEvaluation(tab.id);
   if (started.ok) return;
   try {
@@ -1245,7 +1443,7 @@ async function startFirstRunSetup() {
   const store = await JOB_FIT_PROFILES.load();
   const seed = store.profiles[0];
   seed.setupIncomplete = true;
-  seed.keywords.domainFlags = JOB_FIT_KEYWORDS.emptyConfig();
+  seed.keywords.domainFlags = JOB_FIT_KEYWORDS.emptyConfig("domainFlags");
   await JOB_FIT_PROFILES.save(store);
   await chrome.storage.local.set({ wizardProgress: { [seed.id]: { mode: "install", step: 0, furthest: 0 } } });
   chrome.tabs.create({ url: chrome.runtime.getURL(`wizard.html?mode=install&profile=${encodeURIComponent(seed.id)}`) });

@@ -1,0 +1,11 @@
+{
+  "extName": {
+    "message": "JobFit"
+  },
+  "extDescription": {
+    "message": "Évalue l'offre d'emploi de l'onglet actif par rapport à un profil de candidat enregistré."
+  },
+  "cmdEvaluate": {
+    "message": "Évaluer l'offre d'emploi de cet onglet"
+  }
+}

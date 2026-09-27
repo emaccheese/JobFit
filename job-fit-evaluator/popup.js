@@ -17,12 +17,9 @@ const els = {
   openAiMaxOutput: document.getElementById("openAiMaxOutput"),
   openAiBudget: document.getElementById("openAiBudget"),
   profile: document.getElementById("profile"),
-  salaryUsdMin: document.getElementById("salaryUsdMin"),
-  salaryUsdMax: document.getElementById("salaryUsdMax"),
-  salaryCadMin: document.getElementById("salaryCadMin"),
-  salaryCadMax: document.getElementById("salaryCadMax"),
-  salaryMxnMin: document.getElementById("salaryMxnMin"),
-  salaryMxnMax: document.getElementById("salaryMxnMax"),
+  salaryRows: document.getElementById("salaryRows"),
+  salaryAdd: document.getElementById("salaryAdd"),
+  uiLanguage: document.getElementById("uiLanguage"),
   hardRejectsPresets: document.getElementById("hardRejectsPresets"),
   hardRejectsPhrases: document.getElementById("hardRejectsPhrases"),
   hardRejectsPatterns: document.getElementById("hardRejectsPatterns"),
@@ -34,11 +31,110 @@ const els = {
   status: document.getElementById("status"),
 };
 
-const SALARY_CURRENCIES = ["USD", "CAD", "MXN"];
+// --- salary ----------------------------------------------------------------
+//
+// One row per currency: the currencies of the profile's target countries,
+// any that already hold figures, and any added with "+ Add a currency".
+// Each row has its own pay period, because a Mexican salary is usually
+// quoted per month and a US one per year.
+let salaryCurrencies = [];
+
+function salaryCurrenciesFor(profile) {
+  const list = [];
+  const add = (c) => c && !list.includes(c) && list.push(c);
+  ((profile.jobSearch || {}).targetCountries || []).forEach((c) => add(JOB_FIT_GEO.currencyOf(c)));
+  Object.entries(profile.expectedSalary || {}).forEach(([c, r]) => {
+    if (r && (r.min != null || r.max != null)) add(c);
+  });
+  if (!list.length) ["USD", "CAD", "MXN"].forEach(add);
+  return list;
+}
+
+// The country a currency is being used for: a target country that pays in
+// it, else the first country that does.
+function countryForCurrency(currency, profile) {
+  const targets = ((profile && profile.jobSearch) || {}).targetCountries || [];
+  return (
+    targets.find((c) => JOB_FIT_GEO.currencyOf(c) === currency) ||
+    JOB_FIT_GEO.CODES.find((c) => JOB_FIT_GEO.currencyOf(c) === currency) ||
+    null
+  );
+}
+
+function defaultPeriod(currency, profile) {
+  const country = countryForCurrency(currency, profile);
+  return country ? JOB_FIT_GEO.periodOf(country) : "year";
+}
 
 function salaryFieldsFor(currency) {
-  const key = currency.charAt(0) + currency.slice(1).toLowerCase();
-  return { min: els[`salary${key}Min`], max: els[`salary${key}Max`] };
+  const row = els.salaryRows.querySelector(`[data-currency="${currency}"]`);
+  return row
+    ? { min: row.querySelector(".sal-min"), max: row.querySelector(".sal-max"), period: row.querySelector(".sal-period") }
+    : null;
+}
+
+function renderSalaryRows(profile) {
+  els.salaryRows.innerHTML = "";
+  salaryCurrencies.forEach((cur) => {
+    const range = (profile.expectedSalary || {})[cur] || {};
+    const row = document.createElement("div");
+    row.className = "salary-row";
+    row.dataset.currency = cur;
+    const label = document.createElement("span");
+    label.className = "currency-label";
+    label.textContent = cur;
+    row.appendChild(label);
+    ["min", "max"].forEach((end) => {
+      const input = document.createElement("input");
+      input.type = "number";
+      input.className = `sal-${end}`;
+      input.placeholder = t(end === "min" ? "common.min" : "common.max");
+      input.value = range[end] ?? "";
+      row.appendChild(input);
+    });
+    const period = document.createElement("select");
+    period.className = "sal-period";
+    ["year", "month", "hour"].forEach((value) => {
+      const opt = document.createElement("option");
+      opt.value = value;
+      opt.textContent = t(`period.${value}`);
+      period.appendChild(opt);
+    });
+    period.value = range.period && (range.min != null || range.max != null) ? range.period : defaultPeriod(cur, profile);
+    row.appendChild(period);
+    els.salaryRows.appendChild(row);
+  });
+  renderSalaryAdd();
+}
+
+function renderSalaryAdd() {
+  const select = els.salaryAdd;
+  select.innerHTML = "";
+  const first = document.createElement("option");
+  first.value = "";
+  first.textContent = t("popup.addCurrency");
+  select.appendChild(first);
+  const all = Array.from(new Set(JOB_FIT_GEO.CODES.map(JOB_FIT_GEO.currencyOf))).filter((c) => !salaryCurrencies.includes(c)).sort();
+  all.forEach((cur) => {
+    const opt = document.createElement("option");
+    opt.value = cur;
+    opt.textContent = cur;
+    select.appendChild(opt);
+  });
+}
+
+// A line under the profile picker: where this profile is looking, so it's
+// clear which country rules apply. Edited in the setup wizard.
+function renderSearchSummary(profile) {
+  const host = document.getElementById("searchSummary");
+  const js = profile.jobSearch || {};
+  const targets = (js.targetCountries || []).map((c) => JOB_FIT_I18N.countryName(c));
+  const home = js.home && js.home.country ? JOB_FIT_GEO.placeText(js.home) : "";
+  const parts = [
+    targets.length ? t("popup.searchTargets", { countries: JOB_FIT_I18N.list(targets) }) : null,
+    home ? t("popup.searchHome", { place: home }) : null,
+  ].filter(Boolean);
+  host.textContent = parts.length ? parts.join(" · ") : t("popup.searchNone");
 }
 
 function linesToArray(text) {
@@ -105,7 +201,7 @@ function renderPresetCheckboxes() {
       box.type = "checkbox";
       box.value = preset.id;
       row.appendChild(box);
-      row.appendChild(document.createTextNode(preset.label));
+      row.appendChild(document.createTextNode(JOB_FIT_KEYWORDS.presetLabel(preset)));
       host.appendChild(row);
     });
   });
@@ -145,11 +241,13 @@ function fillKeywordConfig(kind, config) {
 // the LM Studio fields — those are global and saved separately.
 function collectProfileFields() {
   const expectedSalary = {};
-  SALARY_CURRENCIES.forEach((cur) => {
-    const { min, max } = salaryFieldsFor(cur);
+  salaryCurrencies.forEach((cur) => {
+    const fields = salaryFieldsFor(cur);
+    if (!fields) return;
     expectedSalary[cur] = {
-      min: min.value === "" ? null : Number(min.value),
-      max: max.value === "" ? null : Number(max.value),
+      min: fields.min.value === "" ? null : Number(fields.min.value),
+      max: fields.max.value === "" ? null : Number(fields.max.value),
+      period: fields.period.value,
     };
   });
   return {
@@ -166,12 +264,9 @@ function collectProfileFields() {
 function fillFormFromProfile(profile) {
   els.profile.value = profile.profile;
   KEYWORD_KINDS.forEach((kind) => fillKeywordConfig(kind, profile.keywords[kind]));
-  SALARY_CURRENCIES.forEach((cur) => {
-    const range = profile.expectedSalary[cur] || { min: null, max: null };
-    const { min, max } = salaryFieldsFor(cur);
-    min.value = range.min ?? "";
-    max.value = range.max ?? "";
-  });
+  salaryCurrencies = salaryCurrenciesFor(profile);
+  renderSalaryRows(profile);
+  renderSearchSummary(profile);
   formProfileId = profile.id;
   document.getElementById("salaryReasoning").textContent = "";
   applyForcedSections();
@@ -182,7 +277,13 @@ function fillFormFromProfile(profile) {
 function captureForm() {
   const target = store.profiles.find((p) => p.id === formProfileId);
   if (!target) return;
-  Object.assign(target, collectProfileFields());
+  const fields = collectProfileFields();
+  // The keyword configs carry bookkeeping the form doesn't show (`seen`);
+  // keep it, or a category added later would be re-ticked on every save.
+  KEYWORD_KINDS.forEach((kind) => {
+    fields.keywords[kind].seen = (target.keywords[kind] && target.keywords[kind].seen) || JOB_FIT_KEYWORDS.presetsFor(kind).map((p) => p.id);
+  });
+  Object.assign(target, fields);
 }
 
 async function loadSettings() {
@@ -231,7 +332,7 @@ function scheduleAutoSave() {
   captureForm();
   clearTimeout(autoSaveTimer);
   autoSaveTimer = setTimeout(() => {
-    persistSettings().then(() => setStatus("Saved automatically."));
+    persistSettings().then(() => setStatus(t("popup.savedAuto")));
   }, 400);
 }
 
@@ -287,13 +388,13 @@ function renderTierOptions() {
     opt.value = tier.id;
     const cost = JOB_FIT_PROVIDER.formatDollars(JOB_FIT_PROVIDER.costPer100(tier));
     const missing = availableOpenAiModels && !availableOpenAiModels.includes(tier.model);
-    opt.textContent = `${tier.label} — ${tier.model}${missing ? " (not on this key)" : ` · ≈ ${cost} per 100 jobs`}`;
+    opt.textContent = `${t(`tier.${tier.id}.label`)} — ${tier.model}${missing ? ` ${t("popup.notOnKey")}` : ` · ${t("popup.perHundred", { cost })}`}`;
     opt.disabled = Boolean(missing);
     select.appendChild(opt);
   });
   const custom = document.createElement("option");
   custom.value = "custom";
-  custom.textContent = "Custom model…";
+  custom.textContent = t("popup.customModel");
   select.appendChild(custom);
   const tier = JOB_FIT_PROVIDER.tierForModel(current);
   select.value = tier ? tier.id : "custom";
@@ -305,11 +406,11 @@ function syncTierHint() {
   document.getElementById("openAiCustomRow").hidden = Boolean(tier);
   const hint = document.getElementById("openAiTierHint");
   if (!tier) {
-    hint.textContent = "Any chat model your key has. Its cost isn't estimated here.";
+    hint.textContent = t("popup.customModelHint");
     return;
   }
   const flex = JOB_FIT_PROVIDER.formatDollars(JOB_FIT_PROVIDER.costPer100(tier, "flex"));
-  hint.textContent = `${tier.blurb} About ${flex} per 100 with Flex.`;
+  hint.textContent = `${t(`tier.${tier.id}.blurb`)} ${t("popup.flexCost", { cost: flex })}`;
 }
 
 function selectedOpenAiModel() {
@@ -327,7 +428,7 @@ function renderReasoningOptions() {
   ["", ...allowed].forEach((value) => {
     const opt = document.createElement("option");
     opt.value = value;
-    opt.textContent = value || "(model default)";
+    opt.textContent = value || t("popup.modelDefault");
     select.appendChild(opt);
   });
   select.value = JOB_FIT_PROVIDER.effectiveReasoningEffort(selectedOpenAiModel(), wanted);
@@ -361,18 +462,21 @@ async function renderUsage() {
         },
         { requests: 0, tokens: 0 }
       );
-  const t = sum((d) => d === today);
+  const day = sum((d) => d === today);
   const m = sum((d) => d.startsWith(month));
   if (!m.requests) {
-    host.textContent = "Blank for no limit. Usage shows here once you've run some requests.";
+    host.textContent = t("popup.usageEmpty");
     return;
   }
   const avg = Math.round(m.tokens / m.requests);
   const budget = Number(els.openAiBudget.value) || 0;
   host.textContent =
-    `Today: ${t.requests} request${t.requests === 1 ? "" : "s"}, ${formatTokens(t.tokens)} tokens · ` +
-    `this month: ${formatTokens(m.tokens)} · about ${formatTokens(avg)} per request` +
-    (budget ? ` — this budget allows roughly ${Math.floor(budget / avg)} a day.` : ". Blank budget = no limit.");
+    t("popup.usageLine", {
+      count: day.requests,
+      tokens: formatTokens(day.tokens),
+      month: formatTokens(m.tokens),
+      avg: formatTokens(avg),
+    }) + " " + (budget ? t("popup.usageBudget", { count: Math.floor(budget / avg) }) : t("popup.usageNoBudget"));
 }
 
 function showProviderFields() {
@@ -411,16 +515,16 @@ function watchSettingsFields() {
     els.hardRejectsPhrases, els.hardRejectsPatterns,
     els.softWarningsPhrases, els.softWarningsPatterns,
     els.domainFlagsPhrases, els.domainFlagsPatterns,
-    ...SALARY_CURRENCIES.flatMap((cur) => {
-      const { min, max } = salaryFieldsFor(cur);
-      return [min, max];
-    }),
   ].filter(Boolean);
 
   fields.forEach((field) => {
     field.addEventListener("input", scheduleAutoSave);
     field.addEventListener("change", flushAutoSave);
   });
+
+  // Salary rows are rebuilt per profile, so delegate to their container.
+  els.salaryRows.addEventListener("input", scheduleAutoSave);
+  els.salaryRows.addEventListener("change", flushAutoSave);
 
   // Preset checkboxes are rebuilt on every render, so delegate to the container.
   KEYWORD_KINDS.forEach((kind) => {
@@ -433,7 +537,7 @@ async function saveSettings() {
   captureForm();
   await chrome.storage.local.set(modelSettingsFromForm());
   await JOB_FIT_PROFILES.save(store);
-  setStatus(`Saved "${activeProfile().name}".`);
+  setStatus(t("popup.saved", { name: activeProfile().name }));
 }
 
 // Last line of defence. Not relied on — an async write started here may not
@@ -452,7 +556,7 @@ async function switchProfile(id) {
   store.activeProfileId = id;
   await JOB_FIT_PROFILES.save(store);
   fillFormFromProfile(activeProfile());
-  setStatus(`Switched to "${activeProfile().name}".`);
+  setStatus(t("popup.switched", { name: activeProfile().name }));
 }
 
 // Name entry is inline rather than window.prompt(): a modal dialog in an
@@ -478,7 +582,7 @@ async function confirmNamePrompt() {
   const action = pendingNameAction;
   if (!action) return;
   if (!name) {
-    els.profileHint.textContent = "Give the profile a name.";
+    els.profileHint.textContent = t("popup.nameNeeded");
     return;
   }
 
@@ -497,7 +601,7 @@ async function confirmNamePrompt() {
   fillFormFromProfile(activeProfile());
   cancelNamePrompt();
   els.profileHint.textContent = "";
-  setStatus(action === "rename" ? "Renamed." : `Created "${name}".`);
+  setStatus(action === "rename" ? t("popup.renamed") : t("popup.created", { name }));
 }
 
 // Two-step rather than confirm(), same popup-dismissal reason as above.
@@ -506,31 +610,31 @@ let deleteArmed = false;
 async function deleteProfile() {
   const btn = document.getElementById("profileDelete");
   if (store.profiles.length < 2) {
-    els.profileHint.textContent = "Can't delete the only profile.";
+    els.profileHint.textContent = t("popup.cantDeleteOnly");
     return;
   }
 
   if (!deleteArmed) {
     deleteArmed = true;
-    btn.textContent = "Sure?";
+    btn.textContent = t("popup.sure");
     // The tracked-job count goes in the warning because those records are
     // deleted too, and that's the part you can't get back — the profile
     // itself is a minute of retyping.
     const tracked = await JOB_FIT_EVALSTORE.countForProfile(store.activeProfileId);
-    const jobsNote = tracked
-      ? ` and its ${tracked} tracked job${tracked === 1 ? "" : "s"} (evaluations, briefs, notes and application status)`
-      : "";
-    els.profileHint.textContent = `Click again to delete "${activeProfile().name}"${jobsNote}.`;
+    const armedText = tracked
+      ? t("popup.deleteConfirmJobs", { name: activeProfile().name, count: tracked })
+      : t("popup.deleteConfirm", { name: activeProfile().name });
+    els.profileHint.textContent = armedText;
     setTimeout(() => {
       deleteArmed = false;
-      btn.textContent = "Delete";
-      if (els.profileHint.textContent.startsWith("Click again")) els.profileHint.textContent = "";
+      btn.textContent = t("popup.delete");
+      if (els.profileHint.textContent === armedText) els.profileHint.textContent = "";
     }, 6000);
     return;
   }
 
   deleteArmed = false;
-  btn.textContent = "Delete";
+  btn.textContent = t("popup.delete");
   const removed = activeProfile().name;
   const removedId = store.activeProfileId;
 
@@ -540,7 +644,7 @@ async function deleteProfile() {
   try {
     removedJobs = await JOB_FIT_EVALSTORE.removeAllForProfile(removedId);
   } catch (err) {
-    els.profileHint.textContent = `Couldn't delete that profile's jobs: ${err.message}`;
+    els.profileHint.textContent = t("popup.deleteJobsFailed", { error: err.message });
     return;
   }
 
@@ -550,7 +654,7 @@ async function deleteProfile() {
   renderProfileSelect();
   fillFormFromProfile(activeProfile());
   els.profileHint.textContent = "";
-  setStatus(removedJobs ? `Deleted "${removed}" and ${removedJobs} tracked jobs.` : `Deleted "${removed}".`);
+  setStatus(removedJobs ? t("popup.deletedJobs", { name: removed, count: removedJobs }) : t("popup.deleted", { name: removed }));
 }
 
 // Only the reject/warning lists. The candidate text can't be reset to a
@@ -560,7 +664,7 @@ async function deleteProfile() {
 function resetKeywordLists() {
   fillKeywordConfig("hardRejects", JOB_FIT_DEFAULTS.keywords.hardRejects);
   fillKeywordConfig("softWarnings", JOB_FIT_DEFAULTS.keywords.softWarnings);
-  setStatus("Reject and warning categories restored (not yet saved).");
+  setStatus(t("popup.resetDone"));
 }
 
 // The popup document is destroyed whenever it loses focus, so a <details> the
@@ -602,7 +706,7 @@ function renderSetupBanner() {
   const banner = document.getElementById("setupBanner");
   const profile = activeProfile();
   banner.hidden = !(profile && profile.setupIncomplete);
-  if (!banner.hidden) document.getElementById("setupBannerName").textContent = profile.name;
+  if (!banner.hidden) document.getElementById("setupBannerText").textContent = t("popup.setupUnfinished", { name: profile.name });
 }
 
 function persistOpenSections() {
@@ -628,10 +732,10 @@ async function renderShortcuts() {
   } catch (err) {
     /* commands API unavailable */
   }
-  document.getElementById("shortcutKey").textContent = shortcut || "not set";
+  document.getElementById("shortcutKey").textContent = shortcut || t("popup.notSet");
   document.getElementById("evaluateTip").textContent = shortcut
-    ? `Tip: press ${shortcut} on any posting to evaluate it without opening this panel.`
-    : "Tip: set a keyboard shortcut under Shortcuts to evaluate without opening this panel.";
+    ? t("popup.tipShortcut", { shortcut })
+    : t("popup.tipNoShortcut");
 }
 
 // --- readiness -------------------------------------------------------------
@@ -651,15 +755,15 @@ async function checkModel() {
 
   if (settings.provider === "openai") {
     if (probe.reason === "no-key") {
-      setReady("modelDot", "modelState", "bad", "OpenAI is selected but no API key is set.");
+      setReady("modelDot", "modelState", "bad", t("popup.oaNoKey"));
     } else if (probe.reason === "unauthorized") {
-      setReady("modelDot", "modelState", "bad", "OpenAI rejected the API key — check it under Model.");
+      setReady("modelDot", "modelState", "bad", t("popup.oaBadKey"));
     } else if (!probe.ok) {
-      setReady("modelDot", "modelState", "bad", "Couldn't reach OpenAI — check the connection.");
+      setReady("modelDot", "modelState", "bad", t("popup.oaUnreachable"));
     } else if (!wanted) {
-      setReady("modelDot", "modelState", "warn", "OpenAI connected — pick a model under Model.");
+      setReady("modelDot", "modelState", "warn", t("popup.oaPickModel"));
     } else if (probe.models.length && !probe.models.includes(wanted)) {
-      setReady("modelDot", "modelState", "warn", `"${wanted}" isn't available on this OpenAI account.`, probe.models.join("\n"));
+      setReady("modelDot", "modelState", "warn", t("popup.oaModelMissing", { model: wanted }), probe.models.join("\n"));
     } else {
       setReady("modelDot", "modelState", "ok", `OpenAI — ${wanted}`);
     }
@@ -667,27 +771,27 @@ async function checkModel() {
   }
 
   if (probe.reason === "invalid-url") {
-    setReady("modelDot", "modelState", "bad", "The endpoint isn't a valid URL.");
+    setReady("modelDot", "modelState", "bad", t("popup.lmBadUrl"));
     return;
   }
   if (!probe.ok) {
-    setReady("modelDot", "modelState", "bad", "LM Studio isn't reachable — start it and reopen this popup.", probe.url);
+    setReady("modelDot", "modelState", "bad", t("popup.lmUnreachable"), probe.url);
     return;
   }
 
   const loaded = probe.models;
 
   if (!wanted) {
-    setReady("modelDot", "modelState", "ok", `Connected — using ${loaded[0] || "whatever is loaded"}`, loaded.join("\n"));
+    setReady("modelDot", "modelState", "ok", t("popup.lmConnectedUsing", { model: loaded[0] || t("popup.whateverLoaded") }), loaded.join("\n"));
     return;
   }
   // A model name that isn't loaded is the cause of the HTTP error that pauses
   // the whole queue — worth catching here rather than after you've queued ten.
   if (loaded.length && !loaded.includes(wanted)) {
-    setReady("modelDot", "modelState", "warn", `"${wanted}" isn't loaded in LM Studio.`, `Loaded:\n${loaded.join("\n")}`);
+    setReady("modelDot", "modelState", "warn", t("popup.lmNotLoaded", { model: wanted }), `${t("popup.loaded")}:\n${loaded.join("\n")}`);
     return;
   }
-  setReady("modelDot", "modelState", "ok", `Connected — ${wanted}`);
+  setReady("modelDot", "modelState", "ok", t("popup.lmConnected", { model: wanted }));
 }
 
 // Deliberately a cheap selector probe rather than running the extractors: it
@@ -716,7 +820,7 @@ function probePage() {
 async function checkPage() {
   const [tab] = await chrome.tabs.query({ active: true, currentWindow: true });
   if (!tab?.id) {
-    setReady("pageDot", "pageState", "warn", "No active tab.");
+    setReady("pageDot", "pageState", "warn", t("popup.noTab"));
     return;
   }
   let probe;
@@ -724,29 +828,31 @@ async function checkPage() {
     const results = await chrome.scripting.executeScript({ target: { tabId: tab.id }, func: probePage });
     probe = results && results[0] && results[0].result;
   } catch (err) {
-    setReady("pageDot", "pageState", "bad", "Chrome won't let the extension read this page.");
+    setReady("pageDot", "pageState", "bad", t("popup.cantReadPage"));
     return;
   }
   if (!probe) {
-    setReady("pageDot", "pageState", "warn", "Couldn't read this tab.");
+    setReady("pageDot", "pageState", "warn", t("popup.couldntReadTab"));
     return;
   }
 
-  if (probe.linkedin) setReady("pageDot", "pageState", "ok", "LinkedIn posting detected.");
-  else if (probe.greenhouse) setReady("pageDot", "pageState", "ok", "Greenhouse posting detected.");
-  else if (probe.embedded) setReady("pageDot", "pageState", "ok", "Embedded Greenhouse board detected.");
-  else if (probe.indeed) setReady("pageDot", "pageState", "ok", "Indeed posting detected.");
-  else if (probe.workday)setReady("pageDot", "pageState", "ok", "Workday posting detected.");
-  else if (probe.jibe)setReady("pageDot", "pageState", "ok", "Jibe career-site posting detected.");
-  else if (probe.eightfold) setReady("pageDot", "pageState", "ok", "Eightfold career-site posting detected.");
-  else
-    setReady(
-      "pageDot",
-      "pageState",
-      "warn",
-      "No known posting on this page — Evaluate will still try.",
-      probe.host
-    );
+  const site = probe.linkedin
+    ? "LinkedIn"
+    : probe.greenhouse
+      ? "Greenhouse"
+      : probe.embedded
+        ? t("popup.siteEmbedded")
+        : probe.indeed
+          ? "Indeed"
+          : probe.workday
+            ? "Workday"
+            : probe.jibe
+              ? t("popup.siteJibe")
+              : probe.eightfold
+                ? t("popup.siteEightfold")
+                : null;
+  if (site) setReady("pageDot", "pageState", "ok", t("popup.postingDetected", { site }));
+  else setReady("pageDot", "pageState", "warn", t("popup.noKnownPosting"), probe.host);
 }
 
 function humanDuration(ms) {
@@ -763,15 +869,17 @@ async function renderTimingHint() {
   const stored = await chrome.storage.local.get("evalStats");
   const durations = (stored.evalStats && stored.evalStats.durations) || [];
   if (!durations.length) {
-    hint.textContent = "Tune this to your model's speed — timings appear here once you've run a few evaluations.";
+    hint.textContent = t("popup.timingEmpty");
     return;
   }
   const sorted = [...durations].sort((a, b) => a - b);
   const median = sorted[Math.floor(sorted.length / 2)];
   const slowest = sorted[sorted.length - 1];
-  hint.textContent =
-    `Last ${durations.length} evaluation${durations.length === 1 ? "" : "s"}: ` +
-    `median ${humanDuration(median)}, slowest ${humanDuration(slowest)}.`;
+  hint.textContent = t("popup.timingLine", {
+    count: durations.length,
+    median: humanDuration(median),
+    slowest: humanDuration(slowest),
+  });
 }
 
 async function renderQueueStatus() {
@@ -798,12 +906,12 @@ async function renderQueueStatus() {
   }
 
   const parts = [];
-  if (processing) parts.push(`Processing “${processing.title || "posting"}”`);
-  if (pending) parts.push(`${pending} waiting`);
-  if (failed) parts.push(`${failed} failed`);
-  if (snapshot.state === "paused") parts.unshift("⏸ Queue paused");
+  if (processing) parts.push(t("popup.qProcessing", { title: processing.title || t("popup.posting") }));
+  if (pending) parts.push(t("queue.waitingCount", { count: pending }));
+  if (failed) parts.push(t("queue.failedCount", { count: failed }));
+  if (snapshot.state === "paused") parts.unshift(`⏸ ${t("popup.qPaused")}`);
 
-  box.textContent = `${parts.join(" · ")} — see tracked jobs`;
+  box.textContent = `${parts.join(" · ")} — ${t("popup.qSeeTracked")}`;
   box.style.display = "block";
 }
 
@@ -815,7 +923,7 @@ async function suggestSalary() {
   // invented range, which is worse than no answer — you'd save it as your own
   // expectation and every salary comparison after that would be built on it.
   if (!els.profile.value.trim()) {
-    reasoningEl.textContent = "Fill in the candidate profile first — with no CV the model just invents a range.";
+    reasoningEl.textContent = t("popup.salaryNeedsProfile");
     document.getElementById("sec-profile").open = true;
     els.profile.focus();
     return;
@@ -826,32 +934,41 @@ async function suggestSalary() {
   reasoningEl.textContent = "";
 
   try {
+    const profile = activeProfile();
+    const markets = salaryCurrencies.map((currency) => ({
+      currency,
+      period: salaryFieldsFor(currency).period.value,
+      country: countryForCurrency(currency, profile),
+    }));
     const response = await sendMessageWithRetry({
       type: "JOB_FIT_SUGGEST_SALARY",
       profile: els.profile.value,
+      markets,
+      jobSearch: profile.jobSearch,
     });
 
     if (!response || !response.ok) {
-      reasoningEl.textContent = response?.error || "Could not get a suggestion.";
+      reasoningEl.textContent = response?.error || t("popup.noSuggestion");
       return;
     }
 
-    SALARY_CURRENCIES.forEach((cur) => {
+    salaryCurrencies.forEach((cur) => {
       const range = response.data[cur];
       if (!range) return;
       const { min, max } = salaryFieldsFor(cur);
       if (range.min != null) min.value = range.min;
       if (range.max != null) max.value = range.max;
     });
+    await flushAutoSave();
 
     reasoningEl.textContent = response.data.reasoning
-      ? `${response.data.reasoning} (review before saving)`
-      : "Suggested — review before saving.";
+      ? `${response.data.reasoning} ${t("popup.reviewIt")}`
+      : t("popup.suggestedReview");
   } catch (err) {
-    reasoningEl.textContent = `Error: ${err.message}`;
+    reasoningEl.textContent = t("common.errorDetail", { detail: err.message });
   } finally {
     btn.disabled = false;
-    btn.textContent = "Suggest all";
+    btn.textContent = t("popup.suggestAll");
   }
 }
 
@@ -913,15 +1030,15 @@ async function summarizeCurrentTab() {
   btn.disabled = true;
   resultEl.hidden = true;
   copyBtn.hidden = true;
-  statusEl.textContent = "Extracting…";
+  statusEl.textContent = t("popup.extracting");
 
   const [tab] = await chrome.tabs.query({ active: true, currentWindow: true });
   if (!tab?.id) {
-    statusEl.textContent = "No active tab.";
+    statusEl.textContent = t("popup.noTab");
     btn.disabled = false;
     return;
   }
-  const files = JOB_FIT_CONTENT_FILES;
+  const files = await jobFitContentFiles();
 
   let extracted;
   try {
@@ -965,7 +1082,7 @@ async function summarizeCurrentTab() {
   }
 
   if (!extracted) {
-    statusEl.textContent = "Couldn't extract job posting text on this tab.";
+    statusEl.textContent = t("banner.noTextSummary");
     btn.disabled = false;
     return;
   }
@@ -996,28 +1113,26 @@ async function summarizeCurrentTab() {
       },
     });
   } catch (err) {
-    statusEl.textContent = `Error: ${err.message}`;
+    statusEl.textContent = t("common.errorDetail", { detail: err.message });
     btn.disabled = false;
     return;
   }
 
   if (!response || !response.ok) {
     statusEl.textContent = response?.full
-      ? `The queue already holds ${response.max} jobs — let some finish first.`
-      : response?.error || "Could not queue the summary.";
+      ? t("popup.queueFull", { count: response.max })
+      : response?.error || t("popup.couldNotQueueSummary");
     btn.disabled = false;
     return;
   }
 
   statusEl.textContent =
-    response.position > 1
-      ? `Queued behind ${response.position - 1} job(s) — the brief is filed automatically, reopen this popup to collect it.`
-      : "Summarizing with the local model…";
+    response.position > 1 ? t("popup.summaryQueued", { count: response.position - 1 }) : t("popup.summarizing");
 
-  const combinedText = await waitForSummary(tab.url, active.id, requestedAt);
+  const summary = await waitForSummary(tab.url, active.id, requestedAt);
+  const combinedText = summary && summary.text;
   if (!combinedText) {
-    statusEl.textContent =
-      "Still running — the brief is filed against this job automatically, so reopen this popup in a moment to collect it.";
+    statusEl.textContent = t("popup.summaryStillRunning");
     btn.disabled = false;
     renderQueueStatus();
     return;
@@ -1032,11 +1147,9 @@ async function summarizeCurrentTab() {
 
   try {
     await navigator.clipboard.writeText(combinedText);
-    statusEl.textContent = combinedText.includes("LOCAL MODEL EVALUATION")
-      ? `Copied (includes the "${active.name}" evaluation of this posting).`
-      : "Copied to clipboard.";
+    statusEl.textContent = summary.hasEvaluation ? t("popup.copiedWithEval", { name: active.name }) : t("popup.copied");
   } catch (err) {
-    statusEl.textContent = "Couldn't auto-copy — select the text below or click Copy.";
+    statusEl.textContent = t("popup.couldntAutoCopy");
   }
 
   btn.disabled = false;
@@ -1053,7 +1166,7 @@ async function waitForSummary(url, profileId, since, timeoutMs = 120000) {
     const stored = await chrome.storage.local.get("lastSummary");
     const summary = stored.lastSummary;
     if (summary && summary.url === url && summary.profileId === profileId && summary.ts >= since) {
-      return summary.text;
+      return summary;
     }
     await new Promise((resolve) => setTimeout(resolve, 1200));
   }
@@ -1074,7 +1187,7 @@ async function restoreLastSummary() {
   document.getElementById("summarizeResult").value = lastSummary.text;
   document.getElementById("summarizeResult").hidden = false;
   document.getElementById("copySummary").hidden = false;
-  document.getElementById("summarizeStatus").textContent = "Summary from earlier — click Copy to copy it again.";
+  document.getElementById("summarizeStatus").textContent = t("popup.summaryEarlier");
 }
 
 async function copySummary() {
@@ -1082,11 +1195,11 @@ async function copySummary() {
   const statusEl = document.getElementById("summarizeStatus");
   try {
     await navigator.clipboard.writeText(resultEl.value);
-    statusEl.textContent = "Copied to clipboard.";
+    statusEl.textContent = t("popup.copied");
   } catch (err) {
     resultEl.focus();
     resultEl.select();
-    statusEl.textContent = "Select-all done — copy manually (Cmd+C).";
+    statusEl.textContent = t("popup.copyManually");
   }
 }
 
@@ -1145,7 +1258,7 @@ document.getElementById("setupContinue").addEventListener("click", async () => {
   window.close();
 });
 document.getElementById("profileDuplicate").addEventListener("click", () =>
-  askForName("duplicate", `${activeProfile().name} copy`)
+  askForName("duplicate", t("popup.copyName", { name: activeProfile().name }))
 );
 document.getElementById("profileRename").addEventListener("click", () => askForName("rename", activeProfile().name));
 document.getElementById("profileDelete").addEventListener("click", deleteProfile);
@@ -1171,12 +1284,50 @@ document.getElementById("viewHistory").addEventListener("click", () => {
 document.addEventListener("visibilitychange", flushOnHide);
 window.addEventListener("pagehide", flushAutoSave);
 
-renderShortcuts();
-loadSettings().then(() => {
-  restoreLastSummary();
-  if (els.modelProvider.value === "openai") loadOpenAiModels();
+els.salaryAdd.addEventListener("change", () => {
+  const currency = els.salaryAdd.value;
+  if (!currency) return;
+  captureForm();
+  salaryCurrencies.push(currency);
+  renderSalaryRows(activeProfile());
+  flushAutoSave();
+  const fields = salaryFieldsFor(currency);
+  if (fields) fields.min.focus();
 });
-renderQueueStatus();
-checkModel();
-checkPage();
-renderTimingHint();
+
+// The language picker: "Automatic" follows the browser. Changing it reloads
+// the popup in the new language — every string on it is drawn at load.
+function renderLanguagePicker() {
+  const select = els.uiLanguage;
+  select.innerHTML = "";
+  const auto = document.createElement("option");
+  auto.value = "auto";
+  auto.textContent = t("popup.languageAuto", { language: JOB_FIT_I18N.LANGUAGES.find((l) => l.code === JOB_FIT_I18N.detect()).name });
+  select.appendChild(auto);
+  JOB_FIT_I18N.LANGUAGES.forEach((l) => {
+    const opt = document.createElement("option");
+    opt.value = l.code;
+    opt.textContent = l.name;
+    select.appendChild(opt);
+  });
+  select.value = JOB_FIT_I18N.setting;
+  select.addEventListener("change", async () => {
+    await flushAutoSave();
+    await JOB_FIT_I18N.setLanguage(select.value);
+    location.reload();
+  });
+}
+
+JOB_FIT_I18N.load().then(() => {
+  JOB_FIT_I18N.translatePage();
+  renderLanguagePicker();
+  renderShortcuts();
+  loadSettings().then(() => {
+    restoreLastSummary();
+    if (els.modelProvider.value === "openai") loadOpenAiModels();
+  });
+  renderQueueStatus();
+  checkModel();
+  checkPage();
+  renderTimingHint();
+});
