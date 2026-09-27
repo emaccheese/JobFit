@@ -445,8 +445,11 @@ function formatTokens(n) {
 // means nothing until it's translated into evaluations.
 async function renderUsage() {
   const host = document.getElementById("openAiUsage");
-  const days = (await chrome.storage.local.get("usageByDay")).usageByDay || {};
+  const stored = await chrome.storage.local.get(["usageByDay", "openaiBudgetReset"]);
+  const days = stored.usageByDay || {};
   const today = JOB_FIT_PROVIDER.dayKey();
+  const counted = JOB_FIT_PROVIDER.budgetTokensUsed(days, stored.openaiBudgetReset);
+  const wasReset = stored.openaiBudgetReset && stored.openaiBudgetReset.day === today;
   const month = today.slice(0, 7);
   const sum = (filter) =>
     Object.entries(days)
@@ -470,13 +473,46 @@ async function renderUsage() {
   }
   const avg = Math.round(m.tokens / m.requests);
   const budget = Number(els.openAiBudget.value) || 0;
+  const left = budget ? Math.max(0, budget - counted) : 0;
   host.textContent =
     t("popup.usageLine", {
       count: day.requests,
       tokens: formatTokens(day.tokens),
       month: formatTokens(m.tokens),
       avg: formatTokens(avg),
-    }) + " " + (budget ? t("popup.usageBudget", { count: Math.floor(budget / avg) }) : t("popup.usageNoBudget"));
+    }) +
+    " " +
+    (budget
+      ? t(wasReset ? "popup.usageBudgetSinceReset" : "popup.usageBudgetUsed", {
+          used: formatTokens(counted),
+          count: Math.floor(left / avg),
+        })
+      : t("popup.usageNoBudget"));
+}
+
+// Starts today's budget count from zero — handy after switching model or
+// effort, when the day's earlier requests don't reflect what the rest will
+// cost. Only the budget's starting point moves; usage history is untouched.
+// A queue that paused because the budget ran out is resumed.
+async function resetBudget() {
+  const stored = await chrome.storage.local.get("usageByDay");
+  const today = JOB_FIT_PROVIDER.dayKey();
+  await chrome.storage.local.set({
+    openaiBudgetReset: { day: today, tokens: JOB_FIT_PROVIDER.openAiTokensOnDay(stored.usageByDay, today), at: Date.now() },
+  });
+  let resumed = false;
+  try {
+    const snapshot = await sendMessageWithRetry({ type: "JOB_FIT_QUEUE_SNAPSHOT" });
+    // pauseFailure, not the message: the message is in the user's language.
+    if (snapshot && snapshot.state === "paused" && snapshot.pauseFailure === "budget") {
+      await sendMessageWithRetry({ type: "JOB_FIT_QUEUE_RESUME" });
+      resumed = true;
+    }
+  } catch (err) {
+    /* worker asleep and no queue to resume */
+  }
+  await renderUsage();
+  setStatus(resumed ? t("popup.budgetResetResumed") : t("popup.budgetResetDone"));
 }
 
 function showProviderFields() {
@@ -1231,6 +1267,7 @@ els.openAiModel.addEventListener("change", () => {
 });
 els.openAiModel.addEventListener("input", renderReasoningOptions);
 els.openAiBudget.addEventListener("input", renderUsage);
+document.getElementById("resetBudget").addEventListener("click", resetBudget);
 // The preference is only what the user picks here, never the adjusted value a
 // half-typed model name produced.
 els.openAiReasoningEffort.addEventListener("change", () => {

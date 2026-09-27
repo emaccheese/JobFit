@@ -225,7 +225,10 @@
 
   <section>
     <label for="openAiBudget" data-i18n="popup.budget">Daily token budget</label>
-    <input id="openAiBudget" type="number" min="0" step="10000" placeholder="no limit" data-i18n-placeholder="popup.noLimit">
+    <div class="row" style="align-items:center;">
+      <input id="openAiBudget" type="number" min="0" step="10000" placeholder="no limit" data-i18n-placeholder="popup.noLimit">
+      <button id="resetBudget" type="button" style="flex:0 0 auto;" title="Start today's budget count from zero. Usage totals are kept." data-i18n="popup.resetBudget" data-i18n-title="popup.resetBudgetTitle">Reset</button>
+    </div>
     <div class="hint" id="openAiUsage"></div>
   </section>
   </div>

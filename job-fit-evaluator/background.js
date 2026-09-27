@@ -474,11 +474,11 @@ function recordUsage(provider, usage) {
   return usageWrite;
 }
 
+// Counted since the popup's "Reset" if one was pressed today (see
+// JOB_FIT_PROVIDER.budgetTokensUsed).
 async function openAiTokensToday() {
-  const stored = await chrome.storage.local.get("usageByDay");
-  const day = (stored.usageByDay || {})[JOB_FIT_PROVIDER.dayKey()] || {};
-  const t = day.openai;
-  return t ? t.input + t.output : 0;
+  const stored = await chrome.storage.local.get(["usageByDay", "openaiBudgetReset"]);
+  return JOB_FIT_PROVIDER.budgetTokensUsed(stored.usageByDay, stored.openaiBudgetReset);
 }
 
 // One POST with a timeout, a caller's cancel signal and the service-worker
