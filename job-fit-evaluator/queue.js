@@ -176,6 +176,7 @@ var JOB_FIT_QUEUE = (function () {
         if (!next) {
           queue.state = "idle";
           queue.pauseReason = null;
+          queue.pauseFailure = null;
           await write(queue);
           break;
         }
@@ -219,6 +220,10 @@ var JOB_FIT_QUEUE = (function () {
           item.attempts = Math.max(0, (item.attempts || 1) - 1);
           queue.state = "paused";
           queue.pauseReason = outcome.error || "Local model unavailable";
+          // The kind of failure ("budget", "unreachable", …) alongside the
+          // message: the message is in the user's language, so nothing should
+          // branch on its wording.
+          queue.pauseFailure = outcome.failure || null;
           await write(queue);
           break;
         }
@@ -262,6 +267,7 @@ var JOB_FIT_QUEUE = (function () {
     const queue = await read();
     queue.state = activeCount(queue) ? "running" : "idle";
     queue.pauseReason = null;
+    queue.pauseFailure = null;
     queue.consecutiveTimeouts = 0;
     await write(queue);
     return { ok: true };
