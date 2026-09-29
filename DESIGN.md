@@ -89,8 +89,11 @@ job-fit-evaluator/
 ├── ui.css               # shared tokens (colour, type, radius, dark mode) + base controls
 ├── ui-shared.js         # JOB_FIT_UI — score bands, live-region announce, two-step confirm
 ├── float.js             # on-page button (opt-in per site, registered dynamically)
-├── popup.html
+├── popup.html           # the job in this tab, readiness, where next (no settings)
 ├── popup.js
+├── options.html         # Settings (options_ui, opened in a tab)
+├── options.js
+├── backup.js            # JOB_FIT_BACKUP — backup, restore, extraction-coverage report
 ├── extractors/
 │   ├── greenhouse.js    # site-specific selectors
 │   ├── lever.js
@@ -433,7 +436,7 @@ Expected salary is **three** dedicated structured fields (min/max for USD, CAD, 
 - **`extractJson()` falls back to scanning `reasoning_content` for a balanced `{...}` JSON object when `content` comes back empty.** Two different "thinking" models (a Gemma variant and a Qwen variant) were both observed writing the complete, correct final JSON answer *inside* their own reasoning trace and never separately emitting it as `content` before stopping — `finish_reason` can even say `"stop"` (a clean finish) while `content` is still `""`. The fallback scans for balanced-brace `{...}` spans (not just first-`{`-to-last-`}`, which would span unrelated braces in surrounding prose) and tries each from last to first, since a later block is more likely to be the model's final corrected answer than an earlier draft it talked itself through on the way there.
 - **Known limitation:** the local model extracts requirements much more reliably from bulleted postings than from narrative/prose ones — a prose-summarized posting scores noticeably worse than the full raw text. "Evaluate this tab" always uses the full extracted text for this reason. "Summarize this tab" (below) produces a condensed brief for pasting into a *different* LLM that already has your profile — don't feed that condensed output back into this tool's own evaluation, and expect any LLM (local or not) to do worse on a summarized posting than the original.
 
-### Candidate profiles (multiple, stored, editable in popup)
+### Candidate profiles (multiple, stored, editable in Settings)
 
 The tool holds **a list of profiles**, one per person (or per job family for the
 same person), selected from a dropdown at the top of the popup. Added so a
@@ -443,7 +446,8 @@ have postings evaluated against their own CV without overwriting the first.
 **A profile owns:** the candidate text, `expectedSalary` per currency, and all
 three keyword lists (hard rejects, warnings, domain flags).
 
-**Popup layout.** Everything is collapsed by default — profile management,
+**Popup layout (superseded 2026-09-28 — see "Settings page and a slimmer popup").**
+Everything was collapsed by default — profile management,
 the CV textarea, LM Studio, expected salary, and the three keyword lists — so
 the popup opens
 short and you expand only what you're editing. The profile **dropdown is the
@@ -921,6 +925,51 @@ colours that failed contrast (white on the old amber was 3.3:1). One set now:
   injected with the page scripts too, so the card and the pages agree on the bands.
 - The on-page card lives in a shadow root on someone else's page, which
   `ui.css` can't reach; it carries a copy of the same values.
+
+## Settings page and a slimmer popup (2026-09-28)
+
+The popup had become the settings page: nine collapsible sections, about 2,500px
+tall when open, in a window Chrome caps at 600px and destroys whenever it loses
+focus. Editing a CV there was a race against a stray click, and the popup's
+autosave-on-blur and remembered-open-sections code existed only to work around
+where the settings lived. Meanwhile the one thing the popup is opened for, the job
+in the tab, got a single line ("LinkedIn posting detected").
+
+- **Settings is `options.html`** (`options_ui`, `open_in_tab`), laid out like the
+  wizard: a side nav whose highlight follows the scroll, and one card per section:
+  Profile (CV, profile management, the wizard), Expected salary, Screening rules
+  (hard rejects, warnings, domain flags), Model, On-page button and shortcut,
+  Language, and Data (backup, restore, extraction coverage). Each card says whether
+  it belongs to the active profile ("For “Erik — backend”") or is shared by every
+  profile, and the active profile is picked in the sticky header.
+- **Saves are scoped to what the page owns.** Settings can stay open for hours next
+  to a wizard tab that writes the same storage, so a save never writes back a copy
+  held since load: profile fields are merged onto the stored profile, model fields
+  onto the stored model settings (keeping fields the page doesn't show). A change
+  made elsewhere refreshes the form, but never under a field you're typing in; it
+  waits for focus to leave. One indicator in the header: *Saving…*, *All changes
+  saved*, or the error.
+- **Deep links.** The popup's **Fix in Settings** and **Add it in Settings** leave
+  `settingsJump` in storage and call `openOptionsPage()`, which focuses the Settings
+  tab if one is open; the page scrolls to the section and moves focus to its heading.
+  A `#hash` alone couldn't reach an already-open tab.
+- **The popup** is three blocks in reading order, one primary button at a time:
+  1. **This job**: the site probe, then the saved result for the active profile.
+     The popup injects only the extractors and `jobkey.js` (`JOB_FIT_LOOKUP_FILES`),
+     never `content.js`, which would start an evaluation. It then looks the job up:
+     score, verdict, age, and whether it's out of date (another model, or an edited
+     profile). **Show on page** is primary for a current score, **Re-evaluate** for
+     an out-of-date one. Re-evaluate sets `__jobFitIgnoreCacheOnce` in the page
+     before injecting, so that run skips the saved result.
+  2. **Ready to score?**: the model check (`describeModelReadiness`, shared with
+     Settings › Model) with **Fix in Settings** when it isn't green, and the queue.
+  3. **Tracked jobs** and the shortcut tip.
+
+  The profile switcher stays in the popup, because which profile is active is what
+  you have to see before evaluating. Unfinished setup and a profile with no CV each
+  get a notice with a way to fix it.
+- **Backup, restore and the extraction-coverage report** moved into `backup.js`,
+  used by Settings › Data and (until its own redesign) Tracked jobs.
 
 ## Popup readiness
 

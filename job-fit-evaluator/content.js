@@ -723,5 +723,9 @@
     });
   }
 
-  start();
+  // The popup's Re-evaluate sets this just before injecting, so this run
+  // scores the posting again instead of showing the saved result.
+  const ignoreCache = Boolean(window.__jobFitIgnoreCacheOnce);
+  window.__jobFitIgnoreCacheOnce = false;
+  start({ ignoreCache });
 })();

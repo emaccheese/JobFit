@@ -1,834 +1,68 @@
-const els = {
-  profileSelect: document.getElementById("profileSelect"),
-  profileNameRow: document.getElementById("profileNameRow"),
-  profileNameInput: document.getElementById("profileNameInput"),
-  profileHint: document.getElementById("profileHint"),
-  lmStudioUrl: document.getElementById("lmStudioUrl"),
-  lmStudioModel: document.getElementById("lmStudioModel"),
-  lmStudioTimeout: document.getElementById("lmStudioTimeout"),
-  lmStudioReasoningEffort: document.getElementById("lmStudioReasoningEffort"),
-  lmStudioEnableThinking: document.getElementById("lmStudioEnableThinking"),
-  modelProvider: document.getElementById("modelProvider"),
-  openAiKey: document.getElementById("openAiKey"),
-  openAiModel: document.getElementById("openAiModel"),
-  openAiTier: document.getElementById("openAiTier"),
-  openAiFlex: document.getElementById("openAiFlex"),
-  openAiReasoningEffort: document.getElementById("openAiReasoningEffort"),
-  openAiMaxOutput: document.getElementById("openAiMaxOutput"),
-  openAiBudget: document.getElementById("openAiBudget"),
-  profile: document.getElementById("profile"),
-  salaryRows: document.getElementById("salaryRows"),
-  salaryAdd: document.getElementById("salaryAdd"),
-  uiLanguage: document.getElementById("uiLanguage"),
-  hardRejectsPresets: document.getElementById("hardRejectsPresets"),
-  hardRejectsPhrases: document.getElementById("hardRejectsPhrases"),
-  hardRejectsPatterns: document.getElementById("hardRejectsPatterns"),
-  softWarningsPresets: document.getElementById("softWarningsPresets"),
-  softWarningsPhrases: document.getElementById("softWarningsPhrases"),
-  softWarningsPatterns: document.getElementById("softWarningsPatterns"),
-  domainFlagsPhrases: document.getElementById("domainFlagsPhrases"),
-  domainFlagsPatterns: document.getElementById("domainFlagsPatterns"),
-  status: document.getElementById("status"),
-};
+// The toolbar popup: what JobFit knows about the job in this tab, whether it's
+// ready to score, and where to go next. Every setting lives in Settings
+// (options.html) — the popup is destroyed the moment it loses focus, which
+// made it the wrong place to edit a CV.
 
-// --- salary ----------------------------------------------------------------
-//
-// One row per currency: the currencies of the profile's target countries,
-// any that already hold figures, and any added with "+ Add a currency".
-// Each row has its own pay period, because a Mexican salary is usually
-// quoted per month and a US one per year.
-let salaryCurrencies = [];
+const $ = (id) => document.getElementById(id);
 
-function salaryCurrenciesFor(profile) {
-  const list = [];
-  const add = (c) => c && !list.includes(c) && list.push(c);
-  ((profile.jobSearch || {}).targetCountries || []).forEach((c) => add(JOB_FIT_GEO.currencyOf(c)));
-  Object.entries(profile.expectedSalary || {}).forEach(([c, r]) => {
-    if (r && (r.min != null || r.max != null)) add(c);
-  });
-  if (!list.length) ["USD", "CAD", "MXN"].forEach(add);
-  return list;
-}
-
-// The country a currency is being used for: a target country that pays in
-// it, else the first country that does.
-function countryForCurrency(currency, profile) {
-  const targets = ((profile && profile.jobSearch) || {}).targetCountries || [];
-  return (
-    targets.find((c) => JOB_FIT_GEO.currencyOf(c) === currency) ||
-    JOB_FIT_GEO.CODES.find((c) => JOB_FIT_GEO.currencyOf(c) === currency) ||
-    null
-  );
-}
-
-function defaultPeriod(currency, profile) {
-  const country = countryForCurrency(currency, profile);
-  return country ? JOB_FIT_GEO.periodOf(country) : "year";
-}
-
-function salaryFieldsFor(currency) {
-  const row = els.salaryRows.querySelector(`[data-currency="${currency}"]`);
-  return row
-    ? { min: row.querySelector(".sal-min"), max: row.querySelector(".sal-max"), period: row.querySelector(".sal-period") }
-    : null;
-}
-
-function renderSalaryRows(profile) {
-  els.salaryRows.innerHTML = "";
-  salaryCurrencies.forEach((cur) => {
-    const range = (profile.expectedSalary || {})[cur] || {};
-    const row = document.createElement("div");
-    row.className = "salary-row";
-    row.dataset.currency = cur;
-    const label = document.createElement("span");
-    label.className = "currency-label";
-    label.textContent = cur;
-    row.appendChild(label);
-    ["min", "max"].forEach((end) => {
-      const input = document.createElement("input");
-      input.type = "number";
-      input.className = `sal-${end}`;
-      input.placeholder = t(end === "min" ? "common.min" : "common.max");
-      input.value = range[end] ?? "";
-      row.appendChild(input);
-    });
-    const period = document.createElement("select");
-    period.className = "sal-period";
-    ["year", "month", "hour"].forEach((value) => {
-      const opt = document.createElement("option");
-      opt.value = value;
-      opt.textContent = t(`period.${value}`);
-      period.appendChild(opt);
-    });
-    period.value = range.period && (range.min != null || range.max != null) ? range.period : defaultPeriod(cur, profile);
-    row.appendChild(period);
-    els.salaryRows.appendChild(row);
-  });
-  renderSalaryAdd();
-}
-
-function renderSalaryAdd() {
-  const select = els.salaryAdd;
-  select.innerHTML = "";
-  const first = document.createElement("option");
-  first.value = "";
-  first.textContent = t("popup.addCurrency");
-  select.appendChild(first);
-  const all = Array.from(new Set(JOB_FIT_GEO.CODES.map(JOB_FIT_GEO.currencyOf))).filter((c) => !salaryCurrencies.includes(c)).sort();
-  all.forEach((cur) => {
-    const opt = document.createElement("option");
-    opt.value = cur;
-    opt.textContent = cur;
-    select.appendChild(opt);
-  });
-}
-
-// A line under the profile picker: where this profile is looking, so it's
-// clear which country rules apply. Edited in the setup wizard.
-function renderSearchSummary(profile) {
-  const host = document.getElementById("searchSummary");
-  const js = profile.jobSearch || {};
-  const targets = (js.targetCountries || []).map((c) => JOB_FIT_I18N.countryName(c));
-  const home = js.home && js.home.country ? JOB_FIT_GEO.placeText(js.home) : "";
-  const parts = [
-    targets.length ? t("popup.searchTargets", { countries: JOB_FIT_I18N.list(targets) }) : null,
-    home ? t("popup.searchHome", { place: home }) : null,
-  ].filter(Boolean);
-  host.textContent = parts.length ? parts.join(" · ") : t("popup.searchNone");
-}
-
-function linesToArray(text) {
-  return text
-    .split("\n")
-    .map((l) => l.trim())
-    .filter(Boolean);
-}
-
-function arrayToLines(arr) {
-  return (arr || []).join("\n");
-}
-
-let statusTimer = null;
-
-function setStatus(text, { persist = false } = {}) {
-  els.status.textContent = text;
-  clearTimeout(statusTimer);
-  // Errors stay put: a message that clears itself after two seconds is no use
-  // for explaining why a button did nothing.
-  if (!persist) statusTimer = setTimeout(() => (els.status.textContent = ""), 2000);
-}
-
-// The whole profile store, held in memory while the popup is open so
-// switching profiles doesn't need a storage round trip per keystroke.
 let store = { profiles: [], activeProfileId: null };
-// Which profile the form fields currently belong to. Needed because a switch
-// has to write the form back to the OUTGOING profile, not the incoming one.
-let formProfileId = null;
+let tab = null; // the active tab
+let pageProbe = null; // what probePage() saw
+let tabJob = null; // { jobKey, title, company } for the posting in this tab
+let tabRecord = null; // its saved result for the active profile, if any
+let pageKnown = false; // a posting on a site JobFit has an extractor for
+
 function activeProfile() {
   return store.profiles.find((p) => p.id === store.activeProfileId) || store.profiles[0];
 }
 
+// Errors stay put: a message that clears itself is no use for explaining why
+// a button did nothing.
+function setStatus(text) {
+  $("status").textContent = text;
+}
+
+// Settings opens in a tab; the popup has done its job once it has asked.
+async function goToSettings(section) {
+  await openSettings(section);
+  window.close();
+}
+
+// --- profile ---------------------------------------------------------------
+
 function renderProfileSelect() {
-  els.profileSelect.innerHTML = "";
+  const select = $("profileSelect");
+  select.innerHTML = "";
   store.profiles.forEach((p) => {
     const opt = document.createElement("option");
     opt.value = p.id;
     opt.textContent = p.name;
-    els.profileSelect.appendChild(opt);
-  });
-  // No guard needed around this: assigning .value never fires a change event,
-  // so the switch handler can't see a programmatic repopulation.
-  els.profileSelect.value = store.activeProfileId;
-}
-
-const KEYWORD_KINDS = ["hardRejects", "softWarnings", "domainFlags"];
-const ADVANCED_SECTION_ID = {
-  hardRejects: "adv-hardrejects",
-  softWarnings: "adv-warnings",
-  domainFlags: "adv-domainflags",
-};
-
-// Generated from the preset definitions rather than written into the HTML, so
-// the two can't drift apart when a category is added.
-function renderPresetCheckboxes() {
-  KEYWORD_KINDS.forEach((kind) => {
-    const host = els[`${kind}Presets`];
-    if (!host) return;
-    host.innerHTML = "";
-    JOB_FIT_KEYWORDS.presetsFor(kind).forEach((preset) => {
-      const row = document.createElement("label");
-      const box = document.createElement("input");
-      box.type = "checkbox";
-      box.value = preset.id;
-      row.appendChild(box);
-      row.appendChild(document.createTextNode(JOB_FIT_KEYWORDS.presetLabel(preset)));
-      host.appendChild(row);
-    });
-  });
-}
-
-function keywordConfigFromForm(kind) {
-  const host = els[`${kind}Presets`];
-  const presets = host
-    ? Array.from(host.querySelectorAll("input[type=checkbox]"))
-        .filter((box) => box.checked)
-        .map((box) => box.value)
-    : [];
-  return {
-    presets,
-    phrases: linesToArray(els[`${kind}Phrases`].value),
-    patterns: linesToArray(els[`${kind}Patterns`].value),
-  };
-}
-
-function fillKeywordConfig(kind, config) {
-  const resolved = JOB_FIT_KEYWORDS.normalizeConfig(config, kind);
-  const host = els[`${kind}Presets`];
-  if (host) {
-    host.querySelectorAll("input[type=checkbox]").forEach((box) => {
-      box.checked = resolved.presets.includes(box.value);
-    });
-  }
-  els[`${kind}Phrases`].value = arrayToLines(resolved.phrases);
-  els[`${kind}Patterns`].value = arrayToLines(resolved.patterns);
-  // Opened when it holds something, so a pattern carried over from the old
-  // format isn't hidden where you can't see why a posting is being rejected.
-  const advanced = document.getElementById(ADVANCED_SECTION_ID[kind]);
-  if (advanced) advanced.open = resolved.patterns.length > 0;
-}
-
-// Reads the per-profile fields out of the form. Deliberately does not touch
-// the LM Studio fields — those are global and saved separately.
-function collectProfileFields() {
-  const expectedSalary = {};
-  salaryCurrencies.forEach((cur) => {
-    const fields = salaryFieldsFor(cur);
-    if (!fields) return;
-    expectedSalary[cur] = {
-      min: fields.min.value === "" ? null : Number(fields.min.value),
-      max: fields.max.value === "" ? null : Number(fields.max.value),
-      period: fields.period.value,
-    };
-  });
-  return {
-    profile: els.profile.value,
-    keywords: {
-      hardRejects: keywordConfigFromForm("hardRejects"),
-      softWarnings: keywordConfigFromForm("softWarnings"),
-      domainFlags: keywordConfigFromForm("domainFlags"),
-    },
-    expectedSalary,
-  };
-}
-
-function fillFormFromProfile(profile) {
-  els.profile.value = profile.profile;
-  KEYWORD_KINDS.forEach((kind) => fillKeywordConfig(kind, profile.keywords[kind]));
-  salaryCurrencies = salaryCurrenciesFor(profile);
-  renderSalaryRows(profile);
-  renderSearchSummary(profile);
-  formProfileId = profile.id;
-  document.getElementById("salaryReasoning").textContent = "";
-  applyForcedSections();
-}
-
-// Folds whatever is in the form back into the in-memory profile it came from.
-// Called before switching away and before saving.
-function captureForm() {
-  const target = store.profiles.find((p) => p.id === formProfileId);
-  if (!target) return;
-  const fields = collectProfileFields();
-  // The keyword configs carry bookkeeping the form doesn't show (`seen`);
-  // keep it, or a category added later would be re-ticked on every save.
-  KEYWORD_KINDS.forEach((kind) => {
-    fields.keywords[kind].seen = (target.keywords[kind] && target.keywords[kind].seen) || JOB_FIT_KEYWORDS.presetsFor(kind).map((p) => p.id);
-  });
-  Object.assign(target, fields);
-}
-
-async function loadSettings() {
-  const stored = await chrome.storage.local.get([...JOB_FIT_PROVIDER.KEYS, "uiOpenSections"]);
-  const lmStudio = stored.lmStudio || JOB_FIT_DEFAULTS.lmStudio;
-  const openai = { ...JOB_FIT_DEFAULTS.openai, ...(stored.openai || {}) };
-  els.modelProvider.value = stored.modelProvider === "openai" ? "openai" : "lmstudio";
-  els.openAiKey.value = openai.apiKey || "";
-  els.openAiModel.value = openai.model || JOB_FIT_DEFAULTS.openai.model;
-  els.openAiFlex.value = ["bulk", "always", "never"].includes(openai.flex) ? openai.flex : "bulk";
-  renderTierOptions();
-  els.openAiMaxOutput.value = openai.maxOutputTokens;
-  els.openAiBudget.value = Number(openai.dailyTokenBudget) || "";
-  // The saved effort, kept even while a model that doesn't take one is
-  // selected, so switching back restores it.
-  els.openAiReasoningEffort.dataset.saved = openai.reasoningEffort || "";
-  renderReasoningOptions();
-  showProviderFields();
-  renderUsage();
-  els.lmStudioUrl.value = lmStudio.url || JOB_FIT_DEFAULTS.lmStudio.url;
-  els.lmStudioModel.value = lmStudio.model || "";
-  els.lmStudioTimeout.value = lmStudio.timeoutSeconds || JOB_FIT_DEFAULTS.lmStudio.timeoutSeconds;
-  els.lmStudioReasoningEffort.value = lmStudio.reasoningEffort ?? JOB_FIT_DEFAULTS.lmStudio.reasoningEffort;
-  els.lmStudioEnableThinking.checked =
-    typeof lmStudio.enableThinking === "boolean" ? lmStudio.enableThinking : JOB_FIT_DEFAULTS.lmStudio.enableThinking;
-
-  renderPresetCheckboxes();
-  watchSettingsFields();
-  store = await JOB_FIT_PROFILES.load();
-  renderProfileSelect();
-  restoreOpenSections(stored.uiOpenSections);
-  fillFormFromProfile(activeProfile());
-}
-
-// Chrome destroys the popup document the moment it loses focus, and nothing
-// here was written until you pressed Save — so editing your CV and then
-// clicking anything outside the popup lost the edit silently.
-//
-// Debounced rather than written on every keystroke, and short enough that the
-// most you can lose is the last fraction of a second of typing. A blur flush
-// is not enough on its own: the teardown does not wait for an async storage
-// write to finish.
-let autoSaveTimer = null;
-
-function scheduleAutoSave() {
-  captureForm();
-  clearTimeout(autoSaveTimer);
-  autoSaveTimer = setTimeout(() => {
-    persistSettings().then(() => setStatus(t("popup.savedAuto")));
-  }, 400);
-}
-
-function flushAutoSave() {
-  clearTimeout(autoSaveTimer);
-  captureForm();
-  return persistSettings();
-}
-
-// The model settings as the form holds them. One builder for autosave and the
-// Save button, which used to each spell the object out and could drift.
-function modelSettingsFromForm() {
-  return {
-    modelProvider: els.modelProvider.value === "openai" ? "openai" : "lmstudio",
-    lmStudio: {
-      url: els.lmStudioUrl.value.trim() || JOB_FIT_DEFAULTS.lmStudio.url,
-      model: els.lmStudioModel.value.trim(),
-      timeoutSeconds:
-        els.lmStudioTimeout.value === "" ? JOB_FIT_DEFAULTS.lmStudio.timeoutSeconds : Number(els.lmStudioTimeout.value),
-      reasoningEffort: els.lmStudioReasoningEffort.value,
-      enableThinking: els.lmStudioEnableThinking.checked,
-    },
-    openai: {
-      apiKey: els.openAiKey.value.trim(),
-      model: selectedOpenAiModel(),
-      flex: els.openAiFlex.value,
-      reasoningEffort: document.getElementById("openAiReasoningSection").hidden
-        ? els.openAiReasoningEffort.dataset.saved || ""
-        : els.openAiReasoningEffort.value,
-      maxOutputTokens: JOB_FIT_PROVIDER.clampOutputTokens(els.openAiMaxOutput.value),
-      dailyTokenBudget: Math.max(0, Number(els.openAiBudget.value) || 0),
-    },
-  };
-}
-
-async function persistSettings() {
-  await chrome.storage.local.set(modelSettingsFromForm());
-  await JOB_FIT_PROFILES.save(store);
-}
-
-// Only the effort levels this model accepts, and the field only for models
-// that take one at all: a value the model rejects fails the whole request.
-// Tiers first, a custom model id only when asked for. `available` is the
-// key's model list once known, so a tier the key can't use is greyed out.
-let availableOpenAiModels = null;
-
-function renderTierOptions() {
-  const select = els.openAiTier;
-  const current = els.openAiModel.value.trim();
-  select.innerHTML = "";
-  (JOB_FIT_DEFAULTS.openaiTiers || []).forEach((tier) => {
-    const opt = document.createElement("option");
-    opt.value = tier.id;
-    const cost = JOB_FIT_PROVIDER.formatDollars(JOB_FIT_PROVIDER.costPer100(tier));
-    const missing = availableOpenAiModels && !availableOpenAiModels.includes(tier.model);
-    opt.textContent = `${t(`tier.${tier.id}.label`)} — ${tier.model}${missing ? ` ${t("popup.notOnKey")}` : ` · ${t("popup.perHundred", { cost })}`}`;
-    opt.disabled = Boolean(missing);
     select.appendChild(opt);
   });
-  const custom = document.createElement("option");
-  custom.value = "custom";
-  custom.textContent = t("popup.customModel");
-  select.appendChild(custom);
-  const tier = JOB_FIT_PROVIDER.tierForModel(current);
-  select.value = tier ? tier.id : "custom";
-  syncTierHint();
+  select.value = store.activeProfileId;
 }
 
-function syncTierHint() {
-  const tier = (JOB_FIT_DEFAULTS.openaiTiers || []).find((t) => t.id === els.openAiTier.value);
-  document.getElementById("openAiCustomRow").hidden = Boolean(tier);
-  const hint = document.getElementById("openAiTierHint");
-  if (!tier) {
-    hint.textContent = t("popup.customModelHint");
-    return;
-  }
-  const flex = JOB_FIT_PROVIDER.formatDollars(JOB_FIT_PROVIDER.costPer100(tier, "flex"));
-  hint.textContent = `${t(`tier.${tier.id}.blurb`)} ${t("popup.flexCost", { cost: flex })}`;
+// The two things that make every score meaningless, said before you click:
+// setup left unfinished, or a profile with no CV to score against.
+function renderProfileNotices() {
+  const profile = activeProfile();
+  const unfinished = Boolean(profile && profile.setupIncomplete);
+  $("setupBanner").hidden = !unfinished;
+  if (unfinished) $("setupBannerText").textContent = t("popup.setupUnfinished", { name: profile.name });
+  $("cvMissing").hidden = unfinished || Boolean(profile && profile.profile.trim());
+  // One primary button per view: while setup is unfinished, that's the one.
+  $("evaluate").classList.toggle("primary", !unfinished && !(tabRecord && isStale(tabRecord)));
 }
 
-function selectedOpenAiModel() {
-  const tier = (JOB_FIT_DEFAULTS.openaiTiers || []).find((t) => t.id === els.openAiTier.value);
-  return tier ? tier.model : els.openAiModel.value.trim();
-}
-
-function renderReasoningOptions() {
-  const select = els.openAiReasoningEffort;
-  const allowed = JOB_FIT_PROVIDER.reasoningEffortsFor(selectedOpenAiModel());
-  const wanted = select.dataset.saved ?? select.value ?? "";
-  document.getElementById("openAiReasoningSection").hidden = !allowed.length;
-  select.innerHTML = "";
-  if (!allowed.length) return;
-  ["", ...allowed].forEach((value) => {
-    const opt = document.createElement("option");
-    opt.value = value;
-    opt.textContent = value || t("popup.modelDefault");
-    select.appendChild(opt);
-  });
-  select.value = JOB_FIT_PROVIDER.effectiveReasoningEffort(selectedOpenAiModel(), wanted);
-}
-
-function formatTokens(n) {
-  if (n >= 1e6) return `${(n / 1e6).toFixed(1)}M`;
-  if (n >= 1e3) return `${(n / 1e3).toFixed(1)}k`;
-  return String(n);
-}
-
-// Today's and this month's OpenAI tokens beside the budget field, plus what
-// the budget comes to in requests at the current average — a token budget
-// means nothing until it's translated into evaluations.
-async function renderUsage() {
-  const host = document.getElementById("openAiUsage");
-  const stored = await chrome.storage.local.get(["usageByDay", "openaiBudgetReset"]);
-  const days = stored.usageByDay || {};
-  const today = JOB_FIT_PROVIDER.dayKey();
-  const counted = JOB_FIT_PROVIDER.budgetTokensUsed(days, stored.openaiBudgetReset);
-  const wasReset = stored.openaiBudgetReset && stored.openaiBudgetReset.day === today;
-  const month = today.slice(0, 7);
-  const sum = (filter) =>
-    Object.entries(days)
-      .filter(([day]) => filter(day))
-      .reduce(
-        (acc, [, d]) => {
-          const t = d.openai;
-          if (t) {
-            acc.requests += t.requests;
-            acc.tokens += t.input + t.output;
-          }
-          return acc;
-        },
-        { requests: 0, tokens: 0 }
-      );
-  const day = sum((d) => d === today);
-  const m = sum((d) => d.startsWith(month));
-  if (!m.requests) {
-    host.textContent = t("popup.usageEmpty");
-    return;
-  }
-  const avg = Math.round(m.tokens / m.requests);
-  const budget = Number(els.openAiBudget.value) || 0;
-  const left = budget ? Math.max(0, budget - counted) : 0;
-  host.textContent =
-    t("popup.usageLine", {
-      count: day.requests,
-      tokens: formatTokens(day.tokens),
-      month: formatTokens(m.tokens),
-      avg: formatTokens(avg),
-    }) +
-    " " +
-    (budget
-      ? t(wasReset ? "popup.usageBudgetSinceReset" : "popup.usageBudgetUsed", {
-          used: formatTokens(counted),
-          count: Math.floor(left / avg),
-        })
-      : t("popup.usageNoBudget"));
-}
-
-// Starts today's budget count from zero — handy after switching model or
-// effort, when the day's earlier requests don't reflect what the rest will
-// cost. Only the budget's starting point moves; usage history is untouched.
-// A queue that paused because the budget ran out is resumed.
-async function resetBudget() {
-  const stored = await chrome.storage.local.get("usageByDay");
-  const today = JOB_FIT_PROVIDER.dayKey();
-  await chrome.storage.local.set({
-    openaiBudgetReset: { day: today, tokens: JOB_FIT_PROVIDER.openAiTokensOnDay(stored.usageByDay, today), at: Date.now() },
-  });
-  let resumed = false;
-  try {
-    const snapshot = await sendMessageWithRetry({ type: "JOB_FIT_QUEUE_SNAPSHOT" });
-    // pauseFailure, not the message: the message is in the user's language.
-    if (snapshot && snapshot.state === "paused" && snapshot.pauseFailure === "budget") {
-      await sendMessageWithRetry({ type: "JOB_FIT_QUEUE_RESUME" });
-      resumed = true;
-    }
-  } catch (err) {
-    /* worker asleep and no queue to resume */
-  }
-  await renderUsage();
-  setStatus(resumed ? t("popup.budgetResetResumed") : t("popup.budgetResetDone"));
-}
-
-function showProviderFields() {
-  const openai = els.modelProvider.value === "openai";
-  document.getElementById("lmStudioFields").hidden = openai;
-  document.getElementById("openAiFields").hidden = !openai;
-}
-
-// Fills the model suggestions from the account's own model list, so the name
-// is picked rather than typed from memory.
-async function loadOpenAiModels() {
-  const key = els.openAiKey.value.trim();
-  if (!key) return;
-  const probe = await probeModels({ provider: "openai", apiKey: key });
-  const list = document.getElementById("openAiModelList");
-  list.innerHTML = "";
-  if (!probe.ok) return;
-  availableOpenAiModels = probe.models;
-  renderTierOptions();
-  probe.models.forEach((id) => {
-    const opt = document.createElement("option");
-    opt.value = id;
-    list.appendChild(opt);
-  });
-}
-
-// Every field that belongs to a profile or to the LM Studio settings. The
-// profile selector, the rename box and the summary output are deliberately
-// excluded — they are not settings.
-function watchSettingsFields() {
-  const fields = [
-    els.profile, els.lmStudioUrl, els.lmStudioModel, els.lmStudioTimeout,
-    els.lmStudioReasoningEffort, els.lmStudioEnableThinking,
-    els.modelProvider, els.openAiKey, els.openAiModel, els.openAiReasoningEffort,
-    els.openAiMaxOutput, els.openAiBudget, els.openAiFlex,
-    els.hardRejectsPhrases, els.hardRejectsPatterns,
-    els.softWarningsPhrases, els.softWarningsPatterns,
-    els.domainFlagsPhrases, els.domainFlagsPatterns,
-  ].filter(Boolean);
-
-  fields.forEach((field) => {
-    field.addEventListener("input", scheduleAutoSave);
-    field.addEventListener("change", flushAutoSave);
-  });
-
-  // Salary rows are rebuilt per profile, so delegate to their container.
-  els.salaryRows.addEventListener("input", scheduleAutoSave);
-  els.salaryRows.addEventListener("change", flushAutoSave);
-
-  // Preset checkboxes are rebuilt on every render, so delegate to the container.
-  KEYWORD_KINDS.forEach((kind) => {
-    const host = els[`${kind}Presets`];
-    if (host) host.addEventListener("change", flushAutoSave);
-  });
-}
-
-async function saveSettings() {
-  captureForm();
-  await chrome.storage.local.set(modelSettingsFromForm());
-  await JOB_FIT_PROFILES.save(store);
-  setStatus(t("popup.saved", { name: activeProfile().name }));
-}
-
-// Last line of defence. Not relied on — an async write started here may not
-// finish before the document is torn down — but it costs nothing and catches
-// an edit made inside the debounce window.
-function flushOnHide() {
-  if (document.visibilityState === "hidden") flushAutoSave();
-}
-
-// Switching auto-saves the outgoing profile rather than warning about unsaved
-// edits — the popup is transient enough that a "discard changes?" prompt would
-// fire constantly, and a half-typed regex persisted is harmless and editable.
 async function switchProfile(id) {
-  captureForm();
-  await JOB_FIT_PROFILES.save(store);
   store.activeProfileId = id;
   await JOB_FIT_PROFILES.save(store);
-  fillFormFromProfile(activeProfile());
-  setStatus(t("popup.switched", { name: activeProfile().name }));
+  renderProfileNotices();
+  await renderThisJob();
+  JOB_FIT_UI.announce(t("popup.switched", { name: activeProfile().name }));
 }
 
-// Name entry is inline rather than window.prompt(): a modal dialog in an
-// extension popup can dismiss the popup itself, losing the form with it.
-let pendingNameAction = null;
-
-function askForName(action, initialValue) {
-  pendingNameAction = action;
-  els.profileNameInput.value = initialValue || "";
-  els.profileNameRow.hidden = false;
-  els.profileNameInput.focus();
-  els.profileNameInput.select();
-}
-
-function cancelNamePrompt() {
-  pendingNameAction = null;
-  els.profileNameRow.hidden = true;
-  els.profileNameInput.value = "";
-}
-
-async function confirmNamePrompt() {
-  const name = els.profileNameInput.value.trim();
-  const action = pendingNameAction;
-  if (!action) return;
-  if (!name) {
-    els.profileHint.textContent = t("popup.nameNeeded");
-    return;
-  }
-
-  captureForm();
-
-  if (action === "rename") {
-    activeProfile().name = name;
-  } else {
-    const created = Object.assign(JOB_FIT_PROFILES.clone(activeProfile()), { id: JOB_FIT_PROFILES.newId(), name });
-    store.profiles.push(created);
-    store.activeProfileId = created.id;
-  }
-
-  await JOB_FIT_PROFILES.save(store);
-  renderProfileSelect();
-  fillFormFromProfile(activeProfile());
-  cancelNamePrompt();
-  els.profileHint.textContent = "";
-  setStatus(action === "rename" ? t("popup.renamed") : t("popup.created", { name }));
-}
-
-// Two-step rather than confirm(), same popup-dismissal reason as above.
-let deleteArmed = false;
-
-async function deleteProfile() {
-  const btn = document.getElementById("profileDelete");
-  if (store.profiles.length < 2) {
-    els.profileHint.textContent = t("popup.cantDeleteOnly");
-    return;
-  }
-
-  if (!deleteArmed) {
-    deleteArmed = true;
-    btn.textContent = t("popup.sure");
-    // The tracked-job count goes in the warning because those records are
-    // deleted too, and that's the part you can't get back — the profile
-    // itself is a minute of retyping.
-    const tracked = await JOB_FIT_EVALSTORE.countForProfile(store.activeProfileId);
-    const armedText = tracked
-      ? t("popup.deleteConfirmJobs", { name: activeProfile().name, count: tracked })
-      : t("popup.deleteConfirm", { name: activeProfile().name });
-    els.profileHint.textContent = armedText;
-    setTimeout(() => {
-      deleteArmed = false;
-      btn.textContent = t("popup.delete");
-      if (els.profileHint.textContent === armedText) els.profileHint.textContent = "";
-    }, 6000);
-    return;
-  }
-
-  deleteArmed = false;
-  btn.textContent = t("popup.delete");
-  const removed = activeProfile().name;
-  const removedId = store.activeProfileId;
-
-  // Records first: if this throws, the profile stays and the records are still
-  // reachable. The other order would strand them permanently.
-  let removedJobs = 0;
-  try {
-    removedJobs = await JOB_FIT_EVALSTORE.removeAllForProfile(removedId);
-  } catch (err) {
-    els.profileHint.textContent = t("popup.deleteJobsFailed", { error: err.message });
-    return;
-  }
-
-  store.profiles = store.profiles.filter((p) => p.id !== removedId);
-  store.activeProfileId = store.profiles[0].id;
-  await JOB_FIT_PROFILES.save(store);
-  renderProfileSelect();
-  fillFormFromProfile(activeProfile());
-  els.profileHint.textContent = "";
-  setStatus(removedJobs ? t("popup.deletedJobs", { name: removed, count: removedJobs }) : t("popup.deleted", { name: removed }));
-}
-
-// Only the reject/warning lists. The candidate text can't be reset to a
-// default that means anything once profiles exist (restoring one person's CV
-// into another person's profile is nonsense), and domain flags are per-person
-// by construction.
-function resetKeywordLists() {
-  fillKeywordConfig("hardRejects", JOB_FIT_DEFAULTS.keywords.hardRejects);
-  fillKeywordConfig("softWarnings", JOB_FIT_DEFAULTS.keywords.softWarnings);
-  setStatus(t("popup.resetDone"));
-}
-
-// The popup document is destroyed whenever it loses focus, so a <details> the
-// user opened would collapse again on every reopen. Persist the state instead.
-const SECTION_IDS = [
-  "sec-profilemanage",
-  "sec-shortcuts",
-  "sec-profile",
-  "sec-lmstudio",
-  "sec-salary",
-  "sec-hardrejects",
-  "sec-warnings",
-  "sec-domainflags",
-];
-
-function restoreOpenSections(saved) {
-  const state = saved || {};
-  SECTION_IDS.forEach((id) => {
-    const el = document.getElementById(id);
-    if (el) el.open = Boolean(state[id]);
-  });
-}
-
-// Collapsed-by-default is right until a section holds the field you can't get
-// anywhere without — an unconfigured model name, or a profile with no CV text
-// yet (which is every profile the moment after you create it). Opening those
-// beats making someone hunt for why nothing works.
-function applyForcedSections() {
-  renderSetupBanner();
-  // An unfinished wizard profile gets the banner instead: the wizard is the
-  // better place to finish, and opening sections underneath it would compete.
-  if (activeProfile() && activeProfile().setupIncomplete) return;
-  const modelMissing = els.modelProvider.value === "openai" ? !selectedOpenAiModel() : !els.lmStudioModel.value.trim();
-  if (modelMissing) document.getElementById("sec-lmstudio").open = true;
-  if (!els.profile.value.trim()) document.getElementById("sec-profile").open = true;
-}
-
-function renderSetupBanner() {
-  const banner = document.getElementById("setupBanner");
-  const profile = activeProfile();
-  banner.hidden = !(profile && profile.setupIncomplete);
-  if (!banner.hidden) document.getElementById("setupBannerText").textContent = t("popup.setupUnfinished", { name: profile.name });
-}
-
-function persistOpenSections() {
-  const state = {};
-  SECTION_IDS.forEach((id) => {
-    const el = document.getElementById(id);
-    if (el) state[id] = el.open;
-  });
-  chrome.storage.local.set({ uiOpenSections: state });
-}
-
-// --- shortcuts ---------------------------------------------------------------
-
-// Shows the shortcut Chrome actually assigned, which may differ from the
-// suggested one (another extension had it, or you changed it). Formatted by
-// Chrome for the platform, e.g. "⇧⌘E" on a Mac and "Alt+Shift+E" elsewhere.
-async function renderShortcuts() {
-  let shortcut = "";
-  try {
-    const commands = await chrome.commands.getAll();
-    const cmd = commands.find((c) => c.name === "evaluate-tab");
-    shortcut = (cmd && cmd.shortcut) || "";
-  } catch (err) {
-    /* commands API unavailable */
-  }
-  document.getElementById("shortcutKey").textContent = shortcut || t("popup.notSet");
-  document.getElementById("evaluateTip").textContent = shortcut
-    ? t("popup.tipShortcut", { shortcut })
-    : t("popup.tipNoShortcut");
-}
-
-// --- readiness -------------------------------------------------------------
-
-function setReady(dotId, textId, state, text, title) {
-  const dot = document.getElementById(dotId);
-  dot.className = `dot ${state}`;
-  const label = document.getElementById(textId);
-  label.textContent = text;
-  label.title = title || "";
-}
-
-async function checkModel() {
-  const settings = await JOB_FIT_PROVIDER.load();
-  const wanted = settings.model;
-  const probe = await probeModels(settings);
-
-  if (settings.provider === "openai") {
-    if (probe.reason === "no-key") {
-      setReady("modelDot", "modelState", "bad", t("popup.oaNoKey"));
-    } else if (probe.reason === "unauthorized") {
-      setReady("modelDot", "modelState", "bad", t("popup.oaBadKey"));
-    } else if (!probe.ok) {
-      setReady("modelDot", "modelState", "bad", t("popup.oaUnreachable"));
-    } else if (!wanted) {
-      setReady("modelDot", "modelState", "warn", t("popup.oaPickModel"));
-    } else if (probe.models.length && !probe.models.includes(wanted)) {
-      setReady("modelDot", "modelState", "warn", t("popup.oaModelMissing", { model: wanted }), probe.models.join("\n"));
-    } else {
-      setReady("modelDot", "modelState", "ok", `OpenAI — ${wanted}`);
-    }
-    return;
-  }
-
-  if (probe.reason === "invalid-url") {
-    setReady("modelDot", "modelState", "bad", t("popup.lmBadUrl"));
-    return;
-  }
-  if (!probe.ok) {
-    setReady("modelDot", "modelState", "bad", t("popup.lmUnreachable"), probe.url);
-    return;
-  }
-
-  const loaded = probe.models;
-
-  if (!wanted) {
-    setReady("modelDot", "modelState", "ok", t("popup.lmConnectedUsing", { model: loaded[0] || t("popup.whateverLoaded") }), loaded.join("\n"));
-    return;
-  }
-  // A model name that isn't loaded is the cause of the HTTP error that pauses
-  // the whole queue — worth catching here rather than after you've queued ten.
-  if (loaded.length && !loaded.includes(wanted)) {
-    setReady("modelDot", "modelState", "warn", t("popup.lmNotLoaded", { model: wanted }), `${t("popup.loaded")}:\n${loaded.join("\n")}`);
-    return;
-  }
-  setReady("modelDot", "modelState", "ok", t("popup.lmConnected", { model: wanted }));
-}
+// --- this job ----------------------------------------------------------------
 
 // Deliberately a cheap selector probe rather than running the extractors: it
 // only has to say whether this page is worth clicking Evaluate on.
@@ -853,186 +87,52 @@ function probePage() {
   };
 }
 
+function setReady(dotId, textId, state, text, title) {
+  $(dotId).className = `dot ${state}`;
+  const label = $(textId);
+  label.textContent = text;
+  label.title = title || "";
+}
+
 async function checkPage() {
-  const [tab] = await chrome.tabs.query({ active: true, currentWindow: true });
   if (!tab?.id) {
     setReady("pageDot", "pageState", "warn", t("popup.noTab"));
     return;
   }
-  let probe;
   try {
     const results = await chrome.scripting.executeScript({ target: { tabId: tab.id }, func: probePage });
-    probe = results && results[0] && results[0].result;
+    pageProbe = results && results[0] && results[0].result;
   } catch (err) {
     setReady("pageDot", "pageState", "bad", t("popup.cantReadPage"));
     return;
   }
-  if (!probe) {
+  if (!pageProbe) {
     setReady("pageDot", "pageState", "warn", t("popup.couldntReadTab"));
     return;
   }
-
-  const site = probe.linkedin
+  const p = pageProbe;
+  const site = p.linkedin
     ? "LinkedIn"
-    : probe.greenhouse
+    : p.greenhouse
       ? "Greenhouse"
-      : probe.embedded
+      : p.embedded
         ? t("popup.siteEmbedded")
-        : probe.indeed
+        : p.indeed
           ? "Indeed"
-          : probe.workday
+          : p.workday
             ? "Workday"
-            : probe.jibe
+            : p.jibe
               ? t("popup.siteJibe")
-              : probe.eightfold
+              : p.eightfold
                 ? t("popup.siteEightfold")
                 : null;
+  pageKnown = Boolean(site);
   if (site) setReady("pageDot", "pageState", "ok", t("popup.postingDetected", { site }));
-  else setReady("pageDot", "pageState", "warn", t("popup.noKnownPosting"), probe.host);
-}
-
-function humanDuration(ms) {
-  const seconds = Math.round(ms / 1000);
-  if (seconds < 60) return `${seconds}s`;
-  return `${Math.floor(seconds / 60)}m${String(seconds % 60).padStart(2, "0")}s`;
-}
-
-// Shown directly under the timeout field, because that is the setting it
-// informs: the number you need to choose a timeout, next to the box you type it
-// into.
-async function renderTimingHint() {
-  const hint = document.getElementById("timingHint");
-  const stored = await chrome.storage.local.get("evalStats");
-  const durations = (stored.evalStats && stored.evalStats.durations) || [];
-  if (!durations.length) {
-    hint.textContent = t("popup.timingEmpty");
-    return;
-  }
-  const sorted = [...durations].sort((a, b) => a - b);
-  const median = sorted[Math.floor(sorted.length / 2)];
-  const slowest = sorted[sorted.length - 1];
-  hint.textContent = t("popup.timingLine", {
-    count: durations.length,
-    median: humanDuration(median),
-    slowest: humanDuration(slowest),
-  });
-}
-
-async function renderQueueStatus() {
-  const box = document.getElementById("queueStatus");
-  let snapshot;
-  try {
-    snapshot = await sendMessageWithRetry({ type: "JOB_FIT_QUEUE_SNAPSHOT" });
-  } catch (err) {
-    box.style.display = "none";
-    return;
-  }
-  if (!snapshot || !snapshot.items) {
-    box.style.display = "none";
-    return;
-  }
-
-  const processing = snapshot.items.find((i) => i.state === "processing");
-  const pending = snapshot.items.filter((i) => i.state === "pending").length;
-  const failed = snapshot.items.filter((i) => i.state === "failed").length;
-
-  if (!snapshot.active && !failed) {
-    box.style.display = "none";
-    return;
-  }
-
-  const parts = [];
-  if (processing) parts.push(t("popup.qProcessing", { title: processing.title || t("popup.posting") }));
-  if (pending) parts.push(t("queue.waitingCount", { count: pending }));
-  if (failed) parts.push(t("queue.failedCount", { count: failed }));
-  if (snapshot.state === "paused") parts.unshift(`⏸ ${t("popup.qPaused")}`);
-
-  box.textContent = `${parts.join(" · ")} — ${t("popup.qSeeTracked")}`;
-  box.style.display = "block";
-}
-
-async function suggestSalary() {
-  const btn = document.getElementById("suggestSalary");
-  const reasoningEl = document.getElementById("salaryReasoning");
-
-  // With no CV the model has nothing to reason from and returns a plausible
-  // invented range, which is worse than no answer — you'd save it as your own
-  // expectation and every salary comparison after that would be built on it.
-  if (!els.profile.value.trim()) {
-    reasoningEl.textContent = t("popup.salaryNeedsProfile");
-    document.getElementById("sec-profile").open = true;
-    els.profile.focus();
-    return;
-  }
-
-  btn.disabled = true;
-  btn.textContent = "…";
-  reasoningEl.textContent = "";
-
-  try {
-    const profile = activeProfile();
-    const markets = salaryCurrencies.map((currency) => ({
-      currency,
-      period: salaryFieldsFor(currency).period.value,
-      country: countryForCurrency(currency, profile),
-    }));
-    const response = await sendMessageWithRetry({
-      type: "JOB_FIT_SUGGEST_SALARY",
-      profile: els.profile.value,
-      markets,
-      jobSearch: profile.jobSearch,
-    });
-
-    if (!response || !response.ok) {
-      reasoningEl.textContent = response?.error || t("popup.noSuggestion");
-      return;
-    }
-
-    salaryCurrencies.forEach((cur) => {
-      const range = response.data[cur];
-      if (!range) return;
-      const { min, max } = salaryFieldsFor(cur);
-      if (range.min != null) min.value = range.min;
-      if (range.max != null) max.value = range.max;
-    });
-    await flushAutoSave();
-
-    reasoningEl.textContent = response.data.reasoning
-      ? `${response.data.reasoning} ${t("popup.reviewIt")}`
-      : t("popup.suggestedReview");
-  } catch (err) {
-    reasoningEl.textContent = t("common.errorDetail", { detail: err.message });
-  } finally {
-    btn.disabled = false;
-    btn.textContent = t("popup.suggestAll");
-  }
-}
-
-async function evaluateCurrentTab() {
-  // Guard against a double-click firing two concurrent evaluations (and two
-  // concurrent LM Studio requests) before the popup has a chance to close.
-  const btn = document.getElementById("evaluate");
-  if (btn.disabled) return;
-  btn.disabled = true;
-
-  const [tab] = await chrome.tabs.query({ active: true, currentWindow: true });
-  if (!tab?.id) {
-    btn.disabled = false;
-    return;
-  }
-  const started = await startEvaluation(tab.id);
-  if (!started.ok) {
-    setStatus(started.error, { persist: true });
-    btn.disabled = false;
-    return;
-  }
-  window.close();
+  else setReady("pageDot", "pageState", "warn", t("popup.noKnownPosting"), p.host);
 }
 
 // Runs in the page (executeScript serializes it, so it can't call anything
-// outside itself). Same order as content.js's pickExtractor: this used to try
-// only Greenhouse and LinkedIn before the whole-page fallback, so a brief on
-// Indeed, Workday, Jibe or Eightfold summarized the page chrome as well.
+// outside itself). Same order as content.js's dispatchExtraction.
 function extractOnPage() {
   const host = location.hostname;
   const jf = window.__jobFit || {};
@@ -1057,18 +157,138 @@ function extractOnPage() {
   return { ...extracted, jobKey: JOB_FIT_JOBKEY.keyFor(extracted) };
 }
 
+// Which job the tab shows, read with the extractors alone (no content.js, so
+// nothing is evaluated). On a company site that embeds a Greenhouse board the
+// posting is in the iframe, so that's asked too.
+async function readTabJob() {
+  if (!tab?.id || !pageProbe) return null;
+  try {
+    await chrome.scripting.executeScript({ target: { tabId: tab.id }, files: JOB_FIT_LOOKUP_FILES });
+    const top = await chrome.scripting.executeScript({ target: { tabId: tab.id }, func: extractOnPage });
+    let found = top?.find((r) => r.result)?.result || null;
+    if (pageProbe.embedded) {
+      const frameIds = await injectJobFrames(tab.id, JOB_FIT_LOOKUP_FILES, { withCss: false });
+      if (frameIds.length) {
+        const framed = await chrome.scripting.executeScript({ target: { tabId: tab.id, frameIds }, func: extractOnPage });
+        found = framed?.find((r) => r.result)?.result || found;
+      }
+    }
+    return found ? { jobKey: found.jobKey, title: found.title, company: found.company } : null;
+  } catch (err) {
+    return null;
+  }
+}
+
+let currentModel = "";
+
+function staleReason(record) {
+  if (record.score == null && !record.hardReject) return null;
+  const reasons = [];
+  if (!record.hardReject && (record.model || "") !== currentModel) {
+    reasons.push(record.model ? t("history.scoredBy", { model: record.model }) : t("history.scoredByAnother"));
+  }
+  if (record.profileFingerprint !== JOB_FIT_PROFILES.fingerprint(activeProfile())) reasons.push(t("history.olderProfile"));
+  return reasons.length ? JOB_FIT_I18N.list(reasons) : null;
+}
+
+function isStale(record) {
+  return Boolean(staleReason(record));
+}
+
+function scoredWhen(record) {
+  const ts = JOB_FIT_EVALSTORE.activityTs(record);
+  const days = Math.floor((Date.now() - ts) / 86400000);
+  return days <= 0 ? t("popup.scoredToday") : t("popup.scoredAgo", { count: days });
+}
+
+// The saved result for this tab's job under the active profile: the number
+// the on-page card shows, here too, with what to do about it.
+async function renderThisJob() {
+  tabRecord = tabJob ? await JOB_FIT_EVALSTORE.get(activeProfile().id, tabJob.jobKey) : null;
+  const hasScore = Boolean(tabRecord && (tabRecord.score != null || tabRecord.hardReject));
+  $("record").hidden = !hasScore;
+
+  const evaluate = $("evaluate");
+  if (!hasScore) {
+    // "this job" only when a known board's posting was seen; anywhere else
+    // Evaluate still tries, and says so.
+    evaluate.textContent = tabJob && pageKnown ? t("popup.evaluateJob") : t("popup.evaluate");
+    $("reevaluate").hidden = true;
+    renderProfileNotices();
+    return;
+  }
+  $("reevaluate").hidden = false;
+
+  const r = tabRecord;
+  const score = $("recScore");
+  score.className = `score ${r.hardReject ? "red" : JOB_FIT_UI.scoreClass(r.score)}`;
+  score.textContent = r.hardReject ? "✕" : String(r.score);
+  const verdict = r.hardReject
+    ? t("result.hardReject")
+    : r.verdict && JOB_FIT_I18N.has(`verdict.${r.verdict}`)
+      ? t(`verdict.${r.verdict}`)
+      : r.verdict || "";
+  // The badge carries the number visually and is hidden from screen readers,
+  // so the number is spoken here instead.
+  const recVerdict = $("recVerdict");
+  recVerdict.textContent = "";
+  if (!r.hardReject) {
+    const spoken = document.createElement("span");
+    spoken.className = "sr-only";
+    spoken.textContent = `${r.score}/100 `;
+    recVerdict.appendChild(spoken);
+  }
+  const word = document.createElement("span");
+  word.className = "vword";
+  word.textContent = verdict;
+  recVerdict.appendChild(word);
+  $("recName").textContent = [r.title, r.company].filter(Boolean).join(" — ");
+  const meta = $("recMeta");
+  meta.textContent = r.hardReject ? `${r.hardReject.label} · ${scoredWhen(r)}` : scoredWhen(r);
+  const stale = staleReason(r);
+  if (stale) {
+    meta.appendChild(document.createTextNode(" · "));
+    const warn = document.createElement("span");
+    warn.className = "stale";
+    warn.textContent = t("popup.outOfDate", { reason: stale });
+    meta.appendChild(warn);
+  }
+
+  // Out of date: re-scoring is the thing to do. Otherwise showing the saved
+  // result on the page is — it costs nothing.
+  evaluate.textContent = t("popup.showOnPage");
+  $("reevaluate").classList.toggle("primary", Boolean(stale) && !activeProfile().setupIncomplete);
+  renderProfileNotices();
+}
+
+async function evaluateCurrentTab({ ignoreCache = false } = {}) {
+  // Guard against a double-click firing two concurrent evaluations before
+  // the popup has a chance to close.
+  const btn = ignoreCache ? $("reevaluate") : $("evaluate");
+  if (btn.disabled || !tab?.id) return;
+  btn.disabled = true;
+  const started = await startEvaluation(tab.id, { ignoreCache });
+  if (!started.ok) {
+    setStatus(started.error);
+    btn.disabled = false;
+    return;
+  }
+  window.close();
+}
+
+// --- summarize -----------------------------------------------------------------
+
 async function summarizeCurrentTab() {
-  const btn = document.getElementById("summarizeTab");
-  const statusEl = document.getElementById("summarizeStatus");
-  const resultEl = document.getElementById("summarizeResult");
-  const copyBtn = document.getElementById("copySummary");
+  const btn = $("summarizeTab");
+  const statusEl = $("summarizeStatus");
+  const resultEl = $("summarizeResult");
+  const copyBtn = $("copySummary");
 
   btn.disabled = true;
   resultEl.hidden = true;
   copyBtn.hidden = true;
   statusEl.textContent = t("popup.extracting");
 
-  const [tab] = await chrome.tabs.query({ active: true, currentWindow: true });
   if (!tab?.id) {
     statusEl.textContent = t("popup.noTab");
     btn.disabled = false;
@@ -1078,36 +298,19 @@ async function summarizeCurrentTab() {
 
   let extracted;
   try {
-    await chrome.scripting.executeScript({
-      target: { tabId: tab.id },
-      files
-    });
-
-
+    await chrome.scripting.executeScript({ target: { tabId: tab.id }, files });
     // Find cross-origin job board iframes (e.g. embedded Greenhouse on
     // custom-domain career sites). Targeted frameIds avoid the allFrames
     // rejection issue where one inaccessible ad iframe kills the whole call.
     const jobFrameIds = await injectJobFrames(tab.id, files, { withCss: false });
-
-    // Extract from top frame
-    const topResults = await chrome.scripting.executeScript({
-      target: { tabId: tab.id },
-      func: extractOnPage,
-    });
-    // .result unwraps the InjectionResult ({ frameId, result }) — find() returns
-    // the wrapper, and the wrapper is truthy, so without this the downstream
-    // `if (!extracted)` guard passes and the brief is queued with an undefined
-    // posting body.
+    const topResults = await chrome.scripting.executeScript({ target: { tabId: tab.id }, func: extractOnPage });
+    // .result unwraps the InjectionResult ({ frameId, result }) — find()
+    // returns the wrapper, which is truthy even when result is null.
     extracted = topResults?.find((r) => r.result)?.result || null;
-
-    // If a Greenhouse iframe exists, prefer its result. On a custom-domain
-    // career site (e.g. Nuro) the top frame only has nav/footer/blog text;
-    // the actual job posting lives in the iframe.
+    // If a Greenhouse iframe exists, prefer its result: on a custom-domain
+    // career site the top frame only has nav/footer/blog text.
     if (jobFrameIds.length > 0) {
-      const frameResults = await chrome.scripting.executeScript({
-        target: { tabId: tab.id, frameIds: jobFrameIds },
-        func: extractOnPage,
-      });
+      const frameResults = await chrome.scripting.executeScript({ target: { tabId: tab.id, frameIds: jobFrameIds }, func: extractOnPage });
       const frameExtracted = frameResults?.find((r) => r.result)?.result || null;
       if (frameExtracted) extracted = frameExtracted;
     }
@@ -1124,12 +327,10 @@ async function summarizeCurrentTab() {
   }
 
   // Through the same single-flight lane as evaluations, so there is never more
-  // than one request to LM Studio: two at once roughly halves the throughput
-  // of both. Priority, so it runs before queued evaluations rather than behind
-  // ten of them.
+  // than one request to the model. Priority, so it runs before queued
+  // evaluations rather than behind them.
   const active = activeProfile();
   const requestedAt = Date.now();
-
   let response;
   try {
     response = await sendMessageWithRetry({
@@ -1180,14 +381,12 @@ async function summarizeCurrentTab() {
   resultEl.value = combinedText;
   resultEl.hidden = false;
   copyBtn.hidden = false;
-
   try {
     await navigator.clipboard.writeText(combinedText);
     statusEl.textContent = summary.hasEvaluation ? t("popup.copiedWithEval", { name: active.name }) : t("popup.copied");
   } catch (err) {
     statusEl.textContent = t("popup.couldntAutoCopy");
   }
-
   btn.disabled = false;
   renderQueueStatus();
 }
@@ -1199,10 +398,9 @@ async function summarizeCurrentTab() {
 async function waitForSummary(url, profileId, since, timeoutMs = 120000) {
   const startedAt = Date.now();
   while (Date.now() - startedAt < timeoutMs) {
-    const stored = await chrome.storage.local.get("lastSummary");
-    const summary = stored.lastSummary;
-    if (summary && summary.url === url && summary.profileId === profileId && summary.ts >= since) {
-      return summary;
+    const { lastSummary } = await chrome.storage.local.get("lastSummary");
+    if (lastSummary && lastSummary.url === url && lastSummary.profileId === profileId && lastSummary.ts >= since) {
+      return lastSummary;
     }
     await new Promise((resolve) => setTimeout(resolve, 1200));
   }
@@ -1210,25 +408,21 @@ async function waitForSummary(url, profileId, since, timeoutMs = 120000) {
 }
 
 async function restoreLastSummary() {
-  const [tab] = await chrome.tabs.query({ active: true, currentWindow: true });
   if (!tab?.url) return;
-
-  const stored = await chrome.storage.local.get("lastSummary");
-  const lastSummary = stored.lastSummary;
+  const { lastSummary } = await chrome.storage.local.get("lastSummary");
   if (!lastSummary || lastSummary.url !== tab.url || !lastSummary.text) return;
   // A summary built for another profile carries that profile's evaluation
   // block, so don't resurrect it under the current one.
   if (lastSummary.profileId && lastSummary.profileId !== activeProfile().id) return;
-
-  document.getElementById("summarizeResult").value = lastSummary.text;
-  document.getElementById("summarizeResult").hidden = false;
-  document.getElementById("copySummary").hidden = false;
-  document.getElementById("summarizeStatus").textContent = t("popup.summaryEarlier");
+  $("summarizeResult").value = lastSummary.text;
+  $("summarizeResult").hidden = false;
+  $("copySummary").hidden = false;
+  $("summarizeStatus").textContent = t("popup.summaryEarlier");
 }
 
 async function copySummary() {
-  const resultEl = document.getElementById("summarizeResult");
-  const statusEl = document.getElementById("summarizeStatus");
+  const resultEl = $("summarizeResult");
+  const statusEl = $("summarizeStatus");
   try {
     await navigator.clipboard.writeText(resultEl.value);
     statusEl.textContent = t("popup.copied");
@@ -1239,106 +433,65 @@ async function copySummary() {
   }
 }
 
-document.getElementById("save").addEventListener("click", saveSettings);
-// chrome:// pages can't be linked to, but an extension can open one in a tab.
-document.getElementById("changeShortcut").addEventListener("click", () => {
-  chrome.tabs.create({ url: "chrome://extensions/shortcuts" });
-  window.close();
-});
-els.modelProvider.addEventListener("change", () => {
-  showProviderFields();
-  flushAutoSave().then(checkModel);
-  if (els.modelProvider.value === "openai") loadOpenAiModels();
-});
-els.openAiKey.addEventListener("change", () => {
-  loadOpenAiModels();
-  flushAutoSave().then(checkModel);
-});
-els.openAiTier.addEventListener("change", () => {
-  syncTierHint();
-  if (els.openAiTier.value !== "custom") els.openAiModel.value = selectedOpenAiModel();
-  else els.openAiModel.focus();
-  renderReasoningOptions();
-  flushAutoSave().then(checkModel);
-});
-els.openAiModel.addEventListener("change", () => {
-  renderReasoningOptions();
-  flushAutoSave().then(checkModel);
-});
-els.openAiModel.addEventListener("input", renderReasoningOptions);
-els.openAiBudget.addEventListener("input", renderUsage);
-document.getElementById("resetBudget").addEventListener("click", resetBudget);
-// The preference is only what the user picks here, never the adjusted value a
-// half-typed model name produced.
-els.openAiReasoningEffort.addEventListener("change", () => {
-  els.openAiReasoningEffort.dataset.saved = els.openAiReasoningEffort.value;
-});
-document.getElementById("reset").addEventListener("click", resetKeywordLists);
-els.profileSelect.addEventListener("change", (e) => switchProfile(e.target.value));
-// New profiles go through the setup wizard: a blank profile has no CV, no
-// salary and no domain flags, and the wizard is what walks through filling them.
-// Opened as a tab because the popup destroys itself the moment focus moves.
-document.getElementById("profileNew").addEventListener("click", async () => {
-  await flushAutoSave();
-  openSetupWizard({ mode: "new" });
-  window.close();
-});
-document.getElementById("profileWizard").addEventListener("click", async () => {
-  await flushAutoSave();
-  openSetupWizard({ mode: "edit", profile: activeProfile().id });
-  window.close();
-});
-// Resumes where the wizard was left; the wizard reads its own saved progress.
-document.getElementById("setupContinue").addEventListener("click", async () => {
-  await flushAutoSave();
-  openSetupWizard({ profile: activeProfile().id, resume: "1" });
-  window.close();
-});
-document.getElementById("profileDuplicate").addEventListener("click", () =>
-  askForName("duplicate", t("popup.copyName", { name: activeProfile().name }))
-);
-document.getElementById("profileRename").addEventListener("click", () => askForName("rename", activeProfile().name));
-document.getElementById("profileDelete").addEventListener("click", deleteProfile);
-document.getElementById("profileNameOk").addEventListener("click", confirmNamePrompt);
-document.getElementById("profileNameCancel").addEventListener("click", cancelNamePrompt);
-els.profileNameInput.addEventListener("keydown", (e) => {
-  if (e.key === "Enter") confirmNamePrompt();
-  if (e.key === "Escape") cancelNamePrompt();
-});
-SECTION_IDS.forEach((id) => document.getElementById(id)?.addEventListener("toggle", persistOpenSections));
-document.getElementById("evaluate").addEventListener("click", evaluateCurrentTab);
-document.getElementById("suggestSalary").addEventListener("click", suggestSalary);
-document.getElementById("summarizeTab").addEventListener("click", summarizeCurrentTab);
-document.getElementById("copySummary").addEventListener("click", copySummary);
-// An extension page rather than a popup view: it needs room, and it keeps full
-// chrome.storage access without the popup's habit of destroying itself on blur.
-document.getElementById("viewHistory").addEventListener("click", () => {
-  chrome.tabs.create({ url: chrome.runtime.getURL("history.html") });
-});
+// --- readiness -----------------------------------------------------------------
 
-// restoreLastSummary() reads the active profile, so it has to wait for the
-// store to be in memory.
-document.addEventListener("visibilitychange", flushOnHide);
-window.addEventListener("pagehide", flushAutoSave);
+async function checkModel() {
+  const settings = await JOB_FIT_PROVIDER.load();
+  const verdict = describeModelReadiness(settings, await probeModels(settings));
+  setReady("modelDot", "modelState", verdict.state, verdict.text, verdict.title);
+  $("fixModel").hidden = verdict.state === "ok";
+}
 
-els.salaryAdd.addEventListener("change", () => {
-  const currency = els.salaryAdd.value;
-  if (!currency) return;
-  captureForm();
-  salaryCurrencies.push(currency);
-  renderSalaryRows(activeProfile());
-  flushAutoSave();
-  const fields = salaryFieldsFor(currency);
-  if (fields) fields.min.focus();
-});
+async function renderQueueStatus() {
+  const row = $("queueRow");
+  let snapshot;
+  try {
+    snapshot = await sendMessageWithRetry({ type: "JOB_FIT_QUEUE_SNAPSHOT" });
+  } catch (err) {
+    row.hidden = true;
+    return;
+  }
+  const items = (snapshot && snapshot.items) || [];
+  const processing = items.find((i) => i.state === "processing");
+  const pending = items.filter((i) => i.state === "pending").length;
+  const failed = items.filter((i) => i.state === "failed").length;
+  if (!snapshot || (!snapshot.active && !failed)) {
+    row.hidden = true;
+    return;
+  }
+  const paused = snapshot.state === "paused";
+  const parts = [];
+  if (paused) parts.push(t("popup.qPaused"));
+  if (processing) parts.push(t("popup.qProcessing", { title: processing.title || t("popup.posting") }));
+  if (pending) parts.push(t("queue.waitingCount", { count: pending }));
+  if (failed) parts.push(t("queue.failedCount", { count: failed }));
+  $("queueStatus").textContent = `${parts.join(" · ")} — ${t("popup.qSeeTracked")}`;
+  $("queueDot").className = `dot ${paused || failed ? "warn" : "ok"}`;
+  row.hidden = false;
+}
 
-// --- on-page button ------------------------------------------------------------
+// Shows the shortcut Chrome actually assigned, which may differ from the
+// suggested one. Formatted by Chrome for the platform, e.g. "⇧⌘E".
+async function renderShortcutTip() {
+  let shortcut = "";
+  try {
+    const commands = await chrome.commands.getAll();
+    const cmd = commands.find((c) => c.name === "evaluate-tab");
+    shortcut = (cmd && cmd.shortcut) || "";
+  } catch (err) {
+    /* commands API unavailable */
+  }
+  $("evaluateTip").textContent = shortcut ? t("popup.tipShortcut", { shortcut }) : t("popup.tipNoShortcut");
+}
+
+// --- on-page button --------------------------------------------------------------
 //
 // Opt-in per site. Ticking the box asks Chrome for access to this one site;
 // the worker then shows the button here straight away and on every later
 // visit (background.js, setFloatSite). The permission prompt can close the
 // popup before it hears the answer, so the site is also left in
-// `floatPending` for the worker to finish on its own.
+// `floatPending` for the worker to finish on its own. The list of sites is in
+// Settings › On-page button.
 let floatTab = null;
 
 function floatHost(origin) {
@@ -1352,8 +505,6 @@ function floatHost(origin) {
 async function renderFloat() {
   const { floatingButtonSites } = await chrome.storage.local.get("floatingButtonSites");
   const sites = Array.isArray(floatingButtonSites) ? floatingButtonSites : [];
-
-  const [tab] = await chrome.tabs.query({ active: true, currentWindow: true });
   let origin = null;
   try {
     const url = new URL(tab && tab.url);
@@ -1362,45 +513,19 @@ async function renderFloat() {
     origin = null;
   }
   floatTab = origin ? { id: tab.id, origin } : null;
-  document.getElementById("floatRow").hidden = !origin;
+  $("floatRow").hidden = !origin;
   if (origin) {
-    document.getElementById("floatToggle").checked = sites.includes(origin);
-    document.getElementById("floatLabel").textContent = t("popup.floatToggle", { site: floatHost(origin) });
+    $("floatToggle").checked = sites.includes(origin);
+    $("floatLabel").textContent = t("popup.floatToggle", { site: floatHost(origin) });
   }
-
-  const list = document.getElementById("floatSites");
-  list.innerHTML = "";
-  if (!sites.length) {
-    const none = document.createElement("div");
-    none.className = "hint";
-    none.textContent = t("popup.floatNone");
-    list.appendChild(none);
-    return;
-  }
-  sites.forEach((site) => {
-    const chip = document.createElement("span");
-    chip.className = "float-site";
-    chip.appendChild(document.createTextNode(floatHost(site)));
-    const x = document.createElement("button");
-    x.type = "button";
-    x.textContent = "×";
-    x.title = t("popup.floatRemove", { site: floatHost(site) });
-    x.setAttribute("aria-label", x.title);
-    x.addEventListener("click", async () => {
-      await sendMessageWithRetry({ type: "JOB_FIT_FLOAT_SITE", origin: site, enabled: false });
-      renderFloat();
-    });
-    chip.appendChild(x);
-    list.appendChild(chip);
-  });
 }
 
 // Not async before permissions.request: Chrome only shows the prompt from
 // inside the click that asked for it.
-document.getElementById("floatToggle").addEventListener("change", (e) => {
+function onFloatToggle(e) {
   const box = e.target;
-  const hint = document.getElementById("floatHint");
-  hint.hidden = true;
+  const hint = $("floatHint");
+  hint.textContent = "";
   if (!floatTab) return;
   const { id: tabId, origin } = floatTab;
   if (!box.checked) {
@@ -1411,51 +536,63 @@ document.getElementById("floatToggle").addEventListener("change", (e) => {
   chrome.permissions.request({ origins: [`${origin}/*`] }).then(async (granted) => {
     if (!granted) {
       box.checked = false;
-      hint.hidden = false;
       hint.textContent = t("popup.floatDenied");
       return;
     }
     await sendMessageWithRetry({ type: "JOB_FIT_FLOAT_SITE", origin, enabled: true, tabId });
-    hint.hidden = false;
     hint.textContent = t("popup.floatOn");
     renderFloat();
   });
-});
-
-// The language picker: "Automatic" follows the browser. Changing it reloads
-// the popup in the new language — every string on it is drawn at load.
-function renderLanguagePicker() {
-  const select = els.uiLanguage;
-  select.innerHTML = "";
-  const auto = document.createElement("option");
-  auto.value = "auto";
-  auto.textContent = t("popup.languageAuto", { language: JOB_FIT_I18N.LANGUAGES.find((l) => l.code === JOB_FIT_I18N.detect()).name });
-  select.appendChild(auto);
-  JOB_FIT_I18N.LANGUAGES.forEach((l) => {
-    const opt = document.createElement("option");
-    opt.value = l.code;
-    opt.textContent = l.name;
-    select.appendChild(opt);
-  });
-  select.value = JOB_FIT_I18N.setting;
-  select.addEventListener("change", async () => {
-    await flushAutoSave();
-    await JOB_FIT_I18N.setLanguage(select.value);
-    location.reload();
-  });
 }
 
-JOB_FIT_I18N.load().then(() => {
-  JOB_FIT_I18N.translatePage();
-  renderLanguagePicker();
-  renderShortcuts();
-  renderFloat();
-  loadSettings().then(() => {
-    restoreLastSummary();
-    if (els.modelProvider.value === "openai") loadOpenAiModels();
+// --- start -----------------------------------------------------------------------
+
+function wire() {
+  $("profileSelect").addEventListener("change", (e) => switchProfile(e.target.value));
+  $("openSettings").addEventListener("click", () => goToSettings());
+  $("fixModel").addEventListener("click", () => goToSettings("model"));
+  $("addCv").addEventListener("click", () => goToSettings("profile"));
+  $("setupContinue").addEventListener("click", () => {
+    openSetupWizard({ profile: activeProfile().id, resume: "1" });
+    window.close();
   });
+  $("evaluate").addEventListener("click", () => evaluateCurrentTab());
+  $("reevaluate").addEventListener("click", () => evaluateCurrentTab({ ignoreCache: true }));
+  $("openRecord").addEventListener("click", () => {
+    const params = new URLSearchParams({ profile: activeProfile().id, job: tabRecord ? tabRecord.jobKey : "" });
+    chrome.tabs.create({ url: `${chrome.runtime.getURL("history.html")}?${params.toString()}` });
+    window.close();
+  });
+  $("summarizeTab").addEventListener("click", summarizeCurrentTab);
+  $("copySummary").addEventListener("click", copySummary);
+  $("floatToggle").addEventListener("change", onFloatToggle);
+  // An extension page rather than a popup view: it needs room, and it keeps
+  // full chrome.storage access without the popup's habit of closing on blur.
+  const openHistory = () => {
+    chrome.tabs.create({ url: chrome.runtime.getURL("history.html") });
+    window.close();
+  };
+  $("viewHistory").addEventListener("click", openHistory);
+  $("queueStatus").addEventListener("click", openHistory);
+}
+
+async function init() {
+  await JOB_FIT_I18N.load();
+  JOB_FIT_I18N.translatePage();
+  wire();
+  [tab] = await chrome.tabs.query({ active: true, currentWindow: true });
+  store = await JOB_FIT_PROFILES.load();
+  currentModel = JOB_FIT_PROVIDER.currentModel(await chrome.storage.local.get(JOB_FIT_PROVIDER.KEYS));
+  renderProfileSelect();
+  renderProfileNotices();
+  renderShortcutTip();
+  renderFloat();
   renderQueueStatus();
   checkModel();
-  checkPage();
-  renderTimingHint();
-});
+  restoreLastSummary();
+  await checkPage();
+  tabJob = await readTabJob();
+  await renderThisJob();
+}
+
+init();

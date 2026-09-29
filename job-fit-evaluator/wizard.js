@@ -1942,7 +1942,8 @@ $("suggestSalary").addEventListener("click", suggestSalary);
 $("suggestFlags").addEventListener("click", suggestFlags);
 $("addAllFlags").addEventListener("click", () => addFlags(state.flagSuggestions));
 $("runTest").addEventListener("click", runTest);
-$("openRestore").addEventListener("click", () => chrome.tabs.create({ url: chrome.runtime.getURL("history.html") }));
+$("openRestore").addEventListener("click", () => openSettings("data"));
+$("doneSettings").addEventListener("click", () => openSettings());
 $("doneClose").addEventListener("click", closeTab);
 $("doneHistory").addEventListener("click", () =>
   chrome.tabs.create({ url: chrome.runtime.getURL(`history.html?profile=${encodeURIComponent(state.profile.id)}`) })

@@ -25,7 +25,7 @@ The extension talks to any OpenAI-compatible endpoint, so LM Studio is the defau
 but not a requirement.
 
 **Or use the OpenAI API.** If you'd rather not run a model locally, set the provider
-to **OpenAI API** (in the setup wizard, or the popup under **Model**), paste your API
+to **OpenAI API** (in the setup wizard, or **Settings → Model**), paste your API
 key and pick a tier: **Economy** (gpt-6-luna, about $0.05 per 100 postings),
 **Balanced** (gpt-6-sol, about $1 per 100, the default) or **Best** (gpt-6-astra,
 about $5 per 100), or any other chat model your key has. Bulk re-evaluations from
@@ -106,19 +106,27 @@ computed in code, because local models are unreliable at it and fail confidently
      posting (or one you paste) that isn't saved to your tracked jobs.
 
    Everything saves as you go. Close the tab early and the popup offers
-   **Continue setup**. To run it again later, use **Manage profiles → Run setup
-   wizard for this profile** in the popup, or **Data → Run setup wizard…** on the
-   tracked jobs page. **New** profile also opens it. Every setting stays editable
-   in the popup too.
+   **Continue setup**. To run it again later, use **Run setup wizard for this
+   profile** in **Settings → Profile**; **New profile…** there opens it too.
+   Every setting stays editable in **Settings** (the ⚙ in the popup, or
+   right-click the JobFit icon → **Options**).
 
-Then open a job posting and click **Evaluate this tab**.
+Then open a job posting and click **Evaluate this job**.
 
 ## Using it
 
 **Evaluate.** Open the posting and press **⌘⇧E** on a Mac, or **Alt+Shift+E** on
 Windows and Linux. It works on any site, with no clicks. You can also click the
-JobFit icon, then **Evaluate this tab**. You can change the shortcut at
-`chrome://extensions/shortcuts`, or from the popup under **Shortcuts**.
+JobFit icon, then **Evaluate this job**. You can change the shortcut at
+`chrome://extensions/shortcuts`, or from **Settings → On-page button and shortcut**.
+
+**The popup** is for the job in front of you. If you've scored it before, it shows
+the saved score and verdict, when it was scored and whether it's out of date (another
+model, or a profile you've edited since), with **Show on page**, **Re-evaluate** and
+**Open in Tracked jobs**. Below that it says whether the model is reachable, with a
+**Fix in Settings** link when it isn't, and how the queue is doing. Everything you set
+once lives in **Settings**, a full page with a section for each: profile and CV,
+salary, screening rules, model, the on-page button, language, and backups.
 
 **On-page button (optional).** On a job board you use a lot, tick **Show the JobFit
 button on {site}** in the popup. Chrome asks for access to that one site; after that,
@@ -126,7 +134,7 @@ a card sits in the bottom-left corner of its job postings. One click evaluates t
 posting, and if you've scored it before, the card already shows the score when you open
 the page. It never evaluates on its own. Hover it for **–** to shrink it to just the
 score, or **×** (twice) to turn it off for the site and give the access back — or
-remove the site under **Shortcuts and on-page button** in the popup.
+remove the site under **Settings → On-page button and shortcut**.
 
 A banner appears in the page with the score, verdict and a one-line read;
 **Details** expands to matches, gaps, required gaps, warnings and salary.
