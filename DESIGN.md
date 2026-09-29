@@ -86,6 +86,7 @@ job-fit-evaluator/
 ├── wizard.html          # setup wizard (first install, new profile, re-run)
 ├── wizard.js
 ├── lmstudio-ui.js       # shared by popup + wizard: messaging, /v1/models probe
+├── float.js             # on-page button (opt-in per site, registered dynamically)
 ├── popup.html
 ├── popup.js
 ├── extractors/
@@ -831,6 +832,69 @@ What stayed from that work:
   cleared with `text: null`, not `""`, so the queue count returns.
 - **One code path:** starting an evaluation (injecting the page scripts, including into
   Greenhouse iframes) lives in `inject.js`, shared by the popup and the service worker.
+
+### On-page button, opt-in per site (2026-09-27)
+
+A card in the bottom-left corner of job pages (`float.js`) evaluates the posting on
+screen with one click and shows its state: **Evaluate this job**, **In queue · #2**,
+**Scoring…**, the saved score in a coloured badge with its verdict, or **✕ Hard
+reject** with the rule that fired.
+Seeing a job's saved score the moment you open it is most of the value; the click is
+the smaller part.
+
+- **Opt-in per site, because it has to run before anyone clicks.** Everything else in
+  JobFit runs on a page only when asked, which is why the extension installs with no
+  access to job boards. A button that appears by itself needs access up front, and
+  listing job boards in the manifest would show a "read and change your data" warning
+  and disable the extension for existing installs until they approved it. It also
+  couldn't cover company career sites (Eightfold, Jibe, embedded Greenhouse), which
+  live on each company's own domain. So the manifest only declares
+  `optional_host_permissions` (no install warning), and the popup's **Show the JobFit
+  button on {site}** asks Chrome for that one site.
+- **Registration:** the sites are origins in `floatingButtonSites`. `syncFloatScripts()`
+  registers one dynamic content script (`jobfit-float`) for exactly the sites whose
+  permission is still held. It re-checks on startup, on install/update (so the button
+  runs the new files) and on `permissions.onRemoved`, so revoking access in Chrome's
+  own settings takes the button away. Turning a site off, from the popup or the
+  pill's hover **×**, removes it and gives the permission back.
+- **The permission prompt can close the popup** before it hears the answer. The popup
+  writes `floatPending` first, and `permissions.onAdded` in the worker finishes the
+  job either way. `permissions.request` is the first async call in the click
+  handler, because Chrome only prompts from inside the user's gesture.
+- **It never calls the model on its own.** A click sends `JOB_FIT_EVALUATE_TAB`, which
+  runs `evaluateTab()`, the same path as the keyboard shortcut. content.js decides as
+  always: a saved result is shown with Re-evaluate, a new job is screened and queued.
+  The worker can inject into the tab because the site's permission is held; no
+  activeTab grant is needed.
+- **What it loads:** the extractors, `jobkey.js`, the stores and the messages, but not
+  `content.js`, which starts an evaluation as soon as it loads.
+- **It shows only on a posting.** It uses the same extractor chain as an evaluation.
+  The generic fallback counts only when the page carries a schema.org `JobPosting`,
+  or the pill would sit on every page of an enabled site.
+- **Single-page boards:** LinkedIn and Eightfold change jobs without a page load, so
+  the card polls `location.href` (an isolated world can't see the page's own
+  `history.pushState`) and re-reads the job on a short schedule after each change
+  (0.6s … 6s), because the posting fills in a moment after the address does.
+  **It doesn't disappear between jobs.** LinkedIn empties the detail pane while it
+  loads the next one, and removing the card on that miss made it vanish and pop
+  back on every click. A miss during the schedule shows *Reading this job…*; only a
+  page with still no job after the last retry loses the card. Overlapping re-reads
+  are sequenced, so a slow one can't paint over a newer one. State updates come
+  from `storage.onChanged`: the record's key, `queue`, the active profile, the
+  language and the minimized setting.
+- **Look and controls:** a white card with a 46px coloured badge, two lines of text
+  (what it is, and what clicking does), a spring-in entrance and a "pop" on the badge
+  only when the news changes (a score arriving, another job), not on every redraw.
+  Hovering shows **–** (minimize to just the badge, remembered per site in
+  `floatCollapsed`; clicking the badge expands it) and **×** (hide on this site), which
+  asks first: the card turns into "Hide on {site}?" and a second click within 4s
+  confirms, the same two-step pattern as deleting a tracked job. Esc or a click on
+  the card cancels. Animations are off under `prefers-reduced-motion`.
+- **Isolated from the site:** a closed shadow root, so no site CSS reaches it. The host
+  id starts with `job-fit-`, so `textFrom` never reads the pill into a posting.
+  Pointer events stop at the host, for the same Radix-dialog reason as the banner.
+  **Bottom-left**, beside LinkedIn's job list: the bottom-right corner belongs to
+  LinkedIn's messaging bar and Indeed's chat bubble.
 
 ## Popup readiness
 

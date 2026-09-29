@@ -68,6 +68,11 @@
   .salary-row select { flex: 0 0 82px; width: 82px; }
   .salary-add { display: flex; gap: 6px; align-items: center; margin-top: 2px; }
   .salary-add select { width: auto; flex: 0 0 auto; }
+  .float-toggle { display: flex; align-items: flex-start; gap: 7px; font-weight: 400; margin: 8px 0 0; font-size: 12px; cursor: pointer; }
+  .float-toggle input { width: auto; margin: 1px 0 0; flex: 0 0 auto; }
+  .float-sites { display: flex; flex-wrap: wrap; gap: 5px; }
+  .float-site { display: inline-flex; align-items: center; gap: 3px; background: #eaf1fb; border: 1px solid #cfdcf0; border-radius: 999px; padding: 1px 3px 1px 8px; font-size: 11px; }
+  .float-site button { border: none; background: none; padding: 0 4px; font-size: 13px; line-height: 1; color: #555; }
 </style>
 </head>
 <body>
@@ -111,6 +116,11 @@
   <section>
     <button id="evaluate" class="primary" type="button" style="width:100%;" data-i18n="popup.evaluate">Evaluate this tab</button>
     <div class="hint" id="evaluateTip"></div>
+    <label class="float-toggle" id="floatRow" hidden>
+      <input id="floatToggle" type="checkbox">
+      <span id="floatLabel"></span>
+    </label>
+    <div class="hint" id="floatHint" hidden></div>
   </section>
 
   <section>
@@ -135,6 +145,10 @@
         <button id="changeShortcut" type="button" style="flex:0 0 auto;" data-i18n="popup.changeShortcut">Change shortcut</button>
       </div>
       <div class="hint" data-i18n="popup.shortcutHint">Evaluates the posting in the current tab, on any site.</div>
+    </section>
+    <section>
+      <label data-i18n="popup.floatSites">On-page button</label>
+      <div id="floatSites" class="float-sites"></div>
     </section>
   </details>
 

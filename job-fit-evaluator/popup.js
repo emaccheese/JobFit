@@ -1332,6 +1332,96 @@ els.salaryAdd.addEventListener("change", () => {
   if (fields) fields.min.focus();
 });
 
+// --- on-page button ------------------------------------------------------------
+//
+// Opt-in per site. Ticking the box asks Chrome for access to this one site;
+// the worker then shows the button here straight away and on every later
+// visit (background.js, setFloatSite). The permission prompt can close the
+// popup before it hears the answer, so the site is also left in
+// `floatPending` for the worker to finish on its own.
+let floatTab = null;
+
+function floatHost(origin) {
+  try {
+    return new URL(origin).hostname.replace(/^www\./, "");
+  } catch (err) {
+    return origin;
+  }
+}
+
+async function renderFloat() {
+  const { floatingButtonSites } = await chrome.storage.local.get("floatingButtonSites");
+  const sites = Array.isArray(floatingButtonSites) ? floatingButtonSites : [];
+
+  const [tab] = await chrome.tabs.query({ active: true, currentWindow: true });
+  let origin = null;
+  try {
+    const url = new URL(tab && tab.url);
+    if (/^https?:$/.test(url.protocol)) origin = url.origin;
+  } catch (err) {
+    origin = null;
+  }
+  floatTab = origin ? { id: tab.id, origin } : null;
+  document.getElementById("floatRow").hidden = !origin;
+  if (origin) {
+    document.getElementById("floatToggle").checked = sites.includes(origin);
+    document.getElementById("floatLabel").textContent = t("popup.floatToggle", { site: floatHost(origin) });
+  }
+
+  const list = document.getElementById("floatSites");
+  list.innerHTML = "";
+  if (!sites.length) {
+    const none = document.createElement("div");
+    none.className = "hint";
+    none.textContent = t("popup.floatNone");
+    list.appendChild(none);
+    return;
+  }
+  sites.forEach((site) => {
+    const chip = document.createElement("span");
+    chip.className = "float-site";
+    chip.appendChild(document.createTextNode(floatHost(site)));
+    const x = document.createElement("button");
+    x.type = "button";
+    x.textContent = "×";
+    x.title = t("popup.floatRemove", { site: floatHost(site) });
+    x.setAttribute("aria-label", x.title);
+    x.addEventListener("click", async () => {
+      await sendMessageWithRetry({ type: "JOB_FIT_FLOAT_SITE", origin: site, enabled: false });
+      renderFloat();
+    });
+    chip.appendChild(x);
+    list.appendChild(chip);
+  });
+}
+
+// Not async before permissions.request: Chrome only shows the prompt from
+// inside the click that asked for it.
+document.getElementById("floatToggle").addEventListener("change", (e) => {
+  const box = e.target;
+  const hint = document.getElementById("floatHint");
+  hint.hidden = true;
+  if (!floatTab) return;
+  const { id: tabId, origin } = floatTab;
+  if (!box.checked) {
+    sendMessageWithRetry({ type: "JOB_FIT_FLOAT_SITE", origin, enabled: false }).then(renderFloat);
+    return;
+  }
+  chrome.storage.local.set({ floatPending: { origin, tabId, ts: Date.now() } });
+  chrome.permissions.request({ origins: [`${origin}/*`] }).then(async (granted) => {
+    if (!granted) {
+      box.checked = false;
+      hint.hidden = false;
+      hint.textContent = t("popup.floatDenied");
+      return;
+    }
+    await sendMessageWithRetry({ type: "JOB_FIT_FLOAT_SITE", origin, enabled: true, tabId });
+    hint.hidden = false;
+    hint.textContent = t("popup.floatOn");
+    renderFloat();
+  });
+});
+
 // The language picker: "Automatic" follows the browser. Changing it reloads
 // the popup in the new language — every string on it is drawn at load.
 function renderLanguagePicker() {
@@ -1359,6 +1449,7 @@ JOB_FIT_I18N.load().then(() => {
   JOB_FIT_I18N.translatePage();
   renderLanguagePicker();
   renderShortcuts();
+  renderFloat();
   loadSettings().then(() => {
     restoreLastSummary();
     if (els.modelProvider.value === "openai") loadOpenAiModels();
