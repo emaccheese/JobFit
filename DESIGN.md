@@ -86,6 +86,8 @@ job-fit-evaluator/
 ├── wizard.html          # setup wizard (first install, new profile, re-run)
 ├── wizard.js
 ├── lmstudio-ui.js       # shared by popup + wizard: messaging, /v1/models probe
+├── ui.css               # shared tokens (colour, type, radius, dark mode) + base controls
+├── ui-shared.js         # JOB_FIT_UI — score bands, live-region announce, two-step confirm
 ├── float.js             # on-page button (opt-in per site, registered dynamically)
 ├── popup.html
 ├── popup.js
@@ -688,7 +690,7 @@ Dispatch by hostname, fall back to generic. Log which extractor fired.
 ## Queue
 
 Clicking **Evaluate this tab** adds the posting to a serial queue instead of
-running it there and then. Up to 10 jobs; click through a search page, queue
+running it there and then. Up to 50 jobs; click through a search page, queue
 them all, come back later.
 
 ### Why the queue owns the work
@@ -895,6 +897,30 @@ the smaller part.
   Pointer events stop at the host, for the same Radix-dialog reason as the banner.
   **Bottom-left**, beside LinkedIn's job list: the bottom-right corner belongs to
   LinkedIn's messaging bar and Indeed's chat bubble.
+
+## Shared UI foundation (2026-09-28)
+
+The popup, Tracked jobs, the wizard and the on-page surfaces grew one at a time
+and ended up with their own colours, four different ambers among them, and badge
+colours that failed contrast (white on the old amber was 3.3:1). One set now:
+
+- **`ui.css`** holds the tokens and the base controls (buttons, inputs, focus
+  ring, `.sr-only`) for every extension page. A plain colour (`--green`) is a fill
+  that takes white text; `-fg` is the same hue as text on a page surface; `-soft`
+  and `-line` are its tinted background and border. Every text pair meets WCAG AA
+  4.5:1 and every control border and the focus ring 3:1, **in both themes**: the
+  tokens are redefined under `prefers-color-scheme: dark`, so a page that only
+  uses tokens gets dark mode for free.
+- **Nothing below 12px.** Badges are sentence case at 12px rather than 10px
+  uppercase.
+- **`ui-shared.js`** (`JOB_FIT_UI`) holds the score bands (`scoreClass`, 75 and
+  55, also the "strong match" threshold in Needs attention), `announce()` for a
+  polite live region, and `armConfirm()`, the two-step confirm every destructive
+  button uses: the first click turns it red with the confirm wording and
+  announces it, a second click within 5s acts, Esc or the timeout disarms. It is
+  injected with the page scripts too, so the card and the pages agree on the bands.
+- The on-page card lives in a shadow root on someone else's page, which
+  `ui.css` can't reach; it carries a copy of the same values.
 
 ## Popup readiness
 

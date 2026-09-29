@@ -1156,7 +1156,7 @@ async function setBadge(count, state) {
   try {
     await chrome.action.setBadgeText({ text: count ? String(count) : "" });
     if (count) {
-      await chrome.action.setBadgeBackgroundColor({ color: state === "paused" ? "#b7791f" : "#3574d6" });
+      await chrome.action.setBadgeBackgroundColor({ color: state === "paused" ? "#9a6300" : "#2f6bd0" });
     }
   } catch (err) {
     // Badge is cosmetic; never let it break processing.
@@ -1419,7 +1419,7 @@ async function evaluateTab(tab) {
   const started = await startEvaluation(tab.id);
   if (started.ok) return;
   try {
-    await chrome.action.setBadgeBackgroundColor({ tabId: tab.id, color: "#c0392b" });
+    await chrome.action.setBadgeBackgroundColor({ tabId: tab.id, color: "#b3261e" });
     await chrome.action.setBadgeText({ tabId: tab.id, text: "!" });
     await chrome.action.setTitle({ tabId: tab.id, title: `JobFit — ${started.error}` });
     setTimeout(() => {

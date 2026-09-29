@@ -111,16 +111,16 @@
       transition: transform .15s ease, box-shadow .15s ease; }
     .card:hover { transform: translateY(-2px); box-shadow: 0 14px 34px rgba(20, 30, 50, .26), 0 3px 8px rgba(20, 30, 50, .14); }
     .card:active { transform: translateY(0) scale(.99); }
-    .card:focus-visible { outline: 3px solid #a9c4ef; outline-offset: 3px; }
+    .card:focus-visible { outline: 3px solid #2f6bd0; outline-offset: 3px; }
     .card.busy { cursor: default; }
 
     .badge { flex: 0 0 auto; display: grid; place-items: center; width: 46px; height: 46px; border-radius: 50%;
-      background: #3574d6; color: #fff; font-size: 17px; font-weight: 800; letter-spacing: -.02em;
+      background: #2f6bd0; color: #fff; font-size: 17px; font-weight: 800; letter-spacing: -.02em;
       box-shadow: inset 0 -2px 0 rgba(0, 0, 0, .12); }
-    .badge.green { background: #1e8e3e; }
-    .badge.amber { background: #c77c00; }
-    .badge.red { background: #c0392b; }
-    .badge.muted { background: #7b879a; }
+    .badge.green { background: #177a3e; }
+    .badge.amber { background: #9a6300; }
+    .badge.red { background: #b3261e; }
+    .badge.muted { background: #5f6b7c; }
     .badge.mark { font-size: 15px; letter-spacing: .02em; }
     .badge.pop { animation: pop .42s cubic-bezier(.2, .9, .3, 1.4); }
     @keyframes pop { 0% { transform: scale(.7); } 60% { transform: scale(1.12); } 100% { transform: scale(1); } }
@@ -132,8 +132,8 @@
     .text { display: flex; flex-direction: column; gap: 2px; min-width: 0; }
     .primary { font-size: 15px; font-weight: 700; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
     .primary .verdict { text-transform: capitalize; }
-    .secondary { font-size: 12px; color: #616b7c; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
-    .arrow { margin-left: auto; padding-left: 4px; color: #9aa3b2; font-size: 20px; line-height: 1; }
+    .secondary { font-size: 12px; color: #5f6b7c; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+    .arrow { margin-left: auto; padding-left: 4px; color: #5f6b7c; font-size: 20px; line-height: 1; }
 
     .controls { position: absolute; top: -10px; right: -10px; display: flex; gap: 4px; opacity: 0;
       transform: translateY(3px); transition: opacity .15s, transform .15s; }
@@ -142,8 +142,8 @@
       color: #3d4757; font: 700 14px/22px -apple-system, sans-serif; padding: 0; cursor: pointer;
       box-shadow: 0 2px 6px rgba(20, 30, 50, .18); }
     .ctl:hover { background: #f0f2f5; }
-    .ctl:focus-visible { outline: 2px solid #a9c4ef; outline-offset: 1px; }
-    .ctl.danger { background: #c0392b; border-color: #c0392b; color: #fff; }
+    .ctl:focus-visible { outline: 2px solid #2f6bd0; outline-offset: 1px; }
+    .ctl.danger { background: #b3261e; border-color: #b3261e; color: #fff; }
 
     /* Minimized: just the badge, still showing the score. */
     .wrap.collapsed .card { min-width: 0; padding: 5px; border-radius: 50%; gap: 0; }
@@ -221,9 +221,7 @@
   }
 
   function scoreClass(score) {
-    if (score >= 75) return "green";
-    if (score >= 55) return "amber";
-    return "red";
+    return JOB_FIT_UI.scoreClass(score) || "red";
   }
 
   function el(tag, className, text) {

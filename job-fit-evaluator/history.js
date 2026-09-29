@@ -71,14 +71,8 @@ function usageText(usage) {
   return ` · ${t("history.tokens", { tokens: k(total) })}${usage.reasoning ? ` ${t("history.reasoningTokens", { tokens: k(usage.reasoning) })}` : ""}`;
 }
 
-function scoreClass(score) {
-  // Null means summarized but never scored — that has to read as neutral, not
-  // as a red 0, which is what a hard reject looks like.
-  if (score == null) return "";
-  if (score >= 75) return "green";
-  if (score >= 55) return "amber";
-  return "red";
-}
+// The bands are shared with the on-page card and the popup (ui-shared.js).
+const scoreClass = JOB_FIT_UI.scoreClass;
 
 function formatDate(ts) {
   return JOB_FIT_I18N.formatDate(ts);
@@ -748,22 +742,16 @@ function renderJob(record) {
   actions.appendChild(savedMsg);
 
   const del = el("button", "danger", t("history.deleteEntry"));
-  let armed = false;
-  del.addEventListener("click", async () => {
-    if (!armed) {
-      armed = true;
-      del.textContent = t("history.deleteAgain");
-      setTimeout(() => {
-        armed = false;
-        del.textContent = t("history.deleteEntry");
-      }, 4000);
-      return;
-    }
-    markSelfWrite(record.jobKey);
-    await JOB_FIT_EVALSTORE.remove(viewProfileId, record.jobKey);
-    records = records.filter((r) => r.jobKey !== record.jobKey);
-    openKeys.delete(record.jobKey);
-    render();
+  del.type = "button";
+  JOB_FIT_UI.armConfirm(del, {
+    confirmLabel: t("history.deleteAgain"),
+    onConfirm: async () => {
+      markSelfWrite(record.jobKey);
+      await JOB_FIT_EVALSTORE.remove(viewProfileId, record.jobKey);
+      records = records.filter((r) => r.jobKey !== record.jobKey);
+      openKeys.delete(record.jobKey);
+      render();
+    },
   });
   actions.appendChild(del);
   body.appendChild(actions);
@@ -799,7 +787,7 @@ const ATTENTION_RULES = [
   {
     // Deliberately reuses the banner's green threshold: if the tool calls it a
     // strong match, and you haven't acted, that is the thing to act on.
-    test: (r) => (!r.status || r.status === "not_applied") && r.score != null && r.score >= 75,
+    test: (r) => (!r.status || r.status === "not_applied") && r.score != null && r.score >= JOB_FIT_UI.GREEN_FROM,
     label: (r) => t("attention.strongMatch", { score: r.score }),
   },
   {

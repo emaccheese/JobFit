@@ -6,6 +6,7 @@
 
 const JOB_FIT_CONTENT_FILES = [
   "i18n.js",
+  "ui-shared.js",
   "geo.js",
   "defaults.js",
   "provider.js",

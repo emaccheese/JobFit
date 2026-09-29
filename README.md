@@ -132,7 +132,7 @@ A banner appears in the page with the score, verdict and a one-line read;
 **Details** expands to matches, gaps, required gaps, warnings and salary.
 
 **Queue.** Clicking Evaluate on a second posting while the first is still running
-queues it — up to 10. Click through a search page, queue everything that looks
+queues it — up to 50. Click through a search page, queue everything that looks
 plausible, and come back later; the toolbar badge counts down. The queue survives
 browser restarts and pauses itself (rather than burning through every item) if
 LM Studio goes away.

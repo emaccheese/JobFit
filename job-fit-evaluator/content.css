@@ -15,10 +15,10 @@
   box-shadow: 0 2px 6px rgba(0, 0, 0, 0.15);
 }
 
-#job-fit-banner.jf-red { background: #fdecea; border-bottom: 3px solid #d93025; }
-#job-fit-banner.jf-amber { background: #fff4e5; border-bottom: 3px solid #f29900; }
-#job-fit-banner.jf-neutral { background: #eaf1fb; border-bottom: 3px solid #3574d6; }
-#job-fit-banner.jf-green { background: #e6f4ea; border-bottom: 3px solid #1e8e3e; }
+#job-fit-banner.jf-red { background: #fdeceb; border-bottom: 3px solid #b3261e; }
+#job-fit-banner.jf-amber { background: #fdf3e2; border-bottom: 3px solid #9a6300; }
+#job-fit-banner.jf-neutral { background: #eaf1fb; border-bottom: 3px solid #2f6bd0; }
+#job-fit-banner.jf-green { background: #e6f4ec; border-bottom: 3px solid #177a3e; }
 
 #job-fit-banner .jf-main {
   display: flex;
@@ -44,11 +44,11 @@
   font-size: 15px;
   text-align: center;
   color: #fff;
-  background: #5f6b7a;
+  background: #5f6b7c;
 }
-#job-fit-banner .jf-score.green { background: #1e8e3e; }
-#job-fit-banner .jf-score.amber { background: #b7791f; }
-#job-fit-banner .jf-score.red { background: #c0392b; }
+#job-fit-banner .jf-score.green { background: #177a3e; }
+#job-fit-banner .jf-score.amber { background: #9a6300; }
+#job-fit-banner .jf-score.red { background: #b3261e; }
 
 #job-fit-banner .jf-summary {
   overflow: hidden;
@@ -108,9 +108,9 @@
   font-size: 12px;
 }
 
-#job-fit-details .jf-tag-red { background: #fdecea; color: #b3261e; }
-#job-fit-details .jf-tag-amber { background: #fff4e5; color: #a15c00; }
-#job-fit-details .jf-tag-green { background: #e6f4ea; color: #14622f; }
+#job-fit-details .jf-tag-red { background: #fdeceb; color: #b3261e; }
+#job-fit-details .jf-tag-amber { background: #fdf3e2; color: #8a5700; }
+#job-fit-details .jf-tag-green { background: #e6f4ec; color: #146c37; }
 
 #job-fit-details .jf-tag-neutral {
   display: block;

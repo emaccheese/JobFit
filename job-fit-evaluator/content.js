@@ -296,10 +296,9 @@
     document.body.appendChild(banner);
   }
 
+  // Shared bands (ui-shared.js); a scored result always has a number.
   function statusForScore(score) {
-    if (score >= 75) return "green";
-    if (score >= 55) return "amber";
-    return "red";
+    return JOB_FIT_UI.scoreClass(score) || "red";
   }
 
   // A genuine embedded board: hosted on greenhouse.io AND served from an embed
