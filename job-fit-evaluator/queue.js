@@ -12,7 +12,7 @@
 // the state machine can be exercised without Chrome.
 var JOB_FIT_QUEUE = (function () {
   const KEY = "queue";
-  const MAX_ITEMS = 10;
+  const MAX_ITEMS = 50;
   // Only re-attempts caused by a lost worker count here. A model-level failure
   // goes straight to `failed` — the same posting through the same model at
   // temperature 0.2 will not parse differently on a second go, and the user
