@@ -879,7 +879,7 @@ async function evaluateWithLmStudio({ profile, postingText, domainFlags, expecte
   const result = await callLmStudio(systemPrompt(), prompt, { signal, bulk });
 
   if (result.ok && result.data) {
-    // Surfaced in the banner: a score produced from a partial posting is worth
+    // Surfaced in the result panel: a score produced from a partial posting is worth
     // knowing about, and silently dropping text is what made this a bug.
     result.data.input_truncated = truncated;
     if (result.data.salary) {
@@ -1066,7 +1066,7 @@ function runCancellable(callId, run) {
 // Fixed fields rather than one free-text summary, assembled into text in
 // code. With a single "summary" string every model chose its own layout and
 // its own idea of what mattered — and some reported a score, which the model
-// is never given and was copying from JobFit's own banner text on the page.
+// is never given and was copying from JobFit's own result text on the page.
 // Fields make the brief look the same whichever model wrote it, and an
 // explicit "not stated" is kept visible rather than silently missing.
 const SUMMARIZE_SYSTEM_PROMPT = `You condense a job posting into a structured brief for another AI assistant that will assess candidate fit. That assistant already has the candidate's full profile/CV — it only needs the posting, stripped of bloat.
@@ -1413,10 +1413,10 @@ chrome.runtime.onInstalled.addListener((details) => {
 
 // Evaluating without the popup has nowhere to show an error, so it goes on
 // the icon: a red "!" for this tab, with the reason as the tooltip.
-async function evaluateTab(tab) {
+async function evaluateTab(tab, { ignoreCache = false } = {}) {
   if (!tab || tab.id == null) return;
   await i18nReady;
-  const started = await startEvaluation(tab.id);
+  const started = await startEvaluation(tab.id, { ignoreCache });
   if (started.ok) return;
   try {
     await chrome.action.setBadgeBackgroundColor({ tabId: tab.id, color: "#b3261e" });
@@ -1559,10 +1559,23 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
     });
     return true;
   }
-  // The on-page button's click: exactly what the keyboard shortcut does.
+  // The on-page card's click: exactly what the keyboard shortcut does. Its
+  // Re-evaluate asks for the saved result to be skipped.
   if (message?.type === "JOB_FIT_EVALUATE_TAB") {
-    if (sender.tab) evaluateTab(sender.tab);
+    if (sender.tab) evaluateTab(sender.tab, { ignoreCache: Boolean(message.ignoreCache) });
     sendResponse({ ok: Boolean(sender.tab) });
+    return false;
+  }
+  // card.js in a frame (an embedded Greenhouse board) draws nothing itself:
+  // its calls go to the card in the page's top frame. Through here rather
+  // than postMessage, which the embedding site could read — the result says
+  // how well its own posting fits your CV.
+  if (message?.type === "JOB_FIT_CARD_RELAY") {
+    if (sender.tab && sender.frameId !== 0 && typeof message.method === "string") {
+      chrome.tabs
+        .sendMessage(sender.tab.id, { type: "JOB_FIT_CARD_CALL", method: message.method, args: message.args || [] }, { frameId: 0 })
+        .catch(() => {});
+    }
     return false;
   }
   if (message?.type === "JOB_FIT_FLOAT_SITE") {

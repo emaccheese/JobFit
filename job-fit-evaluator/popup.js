@@ -167,7 +167,7 @@ async function readTabJob() {
     const top = await chrome.scripting.executeScript({ target: { tabId: tab.id }, func: extractOnPage });
     let found = top?.find((r) => r.result)?.result || null;
     if (pageProbe.embedded) {
-      const frameIds = await injectJobFrames(tab.id, JOB_FIT_LOOKUP_FILES, { withCss: false });
+      const frameIds = await injectJobFrames(tab.id, JOB_FIT_LOOKUP_FILES);
       if (frameIds.length) {
         const framed = await chrome.scripting.executeScript({ target: { tabId: tab.id, frameIds }, func: extractOnPage });
         found = framed?.find((r) => r.result)?.result || found;
@@ -302,7 +302,7 @@ async function summarizeCurrentTab() {
     // Find cross-origin job board iframes (e.g. embedded Greenhouse on
     // custom-domain career sites). Targeted frameIds avoid the allFrames
     // rejection issue where one inaccessible ad iframe kills the whole call.
-    const jobFrameIds = await injectJobFrames(tab.id, files, { withCss: false });
+    const jobFrameIds = await injectJobFrames(tab.id, files);
     const topResults = await chrome.scripting.executeScript({ target: { tabId: tab.id }, func: extractOnPage });
     // .result unwraps the InjectionResult ({ frameId, result }) — find()
     // returns the wrapper, which is truthy even when result is null.

@@ -136,8 +136,12 @@ the page. It never evaluates on its own. Hover it for **–** to shrink it to ju
 score, or **×** (twice) to turn it off for the site and give the access back — or
 remove the site under **Settings → On-page button and shortcut**.
 
-A banner appears in the page with the score, verdict and a one-line read;
-**Details** expands to matches, gaps, required gaps, warnings and salary.
+The result opens in a panel from a card in the corner of the page, whichever way
+you started it: the score, the verdict and a one-line read, then sections for
+required gaps, matches, gaps, warnings and salary, with **Re-evaluate** and
+**Tracked jobs**. The card doesn't cover the site's navigation. Drag it up either
+edge, or use **⇄** to move it to the other side; the spot is remembered per site.
+Press Esc to close the panel.
 
 **Queue.** Clicking Evaluate on a second posting while the first is still running
 queues it — up to 50. Click through a search page, queue everything that looks

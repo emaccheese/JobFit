@@ -1,5 +1,5 @@
 // Starting an evaluation = injecting the page scripts into the tab; content.js
-// takes it from there (extract, screen, queue, banner). Shared by the popup's
+// takes it from there (extract, screen, queue, show the result on the card). Shared by the popup's
 // button, the toolbar icon on job pages and the keyboard shortcut, which all
 // used to be the popup alone — loaded by popup.html and importScripts()'d by
 // the service worker.
@@ -23,6 +23,7 @@ const JOB_FIT_CONTENT_FILES = [
   "extractors/indeed.js",
   "extractors/eightfold.js",
   "jobkey.js",
+  "card.js",
   "content.js",
 ];
 
@@ -64,7 +65,7 @@ function injectionErrorMessage(err) {
 // Failures here are reported but never rethrown: the top frame has already
 // been injected by this point, and losing that to an iframe problem would be
 // worse than the iframe being missed.
-async function injectJobFrames(tabId, files, { withCss = true, prelude = null } = {}) {
+async function injectJobFrames(tabId, files, { prelude = null } = {}) {
   const report = (info) =>
     chrome.scripting
       .executeScript({
@@ -133,9 +134,6 @@ async function injectJobFrames(tabId, files, { withCss = true, prelude = null } 
   for (const frame of candidates) {
     const frameIds = [frame.frameId];
     try {
-      if (withCss) {
-        await chrome.scripting.insertCSS({ target: { tabId, frameIds }, files: ["content.css"] });
-      }
       if (prelude) await chrome.scripting.executeScript({ target: { tabId, frameIds }, func: prelude });
       await chrome.scripting.executeScript({ target: { tabId, frameIds }, files });
       injected.push(frame.frameId);
@@ -161,7 +159,6 @@ async function startEvaluation(tabId, { ignoreCache = false } = {}) {
   try {
     const files = await jobFitContentFiles();
     const prelude = ignoreCache ? markIgnoreCacheOnce : null;
-    await chrome.scripting.insertCSS({ target: { tabId }, files: ["content.css"] });
     if (prelude) await chrome.scripting.executeScript({ target: { tabId }, func: prelude });
     await chrome.scripting.executeScript({ target: { tabId }, files });
     // Find cross-origin iframes that host job content (e.g. embedded

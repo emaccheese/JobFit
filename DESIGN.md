@@ -68,8 +68,8 @@ A Chrome/Edge extension that reads a job posting on the current tab, applies det
 job-fit-evaluator/
 ├── manifest.json
 ├── background.js        # API call, storage access
-├── content.js           # DOM extraction + banner injection
-├── content.css          # banner styles
+├── content.js           # DOM extraction, screening, queueing; results go to card.js
+├── card.js              # JOB_FIT_CARD — the on-page card and result panel (shadow root)
 ├── defaults.js          # JOB_FIT_DEFAULTS — shipped defaults
 ├── i18n.js              # JOB_FIT_I18N — interface language, t(), dates/numbers
 ├── locales/             # en.js, es.js, fr.js, pt.js — every visible string
@@ -888,7 +888,9 @@ the smaller part.
   are sequenced, so a slow one can't paint over a newer one. State updates come
   from `storage.onChanged`: the record's key, `queue`, the active profile, the
   language and the minimized setting.
-- **Look and controls:** a white card with a 46px coloured badge, two lines of text
+- **Look and controls** (drawn by `card.js` since 2026-09-28, see "On-page card and
+  result panel"; dragging, the other side and the result panel were added there): a
+  white card with a 46px coloured badge, two lines of text
   (what it is, and what clicking does), a spring-in entrance and a "pop" on the badge
   only when the news changes (a score arriving, another job), not on every redraw.
   Hovering shows **–** (minimize to just the badge, remembered per site in
@@ -898,7 +900,7 @@ the smaller part.
   the card cancels. Animations are off under `prefers-reduced-motion`.
 - **Isolated from the site:** a closed shadow root, so no site CSS reaches it. The host
   id starts with `job-fit-`, so `textFrom` never reads the pill into a posting.
-  Pointer events stop at the host, for the same Radix-dialog reason as the banner.
+  Pointer events stop at the host, for the same Radix-dialog reason as the panel.
   **Bottom-left**, beside LinkedIn's job list: the bottom-right corner belongs to
   LinkedIn's messaging bar and Indeed's chat bubble.
 
@@ -988,31 +990,81 @@ being a surprise.
 
 ---
 
-## Banner UI (content.css)
+## On-page card and result panel (card.js, 2026-09-28)
 
-Inject a fixed bar at the top of the page:
-- Left: score (large) + verdict label.
-- Middle: one_line summary.
-- Right: "Details" toggle → expands matches / gaps / required_gaps / flagged phrases.
-- Below (collapsible): keyword highlights, red / amber / green.
-- Small "Re-evaluate" and "Log" buttons.
+Results used to appear in a bar fixed across the top of the page, at the maximum
+z-index, over the site's own navigation, and in the opposite corner from the
+on-page card you'd just clicked. Its styles lived in the page's DOM, so the site's
+CSS reached them. It's gone: every evaluation, whatever started it, now shows in
+**one card with a result panel that opens from it**.
 
-Keep it dismissable. Don't cover the page's own apply button.
-
-**Radix UI dialogs (my.greenhouse.io's candidate portal) treat any click outside their own DOM subtree as a dismiss signal**, and our banner lives in `document.body` — so clicking Evaluate/Details/Dismiss on the banner would close the job dialog underneath it. Fix: stop `pointerdown`/`mousedown`/`click` from bubbling past the banner and details panel elements, so the event never reaches the document-level listener Radix uses to detect outside clicks.
-
----
-
-The score is a coloured badge rather than text sharing weight with the verdict,
-using the same green/amber/red thresholds as the tracked-jobs page — the same
-number should look the same in both places. A hard reject shows no badge, since
-its `0` is a marker rather than a score.
-
-A **Tracked jobs** action opens the page deep-linked to that record
-(`history.html?profile=…&job=…`). Content scripts cannot open tabs, so the
-worker does it. On arrival the page clears any filter that would hide the job,
-expands it, scrolls to it and flashes it — landing at the top of a long list
-would defeat the point.
+- **Two ways onto a page.** `site` mode is the on-page button (`float.js`): the card
+  is there before anyone clicks, and its **×** turns the button off for the site
+  (asking first). `page` mode is an evaluation started from the shortcut, the popup
+  or Re-evaluate on a site without the button: the card appears with the result,
+  its **×** just dismisses it, and it leaves when a single-page board moves on to
+  another job. `page` never downgrades `site`.
+- **One module draws.** `card.js` (`JOB_FIT_CARD`) owns the card, the panel, the
+  job's live state (queued / scoring / score / hard reject, from `queue` and the
+  record in storage), dragging and the per-site preferences. `float.js` only decides
+  whether the site is on and which job is on screen (`attach`, `setJob`,
+  `setLoading`). `content.js` only says what happened: `starting(job)` as soon as it
+  knows the job, then `showResult(resultFromRecord(record, …))` or `showNotice({…})`.
+  `resultFromRecord`, `staleNoteFor` and `duplicateNoteFor` are shared, so a fresh
+  result, a saved one opened later and one opened from the popup read identically.
+- **The panel.** Score badge, verdict, job, the one-liner as wrapping text, when and
+  for which profile it was scored, then an amber **heads-up** box (out of date,
+  possible duplicate, not saved, truncated), then sections that open and close with a
+  count and a tone dot: required gaps (open by default), seniority, matches, gaps,
+  score caps, warnings, domain flags, salary. Footer: **Re-evaluate** (primary only
+  when the score is out of date) and **Tracked jobs**. Clicking the card on a saved
+  score opens the panel from storage, with no injection and no worker round trip.
+- **Notices** replace the bar's error states: *No posting found*, *Queue full*,
+  *Couldn't evaluate* (amber or red, with an "!" badge, opened, **Try again** or
+  **Tracked jobs**). Being queued is a quiet notice: the card already says *In queue
+  · #3*, and the panel, for whoever opens it, says what the keyword screen flagged
+  while it waits.
+- **Where it sits.** Bottom-left by default (the bottom-right corner belongs to
+  LinkedIn's messaging bar and Indeed's chat bubble). It can be dragged anywhere up
+  either edge and snaps to the nearer one on release, remembered per site in
+  `floatPosition`; **Move to the other side** does the same without dragging
+  (WCAG 2.5.7). The pointer is captured on press, so a quick flick that leaves the
+  card still drags, and a press that moves less than 5px is still a click. The spot
+  is clamped to the window on resize. The panel opens upward, or downward when the
+  card has been dragged near the top, and never exceeds the space it has.
+- **Accessibility.**
+  - The card is a button whose label carries the score ("JobFit: 82/100, apply…"),
+    with `aria-expanded` / `aria-controls` when it opens the panel.
+  - The panel is a non-modal `role="dialog"` labelled by its title. Opening it from
+    the card moves focus to the title; Esc or its × closes it and returns focus to
+    the card.
+  - A result that arrives later opens the panel without taking focus, and a polite
+    live region in the shadow root reads the score out ("JobFit score 82: apply").
+    Notices and the hide confirmation are read out too.
+  - The controls (–, ⇄, ×) show on hover and focus, while the panel is open, and
+    always on touch screens (`hover: none`), at 26px.
+  - Colours are the shared AA tokens, with a dark set under `prefers-color-scheme`.
+    Animations are off under `prefers-reduced-motion`.
+- **Embedded boards.** A company site that embeds a Greenhouse board scores the
+  posting inside the iframe, where a fixed card would be clipped to the embed. In a
+  frame, `card.js` draws nothing: every call is sent as `JOB_FIT_CARD_RELAY` to the
+  worker, which forwards it to frame 0 as `JOB_FIT_CARD_CALL`. The top frame always
+  has `card.js`, because the page scripts are injected there first and `content.js`
+  defers from it. Not `postMessage`: the embedding page could read the message, and
+  the result says how well its own posting fits your CV.
+- **Isolated from the site:**
+  - A closed shadow root, so no site CSS reaches it (tested against a page that
+    forces every `button` hot pink).
+  - The host id starts with `job-fit-`, so `textFrom` never reads the card into a
+    posting.
+  - Pointer events stop at the host, because Radix UI dialogs (my.greenhouse.io)
+    treat any click outside their own subtree as a dismiss.
+  - A host left behind by an earlier copy of the script (after an extension reload)
+    is removed rather than stacked.
+- **Tracked jobs** in the panel opens the page deep-linked to the record
+  (`history.html?profile=…&job=…`), through the worker because content scripts can't
+  open tabs. The page clears any filter that would hide the job, expands it, scrolls
+  to it and flashes it.
 
 ---
 

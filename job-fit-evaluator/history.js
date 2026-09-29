@@ -785,7 +785,7 @@ const ATTENTION_RULES = [
     label: () => t("attention.interview"),
   },
   {
-    // Deliberately reuses the banner's green threshold: if the tool calls it a
+    // Deliberately reuses the card's green threshold: if the tool calls it a
     // strong match, and you haven't acted, that is the thing to act on.
     test: (r) => (!r.status || r.status === "not_applied") && r.score != null && r.score >= JOB_FIT_UI.GREEN_FROM,
     label: (r) => t("attention.strongMatch", { score: r.score }),
@@ -1592,7 +1592,7 @@ async function init() {
 
   watchForChanges();
 
-  // Opened from a banner's "Tracked jobs" button: land on the right profile and
+  // Opened from the result panel's "Tracked jobs" button: land on the right profile and
   // on the right job, rather than at the top of a long list.
   const params = new URLSearchParams(location.search);
   const wantedProfile = params.get("profile");
