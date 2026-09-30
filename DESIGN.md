@@ -400,6 +400,38 @@ A second list of findings from real use changed some of the rules above.
   per model across the current result and `previous`. At 30+ points apart, the card
   and Tracked jobs say the requirements and the core work may diverge.
 
+### Job text and good signs (2026-09-30)
+
+- **Warnings and flags read the job, not the company.** `screening.js` splits the
+  posting into sections by heading (`segments`):
+  - *requirements* and *work* (as before);
+  - *boilerplate*: About {Company}, Who we are, Our mission / culture, Benefits,
+    Perks, What we offer, Equal opportunity / EEO, Accommodation, Privacy, Why join;
+  - *other*: any other short, title-like line, so boilerplate never swallows the
+    section after it;
+  - *lead*: the text before the first heading.
+
+  `jobText()` drops the boilerplate, or returns the whole text when there are no
+  headings or when what's left is implausibly little.
+  - **Read from the job text:** user phrase warnings, the ungated presets (master's
+    degree), computed warnings, domain flags and learning terms.
+  - **Read from the whole posting:** hard rejects and the gated legal warnings
+    (sponsorship, work authorization, export control). That language lives in the
+    boilerplate.
+- **Good signs** (`keywords.positiveSignals`, on by default for every profile and
+  outside the fingerprint, since they never change a score):
+  - relocation offered;
+  - visa sponsorship offered, gate `sponsorship`: shown only where the candidate
+    needs it;
+  - a TN visa mentioned, a new gate `tn`: Mexican or Canadian citizens, US jobs.
+    Matched case-sensitively and only next to a visa word or USMCA/NAFTA, since "TN"
+    alone is Tennessee.
+
+  They read the whole posting, because offers sit in the benefits and legal text. A
+  match within a few words after a negation ("not able to offer relocation
+  assistance") is skipped. They're shown in green on the card and in Tracked jobs,
+  and can be toggled in Settings.
+
 ## Layer 2 — local model scoring (only if Layer 1 passes)
 
 > **Alternatives in requirements** (found in testing, 2026-09-17): the model was

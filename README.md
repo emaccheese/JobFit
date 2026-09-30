@@ -103,6 +103,14 @@ profile. They cost at most 5 points and never cap the score, unlike domain flags
 which mark real mismatches. A `NOT:` (or `Gaps:`) line in the profile adds to the
 domain flags the same way.
 
+**Good signs.** Relocation assistance offered, visa sponsorship offered (where you'd
+need it) and a TN visa mentioned (for Mexican or Canadian citizens, on US jobs) show in
+green next to the result. They never change the score, and each can be switched off in
+**Settings → Screening rules**. Warnings and domain flags read the job itself, not the
+company's About-us, benefits and equal-opportunity text, so "a leading cloud company"
+no longer flags "cloud". Hard rejects and the legal warnings still read everything,
+because that's where the sponsorship language lives.
+
 ## Setup
 
 1. Install and start [LM Studio](https://lmstudio.ai/), load a model, and start its

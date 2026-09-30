@@ -873,4 +873,13 @@ JOB_FIT_MESSAGES.fr = {
   "bg.capLearning": "{terms} est en cours d'apprentissage — {points} points de moins",
   "result.unverifiedMatches": "Attribuées mais absentes de votre profil",
   "result.modelsDisagree": "Les modèles divergent de {spread} points ({runs}) : les exigences et le travail principal pourraient diverger — lisez les responsabilités.",
+  "result.goodSigns": "Bons signes",
+  "settings.goodSignsTitle": "Bons signes",
+  "settings.goodSignsIntro": "Affichés en vert quand une offre les mentionne. Ils ne changent jamais la note.",
+  "preset.relocationoffered.label": "Aide à la relocalisation offerte",
+  "preset.relocationoffered.example": "Une aide à la relocalisation est offerte",
+  "preset.sponsorshipoffered.label": "Parrainage de visa offert (là où il vous le faudrait)",
+  "preset.sponsorshipoffered.example": "Nous parrainons les visas pour ce poste",
+  "preset.tnvisa.label": "Visa TN mentionné (citoyens mexicains ou canadiens, postes aux États-Unis)",
+  "preset.tnvisa.example": "Les titulaires d'un visa TN sont les bienvenus",
 };

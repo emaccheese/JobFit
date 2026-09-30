@@ -888,4 +888,13 @@ JOB_FIT_MESSAGES.en = {
   "bg.capLearning": "{terms} is something you're learning — {points} points off",
   "result.unverifiedMatches": "Claimed but not in your profile",
   "result.modelsDisagree": "Models disagree by {spread} points ({runs}): requirements and core work may diverge — read the responsibilities.",
+  "result.goodSigns": "Good signs",
+  "settings.goodSignsTitle": "Good signs",
+  "settings.goodSignsIntro": "Shown in green when a posting says them. They never change the score.",
+  "preset.relocationoffered.label": "Relocation assistance offered",
+  "preset.relocationoffered.example": "Relocation assistance is available",
+  "preset.sponsorshipoffered.label": "Visa sponsorship offered (where you'd need it)",
+  "preset.sponsorshipoffered.example": "We sponsor visas for this role",
+  "preset.tnvisa.label": "TN visa mentioned (Mexican or Canadian citizens, US jobs)",
+  "preset.tnvisa.example": "TN visa holders welcome",
 };

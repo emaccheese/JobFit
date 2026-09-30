@@ -848,6 +848,7 @@ function renderJobDetails(record, { inline = false } = {}) {
         )
       );
     }
+    tagList(box, t("result.goodSigns"), record.positiveSignals, "tag-green");
     evaluationTags(box, e);
     const coreWork = record.coreWorkOnly || e.core_work_only || [];
     const disagreement = JOB_FIT_EVALSTORE.modelDisagreement(record);

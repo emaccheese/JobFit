@@ -139,6 +139,7 @@
       : [];
     const sections = [
       { title: t("result.requiredGaps"), tone: "red", items: e.required_gaps, open: true },
+      { title: t("result.goodSigns"), tone: "green", items: record.positiveSignals, open: true },
       // Notes, not deductions, unless both are there (see score caps).
       { title: t("result.seniority"), tone: "amber", items: [e.seniority_flag, e.level_flag].filter(Boolean) },
       { title: t("result.matches"), tone: "green", items: e.matches },

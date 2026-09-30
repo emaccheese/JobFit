@@ -259,6 +259,59 @@ var JOB_FIT_KEYWORDS = (function () {
     // Skills the person is picking up. Flagged for their information and
     // given to the model as learnable, never a reason to cap the score.
     learningFlags: [],
+    // What speaks for a job. Shown in green; never changes the score.
+    // screening.js skips a match right after a negation ("not able to offer
+    // relocation assistance").
+    positiveSignals: [
+      {
+        id: "relocationoffered",
+        label: "Relocation assistance offered",
+        example: "Relocation assistance is available",
+        patterns: [
+          "relocation (assistance|support|package|bonus|benefits?|stipend) (is |are |will be )?(available|offered|provided|included)",
+          "(we|will|can|to) (offer|provide|cover|support|help with) relocation",
+          "relocation eligible:? ?(yes|y)\\b",
+          "relocation (is )?(available|offered|provided|supported)",
+          "(apoyo|ayuda|paquete|bono) (de|para) (reubicaci[óo]n|mudanza) (disponible|incluid[oa]|ofrecid[oa])",
+          "(ofrecemos|se ofrece|brindamos) (apoyo|ayuda|paquete) (de|para) (reubicaci[óo]n|mudanza)",
+          "aide (à|a) la (relocalisation|r[ée]installation) (offerte|disponible|incluse)",
+          "(aux[íi]lio|ajuda|apoio) (de|para) (realoca[çc][ãa]o|mudan[çc]a) (oferecid[oa]|dispon[íi]vel|inclu[íi]d[oa])",
+        ],
+      },
+      {
+        id: "sponsorshipoffered",
+        label: "Visa sponsorship offered",
+        example: "We sponsor visas for this role",
+        gate: "sponsorship",
+        patterns: [
+          "(visa |h-?1b |immigration |employment )?sponsorship (is |will be )?(available|offered|provided|possible|considered)",
+          "(we|will|can|do|does|are able to|happy to|willing to) sponsor",
+          "open to (visa )?sponsor(ing|ship)",
+          "sponsorship eligible:? ?(yes|y)\\b",
+          "h-?1b transfers? (are )?(welcome|accepted|supported|considered)",
+          "(ofrecemos|brindamos|otorgamos) patrocinio",
+          "patrocinio (de visa |migratorio )?(disponible|ofrecido)",
+          "parrainage (de visa |d'immigration )?(offert|disponible|possible)",
+          "nous parrainons",
+          "oferecemos patroc[íi]nio",
+          "patroc[íi]nio (de visto )?(oferecido|dispon[íi]vel)",
+        ],
+      },
+      {
+        // Case-sensitive, and only next to a visa word or USMCA/NAFTA: "TN" on
+        // its own is also Tennessee ("Nashville, TN").
+        id: "tnvisa",
+        label: "TN visa mentioned",
+        example: "TN visa holders welcome",
+        gate: "tn",
+        caseSensitive: true,
+        patterns: [
+          "\\bTN[ -](?:[Vv]isas?|[Ss]tatus|[Hh]olders?|[Ee]ligib(?:le|ility)|[Cc]lassification|[Ww]ork (?:[Pp]ermit|[Aa]uthorization))\\b",
+          "\\b(?:USMCA|NAFTA)\\b[^.\\n]{0,40}\\bTN\\b",
+          "\\bTN\\b[^.\\n]{0,20}\\b(?:USMCA|NAFTA)\\b",
+        ],
+      },
+    ],
   };
 
   // The categories that existed before `seen` was recorded. A saved config
@@ -269,6 +322,7 @@ var JOB_FIT_KEYWORDS = (function () {
     softWarnings: ["exportcontrol", "workauth", "masters"],
     domainFlags: [],
     learningFlags: [],
+    positiveSignals: [],
   };
 
   // Translated when the locale files are loaded; English otherwise.
@@ -339,7 +393,9 @@ var JOB_FIT_KEYWORDS = (function () {
       const preset = available.find((p) => p.id === id);
       if (!preset || !preset.patterns) return;
       const label = presetLabel(preset);
-      preset.patterns.forEach((source) => entries.push({ source, label, presetId: preset.id, gate: preset.gate || null }));
+      preset.patterns.forEach((source) =>
+        entries.push({ source, label, presetId: preset.id, gate: preset.gate || null, caseSensitive: Boolean(preset.caseSensitive) })
+      );
     });
 
     (config.phrases || []).forEach((phrase) => {

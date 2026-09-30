@@ -1605,6 +1605,7 @@ async function screenQueuedItem(item) {
       domainFlags: item.domainFlags || [],
       learningFlags: item.learningFlags || [],
       coreWorkOnly: [],
+      positiveSignals: [],
       softWarnings: item.softWarnings || [],
       place: { country: place.country, region: place.region, arrangement: place.arrangement },
     };
@@ -1652,6 +1653,7 @@ async function runQueuedEvaluation(item) {
         domainFlags: [],
         learningFlags: [],
         coreWorkOnly: [],
+        positiveSignals: [],
         softWarnings: [],
       });
     } catch (err) {
@@ -1695,6 +1697,7 @@ async function runQueuedEvaluation(item) {
       domainFlags: screened.domainFlags,
       learningFlags: screened.learningFlags || [],
       coreWorkOnly: screened.coreWorkOnly || [],
+      positiveSignals: screened.positiveSignals || [],
       // "Sponsorship not stated" sits with the other amber warnings, where
       // it's something to ask about, not a lower verdict.
       softWarnings: [...(screened.softWarnings || []), ...(result.data.sponsorship_warning ? [result.data.sponsorship_warning] : [])],

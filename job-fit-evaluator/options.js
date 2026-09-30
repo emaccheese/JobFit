@@ -44,12 +44,15 @@ const els = {
   domainFlagsPhrases: $("domainFlagsPhrases"),
   domainFlagsPatterns: $("domainFlagsPatterns"),
   learningFlagsPhrases: $("learningFlagsPhrases"),
+  positiveSignalsPresets: $("positiveSignalsPresets"),
   learningFlagsPatterns: $("learningFlagsPatterns"),
   uiLanguage: $("uiLanguage"),
   saveState: $("saveState"),
 };
 
-const KEYWORD_KINDS = ["hardRejects", "softWarnings", "domainFlags", "learningFlags"];
+const KEYWORD_KINDS = ["hardRejects", "softWarnings", "domainFlags", "learningFlags", "positiveSignals"];
+// The kinds shown as ticked categories.
+const PRESET_KINDS = ["hardRejects", "softWarnings", "positiveSignals"];
 const ADVANCED_SECTION_ID = {
   hardRejects: "adv-hardrejects",
   softWarnings: "adv-warnings",
@@ -235,7 +238,7 @@ function renderSearchSummary(profile) {
 // the two can't drift apart when a category is added. Laid out like the
 // wizard's, with the example of posting language each one catches.
 function renderPresetCheckboxes() {
-  ["hardRejects", "softWarnings"].forEach((kind) => {
+  PRESET_KINDS.forEach((kind) => {
     const host = els[`${kind}Presets`];
     host.innerHTML = "";
     JOB_FIT_KEYWORDS.presetsFor(kind).forEach((preset) => {
@@ -263,8 +266,9 @@ function keywordConfigFromForm(kind) {
     : [];
   return {
     presets,
-    phrases: linesToArray(els[`${kind}Phrases`].value),
-    patterns: linesToArray(els[`${kind}Patterns`].value),
+    // Good signs are presets only: no phrase or pattern boxes.
+    phrases: els[`${kind}Phrases`] ? linesToArray(els[`${kind}Phrases`].value) : [],
+    patterns: els[`${kind}Patterns`] ? linesToArray(els[`${kind}Patterns`].value) : [],
   };
 }
 
@@ -276,11 +280,11 @@ function fillKeywordConfig(kind, config) {
       box.checked = resolved.presets.includes(box.value);
     });
   }
-  els[`${kind}Phrases`].value = resolved.phrases.join("\n");
-  els[`${kind}Patterns`].value = resolved.patterns.join("\n");
+  if (els[`${kind}Phrases`]) els[`${kind}Phrases`].value = resolved.phrases.join("\n");
+  if (els[`${kind}Patterns`]) els[`${kind}Patterns`].value = resolved.patterns.join("\n");
   // Opened when it holds something, so a pattern carried over from the old
   // format isn't hidden where you can't see why a posting is being rejected.
-  $(ADVANCED_SECTION_ID[kind]).open = resolved.patterns.length > 0;
+  if (ADVANCED_SECTION_ID[kind]) $(ADVANCED_SECTION_ID[kind]).open = resolved.patterns.length > 0;
 }
 
 // --- the profile form ----------------------------------------------------------
@@ -303,6 +307,7 @@ function collectProfileFields() {
       softWarnings: keywordConfigFromForm("softWarnings"),
       domainFlags: keywordConfigFromForm("domainFlags"),
       learningFlags: keywordConfigFromForm("learningFlags"),
+      positiveSignals: keywordConfigFromForm("positiveSignals"),
     },
     expectedSalary,
   };
@@ -683,7 +688,7 @@ function watchFields() {
   // Rebuilt per profile, so delegated to their containers.
   els.salaryRows.addEventListener("input", scheduleProfileSave);
   els.salaryRows.addEventListener("change", flushProfileSave);
-  ["hardRejects", "softWarnings"].forEach((kind) => els[`${kind}Presets`].addEventListener("change", flushProfileSave));
+  PRESET_KINDS.forEach((kind) => els[`${kind}Presets`].addEventListener("change", flushProfileSave));
 
   const modelFields = [
     els.lmStudioUrl, els.lmStudioModel, els.lmStudioTimeout, els.lmStudioReasoningEffort, els.lmStudioEnableThinking,

@@ -873,4 +873,13 @@ JOB_FIT_MESSAGES.es = {
   "bg.capLearning": "{terms} es algo que estás aprendiendo — {points} puntos menos",
   "result.unverifiedMatches": "Se atribuyen pero no están en tu perfil",
   "result.modelsDisagree": "Los modelos difieren por {spread} puntos ({runs}): los requisitos y el trabajo principal podrían no coincidir; lee las responsabilidades.",
+  "result.goodSigns": "Buenas señales",
+  "settings.goodSignsTitle": "Buenas señales",
+  "settings.goodSignsIntro": "Se muestran en verde cuando una vacante las menciona. Nunca cambian el puntaje.",
+  "preset.relocationoffered.label": "Ofrecen apoyo para reubicación",
+  "preset.relocationoffered.example": "Contamos con apoyo de reubicación disponible",
+  "preset.sponsorshipoffered.label": "Ofrecen patrocinio de visa (donde lo necesitarías)",
+  "preset.sponsorshipoffered.example": "Ofrecemos patrocinio de visa para este puesto",
+  "preset.tnvisa.label": "Mencionan la visa TN (ciudadanos mexicanos o canadienses, empleos en EE. UU.)",
+  "preset.tnvisa.example": "Se aceptan candidatos con visa TN",
 };

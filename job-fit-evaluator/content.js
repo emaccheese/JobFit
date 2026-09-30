@@ -408,6 +408,7 @@
         sections: [
           { title: t("banner.domainFlagsTitle"), tone: "neutral", items: domainFlagMatches, open: true },
           { title: t("result.learningFlags"), tone: "neutral", items: learningMatches, open: true },
+          { title: t("result.goodSigns"), tone: "green", items: layer1.positiveSignals || [], open: true },
           { title: t("banner.warningsTitle"), tone: "amber", items: softWarningMatches, open: true },
         ].filter((section) => section.items.length),
       },
