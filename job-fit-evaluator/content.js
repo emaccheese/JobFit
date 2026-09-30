@@ -335,6 +335,7 @@
     }
 
     const domainFlagMatches = layer1.domainFlags;
+    const learningMatches = layer1.learningFlags || [];
     const softWarningMatches = layer1.softWarnings;
 
     // Handed to the service worker rather than run from here. Everything the
@@ -363,6 +364,7 @@
           url: location.href,
           extractor: extractorName,
           domainFlags: domainFlagMatches,
+          learningFlags: learningMatches,
           softWarnings: softWarningMatches,
         },
       });
@@ -404,6 +406,7 @@
         meta: t("float.asProfile", { name: activeProfile.name }),
         sections: [
           { title: t("banner.domainFlagsTitle"), tone: "neutral", items: domainFlagMatches, open: true },
+          { title: t("result.learningFlags"), tone: "neutral", items: learningMatches, open: true },
           { title: t("banner.warningsTitle"), tone: "amber", items: softWarningMatches, open: true },
         ].filter((section) => section.items.length),
       },

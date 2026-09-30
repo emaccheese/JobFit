@@ -43,12 +43,19 @@ const els = {
   softWarningsPatterns: $("softWarningsPatterns"),
   domainFlagsPhrases: $("domainFlagsPhrases"),
   domainFlagsPatterns: $("domainFlagsPatterns"),
+  learningFlagsPhrases: $("learningFlagsPhrases"),
+  learningFlagsPatterns: $("learningFlagsPatterns"),
   uiLanguage: $("uiLanguage"),
   saveState: $("saveState"),
 };
 
-const KEYWORD_KINDS = ["hardRejects", "softWarnings", "domainFlags"];
-const ADVANCED_SECTION_ID = { hardRejects: "adv-hardrejects", softWarnings: "adv-warnings", domainFlags: "adv-domainflags" };
+const KEYWORD_KINDS = ["hardRejects", "softWarnings", "domainFlags", "learningFlags"];
+const ADVANCED_SECTION_ID = {
+  hardRejects: "adv-hardrejects",
+  softWarnings: "adv-warnings",
+  domainFlags: "adv-domainflags",
+  learningFlags: "adv-learningflags",
+};
 const MODEL_KEYS = ["modelProvider", "lmStudio", "openai"];
 
 function el(tag, className, text) {
@@ -295,6 +302,7 @@ function collectProfileFields() {
       hardRejects: keywordConfigFromForm("hardRejects"),
       softWarnings: keywordConfigFromForm("softWarnings"),
       domainFlags: keywordConfigFromForm("domainFlags"),
+      learningFlags: keywordConfigFromForm("learningFlags"),
     },
     expectedSalary,
   };
@@ -665,6 +673,7 @@ function watchFields() {
     els.hardRejectsPhrases, els.hardRejectsPatterns,
     els.softWarningsPhrases, els.softWarningsPatterns,
     els.domainFlagsPhrases, els.domainFlagsPatterns,
+    els.learningFlagsPhrases, els.learningFlagsPatterns,
   ];
   profileFields.forEach((field) => {
     field.addEventListener("input", scheduleProfileSave);

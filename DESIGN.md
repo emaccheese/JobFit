@@ -285,6 +285,80 @@ A second, separate editable list — **not** a return to the old soft-warning/po
 
 ---
 
+## Scoring corrections from testing (2026-09-30)
+
+A real test run turned up scores that were wrong in ways the code, not the model,
+was responsible for. The VIAVI "Software Development Engineer (Image Processing)"
+posting is the clearest: the model scored it 90–92, the domain-flag cap cut it to 50,
+and the right answer was about 80, apply.
+
+- **The domain-flag cap only fires for a skill the job really requires.** It used to
+  check whether a required gap's text merely *contained* a flag as a substring, so
+  "Familiarity with common image processing and numerical libraries such as OpenCV,
+  NumPy, SciPy, scikit-image, or PIL" capped at 50 because OpenCV is a flag. That
+  requirement is a low bar and offers five alternatives. Now, for each flag in a
+  required gap:
+  - The flag must appear in the gap as a whole word (the same compiler as screening).
+    "go" used to match inside "Google Test".
+  - It's **soft** when the gap is worded as a low bar ("familiarity with", "exposure
+    to", "working knowledge", "introductory", "basic understanding", "a plus") or
+    lists alternatives ("or", "and/or", "such as", "e.g."). It's also soft when every
+    sentence of the posting that names it is. For alternatives, the "or" must be
+    within ~60 characters of the term, so an unrelated "or" in a long sentence
+    doesn't count.
+  - A **hard** hit caps at 50, as before. Soft hits alone cost **10 points**, and the
+    reason says so. The model's own score is kept as `raw_score` either way.
+- **Learning list** (`keywords.learningFlags`, Settings › Screening rules). Skills
+  being picked up are given to the model as "a minor gap at most, never a cap". A term
+  on it is taken off the domain flags, and it never reaches the cap. It joins the
+  profile fingerprint only once it has something in it, so adding the list didn't
+  mark every saved score out of date.
+- **Keyword matching.**
+  - A hyphen counts as part of a word, so "go" no longer matches "go-to-market", and
+    a trailing `+` or `#` does too, so "C" isn't "C++" or "C#".
+  - One- or two-letter phrases with a capital ("Go", "R", "C") match case-sensitively.
+  - A few words skip phrases where they mean something else (`FALSE_FRIENDS`):
+    "cloud" skips "point cloud" and "word cloud", and "go" skips "go live", "go to".
+- **The verdict comes from the final score** (75 / 55, the card's colour bands), not
+  from the model. A 90 came back "borderline" only because sponsorship wasn't stated.
+  The model's word is kept as `model_verdict` when it differs.
+- **"Sponsorship not stated"** is added to the amber warnings when the candidate needs
+  sponsorship in the posting's country, and nowhere else.
+- **Location is never a gap.** Gaps naming relocation, commuting, "based in", a bare
+  "City, ST" or the posting's own city are dropped, and the prompt says so. Location
+  matters only through the keyword rules (must be local, no relocation).
+- **Salary.**
+  - Amounts the model returned as strings ("140,000", "140k") are read as numbers. A
+    string compared with a number is always false, which is how a $140K ceiling came
+    out "within" a $160K floor.
+  - When the numeric fields are empty, the amounts are read from `posting_stated`.
+  - A missing currency is taken from a sign in the text (C$, MX$…), then from the
+    job's country: "84,000 to 156,000" in Ottawa is CAD, and the note says it was
+    inferred.
+  - "Most offers fall between the minimum and the midpoint" makes the midpoint the
+    realistic top (`posting_realistic_max`).
+- **Experience level.** The largest number of years the posting asks for, next to
+  the word "experience", against the first number of years in the profile. Asking
+  for half or less (2 against 8), or entry-level / new-graduate wording, flags
+  "likely below your level" and caps at **70**.
+- **Requirements and core work diverge.** `screening.js` splits the posting on its
+  headings (Requirements / Qualifications vs. Responsibilities / What you'll do). A
+  domain flag the work section describes but the requirements never name is flagged
+  as a heads-up and given to the model.
+- **Hard rejects that were missed:**
+  - "does not **currently** sponsor … visas" (an adverb slipped past the old pattern).
+  - "must not / do not require sponsorship now or in the future".
+  - A bare "now or in the future" is still deliberately not a pattern: it would
+    reject every posting whose application form asks "Will you now or in the future
+    require sponsorship?".
+  - Roblox's "may not be able to employ candidates who have … certain U.S. visa
+    categories" is an amber warning.
+  - GE HealthCare's "will only employ those who are legally authorized" stays a
+    warning, by decision: employers who write it often still transfer visas.
+- **Scoring the full posting** was already the case: evaluations send the extracted
+  text, never a brief, and postings over 12,000 characters lose part of the middle,
+  never the end, where the legal boilerplate sits.
+
 ## Layer 2 — local model scoring (only if Layer 1 passes)
 
 > **Alternatives in requirements** (found in testing, 2026-09-17): the model was

@@ -91,6 +91,8 @@
     if (staleNote) notes.push(staleNote);
     if (saveError) notes.push(t("banner.notSaved", { error: saveError }));
     if (record.evaluation && record.evaluation.input_truncated) notes.push(t("banner.truncated"));
+    const coreWork = record.coreWorkOnly || (record.evaluation && record.evaluation.core_work_only) || [];
+    if (coreWork.length) notes.push(t("result.coreWorkDiverges", { terms: coreWork.join(", ") }));
 
     const when = record.lastEvaluatedAt ? t("float.evaluatedWhen", { when: timeAgo(record.lastEvaluatedAt) }) : null;
     const meta = [cached ? when : null, profileName ? t("float.asProfile", { name: profileName }) : null].filter(Boolean).join(" · ");
@@ -131,7 +133,7 @@
       : [];
     const sections = [
       { title: t("result.requiredGaps"), tone: "red", items: e.required_gaps, open: true },
-      { title: t("result.seniority"), tone: "red", items: e.seniority_flag ? [e.seniority_flag] : [] },
+      { title: t("result.seniority"), tone: "red", items: [e.seniority_flag, e.level_flag].filter(Boolean) },
       { title: t("result.matches"), tone: "green", items: e.matches },
       { title: t("result.gaps"), tone: "amber", items: e.gaps },
       {
@@ -143,6 +145,7 @@
       },
       { title: t("banner.warningsTitle"), tone: "amber", items: record.softWarnings },
       { title: t("banner.domainFlagsTitle"), tone: "neutral", items: record.domainFlags },
+      { title: t("result.learningFlags"), tone: "neutral", items: record.learningFlags },
       { title: t("result.salary"), tone: "neutral", items: salary },
     ].filter((s) => s.items && s.items.length);
 

@@ -237,6 +237,18 @@
           <label class="field-label" for="domainFlagsPatterns" data-i18n="popup.patternsLabel">One regular expression per line.</label>
           <textarea id="domainFlagsPatterns" rows="3" spellcheck="false"></textarea>
         </details>
+
+        <h3 id="h-learningFlags" data-i18n="settings.learningTitle">Learning</h3>
+        <div class="field">
+          <label class="field-label" for="learningFlagsPhrases" data-i18n="settings.learningLabel">Skills you're picking up or could learn quickly — flagged for your information, never a reason to cap the score</label>
+          <textarea id="learningFlagsPhrases" rows="4" placeholder="one per line&#10;OpenCV&#10;GoogleTest&#10;ONNX Runtime" data-i18n-placeholder="settings.learningPlaceholder"></textarea>
+          <div class="hint" data-i18n="settings.learningHint">A term here is taken off the domain flags: a posting that asks for it counts as a minor gap at most.</div>
+        </div>
+        <details class="advanced" id="adv-learningflags">
+          <summary data-i18n="popup.advancedPatterns">Advanced — raw patterns</summary>
+          <label class="field-label" for="learningFlagsPatterns" data-i18n="popup.patternsLabel">One regular expression per line.</label>
+          <textarea id="learningFlagsPatterns" rows="3" spellcheck="false"></textarea>
+        </details>
       </section>
 
       <!-- Model -->

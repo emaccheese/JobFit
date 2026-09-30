@@ -71,12 +71,28 @@ computed in code, because local models are unreliable at it and fail confidently
 
 - **Salary comparison.** The model extracts numbers; the comparison against your
   expected range is arithmetic done in JavaScript. It once reported a posting as
-  "within your range" while also stating a ceiling below the floor.
+  "within your range" while also stating a ceiling below the floor. When the posting
+  gives numbers without a currency, the currency comes from the job's country (and
+  says so), and "most offers fall between the minimum and the midpoint" makes the
+  midpoint the realistic top.
 - **Seniority check.** Keyword presence plus a threshold, and only ever against a
   salary the posting actually stated — never against the model's own estimate,
   which made the check circular.
+- **Experience level.** A posting asking for far fewer years than you have ("2+
+  years, academic experience acceptable" against your 8) is flagged *likely below
+  your level* and capped at 70.
 - **Score caps.** The prompt asks the model to cap its own score for uncovered
-  required skills; the cap is then enforced in code regardless.
+  required skills; the cap is then enforced in code regardless — but only for a
+  skill the job really requires. A requirement worded as a low bar ("familiarity
+  with", "exposure to") or offered as one of several options ("OpenCV, NumPy, … or
+  PIL") costs 10 points instead.
+- **The verdict.** Apply at 75 and up, borderline 55–74, skip below 55, from the
+  final score. A posting that doesn't mention sponsorship gets an amber warning (when
+  you'd need it there), not a lower verdict.
+
+**Learning.** Skills you're picking up (OpenCV, GoogleTest, ONNX Runtime…) go in
+**Settings → Screening rules → Learning**. They're flagged for your information and
+never cap the score, unlike domain flags, which mark real mismatches.
 
 ## Setup
 

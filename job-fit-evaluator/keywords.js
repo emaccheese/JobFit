@@ -85,6 +85,14 @@ var JOB_FIT_KEYWORDS = (function () {
           "(not|unable to|cannot) (currently )?(offer|offering|provide|providing|support|supporting)( any)? (visa |immigration |employment |work authorization |h-?1b )?sponsorship",
           "sponsorship (is |will )?(not|n't) (be )?(available|offered|provided|supported|possible|an option)",
           "(ineligible|not eligible) for (visa |immigration |employment )?sponsorship",
+          // "does not currently sponsor employment visas": an adverb between
+          // "not" and "sponsor" slipped past the pattern above.
+          "not (currently |presently |at this time |yet )?(be )?(able to )?sponsor(ing)?[^.\\n]{0,40}visas?",
+          // "Candidates must not require sponsorship now or in the future" —
+          // a statement, unlike the application question above, which has no
+          // "not" in it.
+          "(must|should|will|would|can|do|does|did) not (now or in the future |currently or in the future |now or at any time )?(require|need) (visa |employer |employment |immigration |work )?sponsorship",
+          "(don't|doesn't|won't) (now or in the future )?(require|need) (visa |employer |employment |immigration |work )?sponsorship",
           // Spanish
           "no (ofrecemos|ofrece|brindamos|brinda|proporcionamos|otorgamos|contamos con|podemos ofrecer|es posible ofrecer)( el| ning[úu]n)? patrocinio",
           "no (patrocinamos|podemos patrocinar|se patrocinan?) (visas?|a candidatos)",
@@ -191,6 +199,10 @@ var JOB_FIT_KEYWORDS = (function () {
           "only (employ|hire|consider|accept) (those|candidates|applicants|individuals|people) who are (legally )?authorized to work",
           "must (be|already be) (legally )?authorized to work in the (united states|u\\.?s\\.?|canada|mexico)",
           "must (have|hold) (a )?(valid )?work (permit|authorization)",
+          // "…may not be able to employ candidates who have certain U.S. visa
+          // categories": some visas excluded, which one isn't said.
+          "may not be able to (employ|hire|consider|support)[^.\\n]{0,120}visa",
+          "certain (u\\.?s\\.? )?(visa|immigration) (categories|types|statuses|classifications)",
           "deb(e|es|er[áa]s?) (contar con|tener) (un )?(permiso|autorizaci[óo]n) (legal )?(de trabajo|para trabajar)",
           "(legalmente )?autorizad[oa] para trabajar en",
           "(doit|devez) (être|etre) (l[ée]galement )?autoris[ée]e? (à|a) travailler",
@@ -244,6 +256,9 @@ var JOB_FIT_KEYWORDS = (function () {
     // Deliberately none: domain flags are one person's skill gaps, so there is
     // no sensible shared list to offer.
     domainFlags: [],
+    // Skills the person is picking up. Flagged for their information and
+    // given to the model as learnable, never a reason to cap the score.
+    learningFlags: [],
   };
 
   // The categories that existed before `seen` was recorded. A saved config
@@ -253,6 +268,7 @@ var JOB_FIT_KEYWORDS = (function () {
     hardRejects: ["citizenship", "sponsorship", "clearance", "itar", "locality", "relocation", "student"],
     softWarnings: ["exportcontrol", "workauth", "masters"],
     domainFlags: [],
+    learningFlags: [],
   };
 
   // Translated when the locale files are loaded; English otherwise.
@@ -275,18 +291,41 @@ var JOB_FIT_KEYWORDS = (function () {
     return PRESETS[kind] || [];
   }
 
-  // A phrase is literal text, matched case-insensitively as whole words.
-  // Boundaries are added only where the phrase actually begins or ends with a
-  // word character, so "C++" and ".NET" still match — which matters, because
-  // those are exactly the terms people put in domain flags.
+  // Words that are also part of common phrases meaning something else. A
+  // phrase that is exactly one of these doesn't match inside them: "cloud"
+  // (computing) isn't a point cloud, and "Go" (the language) isn't "go to
+  // market" or "go live". Each one of these fired a false warning.
+  const FALSE_FRIENDS = {
+    cloud: { before: ["point", "word", "tag"], after: ["of points"] },
+    clouds: { before: ["point", "word", "tag"], after: ["of points"] },
+    go: { after: ["to", "live", "beyond", "ahead", "back", "further", "above", "through", "into", "over", "out", "for", "with"] },
+  };
+
+  // One or two letters with a capital, typed that way ("Go", "R", "C", "Qt"):
+  // a language or library name that as a lower-case word means something
+  // else, so it's matched exactly as typed.
+  function isShortToken(phrase) {
+    const trimmed = String(phrase).trim();
+    return trimmed.length <= 2 && /^[A-Za-z]+$/.test(trimmed) && /[A-Z]/.test(trimmed);
+  }
+
+  // A phrase is literal text, matched as whole words (case-insensitive unless
+  // it's a short token, above). Boundaries are added only where the phrase
+  // actually begins or ends with a word character, so "C++" and ".NET" still
+  // match — which matters, because those are exactly the terms people put in
+  // domain flags. A hyphen counts as part of a word, so "go" doesn't match
+  // "go-to-market"; a trailing + or # does too, so "C" isn't "C++" or "C#".
   function phraseToPattern(phrase) {
     const trimmed = String(phrase).trim();
     if (!trimmed) return null;
 
     const escaped = trimmed.replace(REGEX_METACHARS, "\\$&").replace(/\s+/g, "\\s+");
-    const lead = /^\w/.test(trimmed) ? "\\b" : "";
-    const trail = /\w$/.test(trimmed) ? "\\b" : "";
-    return `${lead}${escaped}${trail}`;
+    const lead = /^\w/.test(trimmed) ? "(?<![\\w-])" : "";
+    const trail = /\w$/.test(trimmed) ? "(?![\\w+#-])" : "";
+    const friends = FALSE_FRIENDS[trimmed.toLowerCase()];
+    const notBefore = friends && friends.before ? friends.before.map((w) => `(?<!\\b${w}\\s+)`).join("") : "";
+    const notAfter = friends && friends.after ? `(?!\\s+(?:${friends.after.map((w) => w.replace(/\s+/g, "\\s+")).join("|")})\\b)` : "";
+    return `${notBefore}${lead}${escaped}${trail}${notAfter}`;
   }
 
   // Returns [{ source, label }]. The label is what the UI shows when something
@@ -305,7 +344,7 @@ var JOB_FIT_KEYWORDS = (function () {
 
     (config.phrases || []).forEach((phrase) => {
       const source = phraseToPattern(phrase);
-      if (source) entries.push({ source, label: String(phrase).trim() });
+      if (source) entries.push({ source, label: String(phrase).trim(), caseSensitive: isShortToken(phrase) });
     });
 
     (config.patterns || []).forEach((source) => {
@@ -409,6 +448,7 @@ var JOB_FIT_KEYWORDS = (function () {
     presetExample,
     computedIds,
     phraseToPattern,
+    isShortToken,
     patternToPhrase,
     compile,
     emptyConfig,

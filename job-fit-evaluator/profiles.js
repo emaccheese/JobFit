@@ -102,6 +102,7 @@ var JOB_FIT_PROFILES = (function () {
         hardRejects: clone(JOB_FIT_DEFAULTS.keywords.hardRejects),
         softWarnings: clone(JOB_FIT_DEFAULTS.keywords.softWarnings),
         domainFlags: JOB_FIT_KEYWORDS.emptyConfig(),
+        learningFlags: JOB_FIT_KEYWORDS.emptyConfig(),
       },
       expectedSalary: normalizeSalary(JOB_FIT_DEFAULTS.expectedSalary),
       jobSearch: blankJobSearch(),
@@ -135,6 +136,11 @@ var JOB_FIT_PROFILES = (function () {
         domainFlags: keywords.domainFlags
           ? JOB_FIT_KEYWORDS.normalizeConfig(keywords.domainFlags, "domainFlags")
           : clone(JOB_FIT_DEFAULTS.keywords.domainFlags),
+        // Skills being learned: flagged for information only. Added later, so
+        // a profile without it simply has none.
+        learningFlags: keywords.learningFlags
+          ? JOB_FIT_KEYWORDS.normalizeConfig(keywords.learningFlags, "learningFlags")
+          : JOB_FIT_KEYWORDS.emptyConfig("learningFlags"),
       },
       expectedSalary: normalizeSalary(profile.expectedSalary),
       jobSearch: normalizeJobSearch(profile.jobSearch),
@@ -229,6 +235,9 @@ var JOB_FIT_PROFILES = (function () {
       hardRejects: keywordPart(profile.keywords.hardRejects),
       softWarnings: keywordPart(profile.keywords.softWarnings, true),
       domainFlags: keywordPart(profile.keywords.domainFlags),
+      // Only once there is something in it, so adding the list didn't mark
+      // every saved score out of date.
+      learningFlags: JOB_FIT_KEYWORDS.isEmpty(profile.keywords.learningFlags) ? undefined : keywordPart(profile.keywords.learningFlags),
       expectedSalary: salaryPart,
       jobSearch,
     });

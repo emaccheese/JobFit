@@ -363,7 +363,7 @@ function evaluationTags(parent, e) {
   tagList(parent, t("result.matches"), e.matches, "tag-green");
   tagList(parent, t("result.gaps"), e.gaps, "tag-amber");
   tagList(parent, t("result.requiredGaps"), e.required_gaps, "tag-red");
-  tagList(parent, t("result.seniority"), e.seniority_flag ? [e.seniority_flag] : [], "tag-red");
+  tagList(parent, t("result.seniority"), [e.seniority_flag, e.level_flag].filter(Boolean), "tag-red");
   tagList(parent, t("result.scoreCap"), e.score_cap_reasons, "tag-amber");
   if (e.salary) {
     tagList(
@@ -848,8 +848,10 @@ function renderJobDetails(record, { inline = false } = {}) {
       );
     }
     evaluationTags(box, e);
-    tagList(box, t("history.warnings"), record.softWarnings, "tag-amber");
+    const coreWork = record.coreWorkOnly || e.core_work_only || [];
+    tagList(box, t("history.warnings"), [...(record.softWarnings || []), ...(coreWork.length ? [t("result.coreWorkDiverges", { terms: coreWork.join(", ") })] : [])], "tag-amber");
     tagList(box, t("history.domainFlags"), record.domainFlags, "tag-neutral");
+    tagList(box, t("result.learningFlags"), record.learningFlags, "tag-neutral");
   }
 
   // Actions: score it again, or delete it.
@@ -1849,6 +1851,7 @@ function evaluateItem(record, profile, fingerprint) {
     url: record.url,
     extractor: record.extractor,
     domainFlags: record.domainFlags || [],
+    learningFlags: record.learningFlags || [],
     softWarnings: record.softWarnings || [],
   };
 }
