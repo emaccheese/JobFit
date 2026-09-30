@@ -128,13 +128,23 @@ model, or a profile you've edited since), with **Show on page**, **Re-evaluate**
 once lives in **Settings**, a full page with a section for each: profile and CV,
 salary, screening rules, model, the on-page button, language, and backups.
 
-**On-page button (optional).** On a job board you use a lot, tick **Show the JobFit
-button on {site}** in the popup. Chrome asks for access to that one site; after that,
-a card sits in the bottom-left corner of its job postings. One click evaluates the
-posting, and if you've scored it before, the card already shows the score when you open
-the page. It never evaluates on its own. Hover it for **–** to shrink it to just the
-score, or **×** (twice) to turn it off for the site and give the access back — or
-remove the site under **Settings → On-page button and shortcut**.
+**On-page button (optional).** A card in the corner of job postings that evaluates the
+posting with one click, and already shows the score when you open a job you've scored
+before. It never evaluates on its own, and it's off everywhere until you turn it on:
+
+- **For a whole job board** (LinkedIn, Indeed, Greenhouse, Workday): in
+  **Settings → On-page button and shortcut**, tick the board or press **Turn on for all
+  job boards**. Or open a posting on that board and tick **Show the JobFit button on all
+  {board} job pages** in the popup. A board is one Chrome permission covering all of it:
+  every Indeed country, LinkedIn's country sites, every employer's Workday site.
+  Greenhouse needs no prompt, because JobFit already has access there.
+- **For a company's own career site** (Jibe, Eightfold, a Greenhouse board embedded on
+  the company's domain): open it and tick **Show the JobFit button on {site}** in the
+  popup. On a site with an embedded Greenhouse board, the card shows the job in the
+  embed.
+
+Hover the card for **–** to shrink it to just the score, or **×** (twice) to turn it off
+for that board or site and give the access back. You can also do that in Settings.
 
 The result opens in a panel from a card in the corner of the page, whichever way
 you started it: the score, the verdict and a one-line read, then sections for
@@ -179,8 +189,9 @@ posting evaluated for two people is two records.
 
 - **No posting or CV is sent anywhere except your own `localhost`.** There is no
   cloud mode and no telemetry.
-- The on-page button is off everywhere by default. Each site you switch it on for is a
-  separate Chrome permission you grant (and can revoke) for that site alone.
+- The on-page button is off everywhere by default. Each job board or site you switch it
+  on for is a separate Chrome permission you grant (and can revoke) for that board or
+  site alone.
 - Host permissions are `localhost`, `127.0.0.1`, and `*://*.greenhouse.io/*`. The
   last one exists only so the extension can read a Greenhouse job board that a
   company career site embeds in a cross-origin iframe — without it Chrome won't

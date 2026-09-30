@@ -18,7 +18,8 @@ importScripts(
   "evalstore.js",
   "queue.js",
   "lmstudio-ui.js",
-  "inject.js"
+  "inject.js",
+  "boards.js"
 );
 
 // Messages this worker writes (errors, score-cap reasons, briefs) are in the
@@ -1440,35 +1441,50 @@ chrome.commands.onCommand.addListener((command, tab) => {
 });
 
 // ---------------------------------------------------------------------------
-// On-page button (float.js), opt-in per site.
+// On-page button (float.js), opt-in per site or per job board.
 //
 // JobFit reads nothing on a page until asked, and installs with no access to
-// job boards. The button needs to run on a site before anyone clicks, so each
-// site is switched on in the popup, which asks Chrome for that site alone
-// (optional_host_permissions). The sites live in `floatingButtonSites`
-// (origins), and one dynamically registered content script covers exactly
-// the ones whose permission is still held — revoking it in Chrome's own
-// settings takes the button away too.
+// job boards. The button needs to run on a site before anyone clicks, so it's
+// switched on in the popup or Settings, which ask Chrome for exactly that
+// (optional_host_permissions): one site (`floatingButtonSites`, origins), or
+// a whole job board (`floatingButtonBoards`, ids from boards.js) — every
+// Indeed country, every Workday employer — as one permission. One dynamically
+// registered content script covers exactly what's still granted, so revoking
+// access in Chrome's own settings takes the button away too.
 // ---------------------------------------------------------------------------
 
 const FLOAT_SCRIPT_ID = "jobfit-float";
+const FLOAT_FRAME_SCRIPT_ID = "jobfit-float-frame";
 
 // The extractors and job identity (to know which job is on screen), the
-// stores (to show its saved score), and the messages. content.js is left out:
-// it starts an evaluation the moment it loads, and the button only does that
-// on a click.
+// stores (to show its saved score), the card and the messages. content.js is
+// left out: it starts an evaluation the moment it loads, and the button only
+// does that on a click.
 function floatFiles() {
   const pageFiles = JOB_FIT_CONTENT_FILES.filter((f) => f !== "content.js" && f !== "screening.js" && f !== "geo.js");
-  return ["locales/en.js", "locales/es.js", "locales/fr.js", "locales/pt.js", ...pageFiles, "float.js"];
+  return ["locales/en.js", "locales/es.js", "locales/fr.js", "locales/pt.js", ...pageFiles, "boards.js", "float.js"];
+}
+
+// A Greenhouse board embedded in a company's career site: just enough to say
+// which job the embed shows (float-frame.js).
+function floatFrameFiles() {
+  return ["extractors/text.js", "extractors/greenhouse.js", "jobkey.js", "float-frame.js"];
 }
 
 function sitePattern(origin) {
   return `${origin}/*`;
 }
 
-async function floatSites() {
-  const { floatingButtonSites } = await chrome.storage.local.get("floatingButtonSites");
-  return Array.isArray(floatingButtonSites) ? floatingButtonSites : [];
+async function floatState() {
+  const { floatingButtonSites, floatingButtonBoards } = await chrome.storage.local.get(["floatingButtonSites", "floatingButtonBoards"]);
+  return {
+    sites: Array.isArray(floatingButtonSites) ? floatingButtonSites : [],
+    boards: Array.isArray(floatingButtonBoards) ? floatingButtonBoards.filter((id) => JOB_FIT_BOARDS.byId(id)) : [],
+  };
+}
+
+async function floatEnabledFor(url) {
+  return JOB_FIT_BOARDS.enabledFor(url, await floatState());
 }
 
 // Serialized: registering while an earlier call is still unregistering would
@@ -1478,25 +1494,46 @@ let floatSync = Promise.resolve();
 function syncFloatScripts() {
   floatSync = floatSync
     .then(async () => {
-      const sites = await floatSites();
-      const granted = [];
+      const { sites, boards } = await floatState();
+      const grantedSites = [];
       for (const origin of sites) {
-        if (await chrome.permissions.contains({ origins: [sitePattern(origin)] })) granted.push(origin);
+        if (await chrome.permissions.contains({ origins: [sitePattern(origin)] })) grantedSites.push(origin);
       }
-      if (granted.length !== sites.length) await chrome.storage.local.set({ floatingButtonSites: granted });
+      const grantedBoards = [];
+      for (const id of boards) {
+        if (await chrome.permissions.contains({ origins: JOB_FIT_BOARDS.byId(id).patterns })) grantedBoards.push(id);
+      }
+      if (grantedSites.length !== sites.length || grantedBoards.length !== boards.length) {
+        await chrome.storage.local.set({ floatingButtonSites: grantedSites, floatingButtonBoards: grantedBoards });
+      }
       try {
-        await chrome.scripting.unregisterContentScripts({ ids: [FLOAT_SCRIPT_ID] });
+        await chrome.scripting.unregisterContentScripts({ ids: [FLOAT_SCRIPT_ID, FLOAT_FRAME_SCRIPT_ID] });
       } catch (err) {
-        /* wasn't registered */
+        // Not both registered; take away whichever was.
+        await chrome.scripting.unregisterContentScripts({ ids: [FLOAT_SCRIPT_ID] }).catch(() => {});
+        await chrome.scripting.unregisterContentScripts({ ids: [FLOAT_FRAME_SCRIPT_ID] }).catch(() => {});
       }
-      if (!granted.length) return;
+      const matches = Array.from(
+        new Set([...grantedSites.map(sitePattern), ...grantedBoards.flatMap((id) => JOB_FIT_BOARDS.byId(id).patterns)])
+      );
+      if (!matches.length) return;
       await chrome.scripting.registerContentScripts([
         {
           id: FLOAT_SCRIPT_ID,
-          matches: granted.map(sitePattern),
+          matches,
           js: floatFiles(),
           runAt: "document_idle",
           allFrames: false,
+          persistAcrossSessions: true,
+        },
+        // Embedded boards: runs in any greenhouse.io embed frame, asks whether
+        // the page around it is switched on, and reads nothing if not.
+        {
+          id: FLOAT_FRAME_SCRIPT_ID,
+          matches: ["https://*.greenhouse.io/embed/*"],
+          js: floatFrameFiles(),
+          runAt: "document_idle",
+          allFrames: true,
           persistAcrossSessions: true,
         },
       ]);
@@ -1505,16 +1542,18 @@ function syncFloatScripts() {
   return floatSync;
 }
 
+// Shown straight away, without reloading the tab.
+function showFloatNow(tabId) {
+  if (tabId != null) chrome.scripting.executeScript({ target: { tabId }, files: floatFiles() }).catch(() => {});
+}
+
 async function setFloatSite(origin, enabled, tabId) {
   if (!/^https?:\/\/[^/]+$/.test(String(origin || ""))) return { ok: false };
-  const sites = await floatSites();
+  const { sites } = await floatState();
   const next = enabled ? Array.from(new Set([...sites, origin])) : sites.filter((s) => s !== origin);
   await chrome.storage.local.set({ floatingButtonSites: next, floatPending: null });
   await syncFloatScripts();
-  if (enabled && tabId != null) {
-    // Shown straight away, without reloading the tab.
-    chrome.scripting.executeScript({ target: { tabId }, files: floatFiles() }).catch(() => {});
-  }
+  if (enabled) showFloatNow(tabId);
   if (!enabled) {
     // Give the access back. Fails harmlessly for a site the manifest itself
     // needs (greenhouse.io).
@@ -1523,13 +1562,47 @@ async function setFloatSite(origin, enabled, tabId) {
   return { ok: true, sites: next };
 }
 
+// Switches whole boards on or off. A site the board now covers loses its own
+// entry and permission: the board's is the one that counts, and a leftover
+// grant would be access nothing uses.
+async function setFloatBoards(ids, enabled, tabId) {
+  const valid = (ids || []).filter((id) => JOB_FIT_BOARDS.byId(id));
+  if (!valid.length) return { ok: false };
+  const state = await floatState();
+  const boards = enabled ? Array.from(new Set([...state.boards, ...valid])) : state.boards.filter((id) => !valid.includes(id));
+  let sites = state.sites;
+  if (enabled) {
+    const covered = sites.filter((origin) => {
+      const board = JOB_FIT_BOARDS.boardForUrl(origin);
+      return board && valid.includes(board.id);
+    });
+    sites = sites.filter((origin) => !covered.includes(origin));
+    covered.forEach((origin) => chrome.permissions.remove({ origins: [sitePattern(origin)] }).catch(() => {}));
+  }
+  await chrome.storage.local.set({ floatingButtonBoards: boards, floatingButtonSites: sites, floatPending: null });
+  await syncFloatScripts();
+  if (enabled) showFloatNow(tabId);
+  if (!enabled) {
+    valid
+      .map(JOB_FIT_BOARDS.byId)
+      .filter((board) => !board.alwaysGranted)
+      .forEach((board) => chrome.permissions.remove({ origins: board.patterns }).catch(() => {}));
+  }
+  return { ok: true, sites, boards };
+}
+
 // The popup asks for the permission; if Chrome's prompt closes the popup
 // before it hears the answer, this finishes the job.
 chrome.permissions.onAdded.addListener(async (added) => {
   const { floatPending } = await chrome.storage.local.get("floatPending");
   if (!floatPending || Date.now() - floatPending.ts > 5 * 60 * 1000) return;
-  if ((added.origins || []).includes(sitePattern(floatPending.origin))) {
+  const origins = added.origins || [];
+  if (floatPending.origin && origins.includes(sitePattern(floatPending.origin))) {
     setFloatSite(floatPending.origin, true, floatPending.tabId);
+  } else if (Array.isArray(floatPending.boards)) {
+    const boards = floatPending.boards.map(JOB_FIT_BOARDS.byId).filter(Boolean);
+    const allGranted = boards.every((board) => board.alwaysGranted || board.patterns.every((p) => origins.includes(p)));
+    if (boards.length && allGranted) setFloatBoards(floatPending.boards, true, floatPending.tabId);
   }
 });
 
@@ -1582,6 +1655,32 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
     const origin = message.origin || (sender.tab && sender.tab.url ? new URL(sender.tab.url).origin : null);
     setFloatSite(origin, Boolean(message.enabled), message.tabId ?? (sender.tab && sender.tab.id)).then(sendResponse);
     return true;
+  }
+  if (message?.type === "JOB_FIT_FLOAT_BOARD") {
+    setFloatBoards(message.boards, Boolean(message.enabled), message.tabId ?? (sender.tab && sender.tab.id)).then(sendResponse);
+    return true;
+  }
+  // float-frame.js, in a Greenhouse board embedded in a company's site: is
+  // the page around it switched on? Asked before it reads anything.
+  if (message?.type === "JOB_FIT_FRAME_ENABLED") {
+    if (!sender.tab || sender.frameId === 0) {
+      sendResponse(false);
+      return false;
+    }
+    floatEnabledFor(sender.tab.url).then(sendResponse);
+    return true;
+  }
+  // …and which job it shows, for the card in the page's top frame.
+  if (message?.type === "JOB_FIT_FRAME_JOB") {
+    if (sender.tab && sender.frameId !== 0 && message.job && typeof message.job.jobKey === "string") {
+      floatEnabledFor(sender.tab.url).then((on) => {
+        if (!on) return;
+        chrome.tabs
+          .sendMessage(sender.tab.id, { type: "JOB_FIT_FRAME_JOB", job: message.job }, { frameId: 0 })
+          .catch(() => {});
+      });
+    }
+    return false;
   }
   if (message?.type === "JOB_FIT_PROBE") {
     recordProbe(message.probe).then(() => sendResponse({ ok: true }));

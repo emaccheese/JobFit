@@ -1,10 +1,10 @@
 // The on-page button: keeps the card (card.js) on job postings of a site the
 // user switched it on for, showing the job on screen and its saved score.
 //
-// Opt-in per site. JobFit reads nothing on a page until asked, so this only
-// runs on sites the user switched it on for in the popup — each one a Chrome
-// permission granted for that site alone (background.js registers this file
-// as a content script for exactly those origins). It never calls the model
+// Opt-in per site or per job board. JobFit reads nothing on a page until
+// asked, so this only runs where the user switched it on, in the popup or in
+// Settings — each a Chrome permission for that site or board alone
+// (background.js registers this file for exactly those). It never calls the model
 // by itself: a click goes through the same path as the keyboard shortcut.
 //
 // This file only decides whether there's a job here and which one; drawing,
@@ -27,6 +27,10 @@
 
   let lastHref = location.href;
   let timers = [];
+  // The job in a Greenhouse board embedded in this page, as float-frame.js
+  // read it in the iframe (via the worker). Only good for the address it
+  // arrived at.
+  let frameJob = null;
   let navigating = false;
   let seq = 0; // refreshes overlap; only the newest one may act
 
@@ -65,22 +69,34 @@
     );
   }
 
-  async function enabledHere() {
-    const { floatingButtonSites } = await chrome.storage.local.get("floatingButtonSites");
-    return Array.isArray(floatingButtonSites) && floatingButtonSites.includes(location.origin);
+  async function readState() {
+    const { floatingButtonSites, floatingButtonBoards } = await chrome.storage.local.get(["floatingButtonSites", "floatingButtonBoards"]);
+    const state = {
+      sites: Array.isArray(floatingButtonSites) ? floatingButtonSites : [],
+      boards: Array.isArray(floatingButtonBoards) ? floatingButtonBoards : [],
+    };
+    const board = JOB_FIT_BOARDS.boardForUrl(location.href);
+    return {
+      on: JOB_FIT_BOARDS.enabledFor(location.href, state),
+      // What the card's × turns off: the whole board if that's why it's
+      // here, otherwise this site.
+      scope: board && state.boards.includes(board.id) && !state.sites.includes(location.origin) ? { board: board.id, label: board.name } : null,
+    };
   }
 
   async function refresh({ final = false } = {}) {
     const mine = ++seq;
     try {
-      const on = await enabledHere();
+      const { on, scope } = await readState();
       if (mine !== seq) return;
       if (!on) {
         JOB_FIT_CARD.detach();
         return;
       }
       await JOB_FIT_I18N.load();
-      const result = extract();
+      // An embedded board's job wins over this page's own reading, as it does
+      // in an evaluation: the page around an embed is the company's site.
+      const result = (frameJob && frameJob.href === location.href ? frameJob : null) || extract();
       if (!result) {
         // Between jobs on a single-page board: keep the card, say so. Only a
         // page that still has no job after the last retry loses it.
@@ -90,9 +106,9 @@
       }
       const profile = await JOB_FIT_PROFILES.getActive();
       if (mine !== seq) return;
-      await JOB_FIT_CARD.attach("site");
+      await JOB_FIT_CARD.attach("site", scope);
       JOB_FIT_CARD.setJob({
-        jobKey: JOB_FIT_JOBKEY.keyFor(result),
+        jobKey: result.jobKey || JOB_FIT_JOBKEY.keyFor(result),
         profileId: profile.id,
         title: result.title,
         company: result.company,
@@ -120,7 +136,12 @@
   try {
     chrome.storage.onChanged.addListener((changes, area) => {
       if (area !== "local") return;
-      if (changes.floatingButtonSites || changes.activeProfileId || changes[JOB_FIT_I18N.STORAGE_KEY]) refresh();
+      if (changes.floatingButtonSites || changes.floatingButtonBoards || changes.activeProfileId || changes[JOB_FIT_I18N.STORAGE_KEY]) refresh();
+    });
+    chrome.runtime.onMessage.addListener((message) => {
+      if (!message || message.type !== "JOB_FIT_FRAME_JOB" || !message.job) return;
+      frameJob = { ...message.job, href: location.href };
+      refresh();
     });
   } catch (err) {
     /* orphaned */

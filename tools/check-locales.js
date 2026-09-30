@@ -18,6 +18,7 @@ const each = (prefix, items) => items.map((i) => `${prefix}.${i}`);
 const DYNAMIC = [
   ...each("arrangement", ["remote", "hybrid", "onsite"]),
   ...each("auth", ["citizen", "permit", "sponsor"]),
+  ...each("boards", ["linkedin.desc", "indeed.desc", "greenhouse.desc", "workday.desc"]),
   ...each("history", ["countStale", "countDup", "countJobs"]),
   ...each("period", ["year", "month", "hour", "per.year", "per.month", "per.hour"]),
   ...each("profileLabel", ["core", "specialisms", "tooling", "leadership", "gaps", "workAuth", "target"]),

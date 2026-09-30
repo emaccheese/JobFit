@@ -101,6 +101,13 @@
     border-bottom-width: 2px; border-radius: 5px; padding: 2px 8px;
   }
   .word-count.over { color: var(--amber-fg); font-weight: 600; }
+  .sub-h { font-size: var(--fs-sm); margin: 18px 0 2px; }
+  .board-list { display: grid; grid-template-columns: repeat(auto-fill, minmax(260px, 1fr)); gap: 8px; margin-top: 8px; }
+  .board { display: flex; gap: 10px; align-items: flex-start; border: 1px solid var(--line); border-radius: 8px; padding: 10px 12px; cursor: pointer; }
+  .board:has(input:checked) { border-color: var(--accent-line); background: var(--accent-soft); }
+  .board input { margin-top: 3px; }
+  .board .name { font-weight: 600; }
+  .board .desc { font-size: var(--fs-xs); color: var(--muted); }
 
   @media (max-width: 760px) {
     .rail { display: none; }
@@ -339,7 +346,18 @@
 
         <h3 id="h-floatSites" data-i18n="popup.floatSites">On-page button</h3>
         <p class="hint" data-i18n="settings.floatIntro">A card in the corner of job postings that shows the saved score and evaluates with one click. It's off everywhere until you turn it on for a site, and each site is a separate Chrome permission you can take back.</p>
-        <div class="site-list" id="floatSites" role="list" aria-labelledby="h-floatSites"></div>
+
+        <h4 class="sub-h" id="h-boards" data-i18n="settings.boardsTitle">Job boards</h4>
+        <p class="hint" data-i18n="settings.boardsIntro">A board is turned on everywhere at once — every country, every employer — with one Chrome permission.</p>
+        <div id="boardList" class="board-list" role="group" aria-labelledby="h-boards"></div>
+        <div class="actions">
+          <button type="button" id="boardsAll" data-i18n="settings.boardsAll">Turn on for all job boards</button>
+        </div>
+        <div class="hint" id="boardStatus" role="status" aria-live="polite"></div>
+
+        <h4 class="sub-h" id="h-otherSites" data-i18n="settings.otherSites">Other sites</h4>
+        <p class="hint" data-i18n="settings.otherSitesHint">Company career sites (Jibe, Eightfold, a Greenhouse board embedded on the company's own site) are turned on one at a time: open one, then tick “Show the JobFit button” in the JobFit popup.</p>
+        <div class="site-list" id="floatSites" role="list" aria-labelledby="h-otherSites"></div>
       </section>
 
       <!-- Language -->
@@ -383,6 +401,7 @@
   <script src="lmstudio-ui.js"></script>
   <script src="ui-shared.js"></script>
   <script src="backup.js"></script>
+  <script src="boards.js"></script>
   <script src="options.js"></script>
 </body>
 </html>

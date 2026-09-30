@@ -503,8 +503,9 @@ function floatHost(origin) {
 }
 
 async function renderFloat() {
-  const { floatingButtonSites } = await chrome.storage.local.get("floatingButtonSites");
-  const sites = Array.isArray(floatingButtonSites) ? floatingButtonSites : [];
+  const stored = await chrome.storage.local.get(["floatingButtonSites", "floatingButtonBoards"]);
+  const sites = Array.isArray(stored.floatingButtonSites) ? stored.floatingButtonSites : [];
+  const boards = Array.isArray(stored.floatingButtonBoards) ? stored.floatingButtonBoards : [];
   let origin = null;
   try {
     const url = new URL(tab && tab.url);
@@ -512,12 +513,16 @@ async function renderFloat() {
   } catch (err) {
     origin = null;
   }
-  floatTab = origin ? { id: tab.id, origin } : null;
+  // On a known job board the toggle covers all of it — every Indeed country,
+  // every Workday employer — as one permission, rather than this one site.
+  const board = origin ? JOB_FIT_BOARDS.boardForUrl(tab.url) : null;
+  floatTab = origin ? { id: tab.id, origin, board } : null;
   $("floatRow").hidden = !origin;
-  if (origin) {
-    $("floatToggle").checked = sites.includes(origin);
-    $("floatLabel").textContent = t("popup.floatToggle", { site: floatHost(origin) });
-  }
+  if (!origin) return;
+  $("floatToggle").checked = sites.includes(origin) || Boolean(board && boards.includes(board.id));
+  $("floatLabel").textContent = board
+    ? t("popup.floatToggleBoard", { board: board.name })
+    : t("popup.floatToggle", { site: floatHost(origin) });
 }
 
 // Not async before permissions.request: Chrome only shows the prompt from
@@ -527,20 +532,27 @@ function onFloatToggle(e) {
   const hint = $("floatHint");
   hint.textContent = "";
   if (!floatTab) return;
-  const { id: tabId, origin } = floatTab;
+  const { id: tabId, origin, board } = floatTab;
   if (!box.checked) {
-    sendMessageWithRetry({ type: "JOB_FIT_FLOAT_SITE", origin, enabled: false }).then(renderFloat);
+    // Whichever put it here: the board, or this site on its own.
+    Promise.all([
+      board ? sendMessageWithRetry({ type: "JOB_FIT_FLOAT_BOARD", boards: [board.id], enabled: false }) : null,
+      sendMessageWithRetry({ type: "JOB_FIT_FLOAT_SITE", origin, enabled: false }),
+    ]).then(renderFloat);
     return;
   }
-  chrome.storage.local.set({ floatPending: { origin, tabId, ts: Date.now() } });
-  chrome.permissions.request({ origins: [`${origin}/*`] }).then(async (granted) => {
+  const origins = board ? board.patterns : [`${origin}/*`];
+  chrome.storage.local.set({ floatPending: board ? { boards: [board.id], tabId, ts: Date.now() } : { origin, tabId, ts: Date.now() } });
+  chrome.permissions.request({ origins }).then(async (granted) => {
     if (!granted) {
       box.checked = false;
       hint.textContent = t("popup.floatDenied");
       return;
     }
-    await sendMessageWithRetry({ type: "JOB_FIT_FLOAT_SITE", origin, enabled: true, tabId });
-    hint.textContent = t("popup.floatOn");
+    await sendMessageWithRetry(
+      board ? { type: "JOB_FIT_FLOAT_BOARD", boards: [board.id], enabled: true, tabId } : { type: "JOB_FIT_FLOAT_SITE", origin, enabled: true, tabId }
+    );
+    hint.textContent = board ? t("popup.floatOnBoard", { board: board.name }) : t("popup.floatOn");
     renderFloat();
   });
 }

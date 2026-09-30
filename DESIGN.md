@@ -88,7 +88,9 @@ job-fit-evaluator/
 ├── lmstudio-ui.js       # shared by popup + wizard: messaging, /v1/models probe
 ├── ui.css               # shared tokens (colour, type, radius, dark mode) + base controls
 ├── ui-shared.js         # JOB_FIT_UI — score bands, live-region announce, two-step confirm
-├── float.js             # on-page button (opt-in per site, registered dynamically)
+├── float.js             # on-page button (opt-in per site or job board, registered dynamically)
+├── float-frame.js       # reads the job in an embedded Greenhouse board for the top frame's card
+├── boards.js            # JOB_FIT_BOARDS — job boards, their match patterns, "is it on here?"
 ├── popup.html           # the job in this tab, readiness, where next (no settings)
 ├── popup.js
 ├── options.html         # Settings (options_ui, opened in a tab)
@@ -838,6 +840,52 @@ What stayed from that work:
   cleared with `text: null`, not `""`, so the queue count returns.
 - **One code path:** starting an evaluation (injecting the page scripts, including into
   Greenhouse iframes) lives in `inject.js`, shared by the popup and the service worker.
+
+### On-page button for whole job boards (2026-09-28)
+
+One site at a time didn't fit how job boards are built. Indeed is a subdomain per
+country, LinkedIn's public job pages are too, and Workday gives every employer its own
+tenant, so "every Workday job" was dozens of prompts. `boards.js` lists the boards with
+one match pattern each:
+
+| Board | Pattern |
+|---|---|
+| LinkedIn | `https://*.linkedin.com/*` |
+| Indeed | `https://*.indeed.com/*` |
+| Greenhouse | `https://*.greenhouse.io/*` |
+| Workday | `https://*.myworkdayjobs.com/*` |
+
+A board is switched on as a whole. The ids are in `floatingButtonBoards`, next to
+`floatingButtonSites` (origins).
+
+- **One prompt.** Settings lists the boards with **Turn on for all job boards**, which
+  asks for every pattern in one `permissions.request`. In the popup, on a page of a
+  known board, the toggle offers the whole board ("on all LinkedIn job pages") instead
+  of the one site. Greenhouse is already in the manifest's `host_permissions`, so it's
+  granted without a prompt and can't be given back. Turning it off just stops the
+  button.
+- **Covered sites fold in.** Turning a board on removes any origin it covers from the
+  site list and gives that origin's own permission back, so no grant is left that
+  nothing uses. `permissions.onAdded` finishes a board grant if Chrome's prompt closed
+  the popup (`floatPending.boards`).
+- **The card knows why it's there.** `float.js` passes the board to `attach("site",
+  scope)`, so **×** asks "Hide on LinkedIn?" and turns the whole board off. A site
+  switched on by itself still turns off by itself.
+- **Embedded Greenhouse boards on company sites.** The posting is inside an iframe the
+  top frame can't read. A second registered script, `jobfit-float-frame`, runs
+  `float-frame.js` in `*.greenhouse.io/embed/*` frames (all frames; the manifest
+  already has that host).
+  - It first asks the worker whether the page around it is switched on
+    (`JOB_FIT_FRAME_ENABLED`, checked against `sender.tab.url`) and reads nothing if
+    not.
+  - Otherwise it reads the job with the Greenhouse extractor and sends
+    `JOB_FIT_FRAME_JOB`. The worker checks again and passes it to frame 0 only.
+  - `float.js` then prefers that job over the page's own reading, as an evaluation
+    does. The page around an embed is the company's site, and it's the embed that
+    `content.js` scores.
+- Both scripts are registered only while at least one board or site is on, and the
+  registration is rebuilt from what's still granted on startup, on update and on
+  `permissions.onRemoved`.
 
 ### On-page button, opt-in per site (2026-09-27)
 

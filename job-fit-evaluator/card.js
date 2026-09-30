@@ -182,6 +182,7 @@
   let root = null; // closed shadow root
   let els = {};
   let mode = null; // "site" | "page" | null (not attached)
+  let siteScope = null; // site mode: { board, label } when a whole job board is why the card is here
   let job = null; // { jobKey, profileId, title, company }
   let jobState = null; // what storage says about the job: evaluate / queued / scoring / score / reject
   let override = null; // "loading" between jobs
@@ -338,7 +339,7 @@
   }
 
   function siteName() {
-    return location.hostname.replace(/^www\./, "");
+    return siteScope ? siteScope.label : location.hostname.replace(/^www\./, "");
   }
 
   function ctl(className, label, content, onClick) {
@@ -933,8 +934,10 @@
     }
     clearTimeout(confirmTimer);
     confirmingHide = false;
+    const scope = siteScope;
     detach();
-    send({ type: "JOB_FIT_FLOAT_SITE", origin: origin(), enabled: false });
+    if (scope && scope.board) send({ type: "JOB_FIT_FLOAT_BOARD", boards: [scope.board], enabled: false });
+    else send({ type: "JOB_FIT_FLOAT_SITE", origin: origin(), enabled: false });
   }
 
   function cancelHide() {
@@ -958,10 +961,12 @@
   // --- public ---------------------------------------------------------------------
 
   // "page" never downgrades "site": the button being on is the stronger fact.
-  async function attach(nextMode) {
+  // In site mode, `scope` says whether a whole job board is why it's here.
+  async function attach(nextMode, scope = null) {
     if (mode === "site" && nextMode === "page") return;
     const wasAttached = Boolean(mode);
     mode = nextMode;
+    if (nextMode === "site") siteScope = scope;
     if (!wasAttached) {
       await loadPrefs();
       pageHref = location.href;
@@ -975,6 +980,7 @@
     root = null;
     els = {};
     mode = null;
+    siteScope = null;
     job = null;
     jobState = null;
     override = null;

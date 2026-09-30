@@ -948,13 +948,73 @@ function floatHost(origin) {
   }
 }
 
+// --- job boards ---------------------------------------------------------------
+//
+// Each board is one permission covering all of it (boards.js). Ticking asks
+// Chrome right there — permissions.request is the first async call in the
+// handler, because Chrome only prompts from inside the click — and the worker
+// registers the button once it's granted.
+
+async function floatBoardsOn() {
+  const { floatingButtonBoards } = await chrome.storage.local.get("floatingButtonBoards");
+  return Array.isArray(floatingButtonBoards) ? floatingButtonBoards : [];
+}
+
+function setBoardStatus(text) {
+  $("boardStatus").textContent = text;
+}
+
+async function renderBoards() {
+  const on = await floatBoardsOn();
+  const host = $("boardList");
+  host.innerHTML = "";
+  JOB_FIT_BOARDS.BOARDS.forEach((board) => {
+    const row = el("label", "board");
+    const box = el("input");
+    box.type = "checkbox";
+    box.checked = on.includes(board.id);
+    box.setAttribute("aria-describedby", `board-desc-${board.id}`);
+    box.addEventListener("change", () => toggleBoards([board.id], box.checked, box));
+    row.appendChild(box);
+    const text = el("div");
+    text.appendChild(el("div", "name", board.name));
+    const desc = el("div", "desc", t(`boards.${board.id}.desc`));
+    desc.id = `board-desc-${board.id}`;
+    text.appendChild(desc);
+    row.appendChild(text);
+    host.appendChild(row);
+  });
+  $("boardsAll").hidden = JOB_FIT_BOARDS.IDS.every((id) => on.includes(id));
+}
+
+function toggleBoards(ids, enabled, box) {
+  const names = JOB_FIT_I18N.list(ids.map((id) => JOB_FIT_BOARDS.byId(id).name));
+  if (!enabled) {
+    sendMessageWithRetry({ type: "JOB_FIT_FLOAT_BOARD", boards: ids, enabled: false }).then(() =>
+      setBoardStatus(t("settings.boardOff", { board: names }))
+    );
+    return;
+  }
+  const origins = ids.flatMap((id) => JOB_FIT_BOARDS.byId(id).patterns);
+  // One request for all of them, so "Turn on for all" is one Chrome prompt.
+  chrome.permissions.request({ origins }).then(async (granted) => {
+    if (!granted) {
+      if (box) box.checked = false;
+      setBoardStatus(t("settings.boardDenied", { board: names }));
+      return;
+    }
+    await sendMessageWithRetry({ type: "JOB_FIT_FLOAT_BOARD", boards: ids, enabled: true });
+    setBoardStatus(t("settings.boardOn", { board: names }));
+  });
+}
+
 async function renderFloatSites() {
   const { floatingButtonSites } = await chrome.storage.local.get("floatingButtonSites");
   const sites = Array.isArray(floatingButtonSites) ? floatingButtonSites : [];
   const list = $("floatSites");
   list.innerHTML = "";
   if (!sites.length) {
-    list.appendChild(el("div", "hint", t("popup.floatNone")));
+    list.appendChild(el("div", "hint", t("settings.otherSitesNone")));
     return;
   }
   sites.forEach((site) => {
@@ -1116,6 +1176,7 @@ function watchStorage() {
       else fillModelFields().then(scheduleModelCheck);
     }
     if (changes.floatingButtonSites) renderFloatSites();
+    if (changes.floatingButtonBoards) renderBoards();
     if (changes.usageByDay || changes.openaiBudgetReset) renderUsage();
     if (changes.evalStats) renderTimingHint();
     if (changes.settingsJump && changes.settingsJump.newValue) consumeJump();
@@ -1193,6 +1254,12 @@ async function init() {
   renderLanguagePicker();
   renderShortcut();
   renderFloatSites();
+  renderBoards();
+  $("boardsAll").addEventListener("click", () => {
+    const boxes = Array.from($("boardList").querySelectorAll("input"));
+    const off = JOB_FIT_BOARDS.IDS.filter((id, i) => !boxes[i].checked);
+    if (off.length) toggleBoards(off, true, null);
+  });
   renderTimingHint();
   checkModel();
   $("changeShortcut").addEventListener("click", () => chrome.tabs.create({ url: "chrome://extensions/shortcuts" }));
