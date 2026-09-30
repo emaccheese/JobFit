@@ -72,6 +72,43 @@ async function probeModels(target, timeoutMs = 2500) {
   }
 }
 
+// What a probe means for the person looking at it: { state: "ok" | "warn" |
+// "bad", text, title }. Shared by the popup's readiness row and Settings ›
+// Model, which used to word the same failures separately.
+function describeModelReadiness(settings, probe) {
+  const wanted = settings.model;
+  if (settings.provider === "openai") {
+    if (probe.reason === "no-key") return { state: "bad", text: t("popup.oaNoKey") };
+    if (probe.reason === "unauthorized") return { state: "bad", text: t("popup.oaBadKey") };
+    if (!probe.ok) return { state: "bad", text: t("popup.oaUnreachable") };
+    if (!wanted) return { state: "warn", text: t("popup.oaPickModel") };
+    if (probe.models.length && !probe.models.includes(wanted)) {
+      return { state: "warn", text: t("popup.oaModelMissing", { model: wanted }), title: probe.models.join("\n") };
+    }
+    return { state: "ok", text: `OpenAI — ${wanted}` };
+  }
+  if (probe.reason === "invalid-url") return { state: "bad", text: t("popup.lmBadUrl") };
+  if (!probe.ok) return { state: "bad", text: t("popup.lmUnreachable"), title: probe.url };
+  const loaded = probe.models;
+  if (!wanted) {
+    return { state: "ok", text: t("popup.lmConnectedUsing", { model: loaded[0] || t("popup.whateverLoaded") }), title: loaded.join("\n") };
+  }
+  // A model name that isn't loaded is the cause of the HTTP error that pauses
+  // the whole queue — worth catching before you've queued ten.
+  if (loaded.length && !loaded.includes(wanted)) {
+    return { state: "warn", text: t("popup.lmNotLoaded", { model: wanted }), title: `${t("popup.loaded")}:\n${loaded.join("\n")}` };
+  }
+  return { state: "ok", text: t("popup.lmConnected", { model: wanted }) };
+}
+
+// Settings opens in a tab (options_ui), and Chrome focuses the one already
+// open. A section to land on is left in storage for it to pick up, because
+// openOptionsPage() can't carry a #hash to a tab that's already open.
+async function openSettings(section) {
+  if (section) await chrome.storage.local.set({ settingsJump: { section, ts: Date.now() } });
+  await chrome.runtime.openOptionsPage();
+}
+
 function openSetupWizard(params) {
   const query = new URLSearchParams(params).toString();
   chrome.tabs.create({ url: chrome.runtime.getURL(`wizard.html?${query}`) });

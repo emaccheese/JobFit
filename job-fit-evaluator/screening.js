@@ -24,7 +24,7 @@ var JOB_FIT_SCREEN = (function () {
     return JOB_FIT_KEYWORDS.compile(config, kind)
       .map((entry) => {
         try {
-          return { ...entry, re: new RegExp(entry.source, "i") };
+          return { ...entry, re: new RegExp(entry.source, entry.caseSensitive ? "" : "i") };
         } catch (e) {
           console.warn(`[Job Fit Evaluator] invalid keyword pattern skipped: ${entry.source}`, e);
           return null;
@@ -286,6 +286,47 @@ var JOB_FIT_SCREEN = (function () {
     return out;
   }
 
+  // --- requirements vs. the work itself ---------------------------------------
+  //
+  // A posting can keep its requirements short and generic while the
+  // responsibilities describe specialist work (3D rendering, point clouds):
+  // scored on the requirements alone it looks like a fit it isn't. Splitting
+  // on the section headings is enough to notice a domain flag that only the
+  // work section mentions.
+
+  const REQUIREMENT_HEADING =
+    /^(?:basic |minimum |required |preferred |desired |key )?(?:requirements?|qualifications?|what you(?:'ll| will)? (?:bring|need|have)|must[- ]haves?|skills(?: (?:and|&) experience)?|who you are|about you|you have|nice to have|requisitos|qualifica[çc][õo]es|exigences|comp[ée]tences|profil recherch[ée])\b/i;
+  const WORK_HEADING =
+    /^(?:(?:key |main |core |primary )?(?:responsibilities|duties)|what you(?:'ll| will) (?:do|be doing|work on)|the role|about the role|your (?:role|impact|mission)|in this role|day[- ]to[- ]day|responsabilidades|funciones|responsabilit[ée]s|atribui[çc][õo]es)\b/i;
+
+  function sections(text) {
+    const out = { requirements: [], work: [] };
+    let current = null;
+    String(text || "")
+      .split(/\n+/)
+      .forEach((raw) => {
+        const line = raw.trim();
+        if (!line) return;
+        const heading = line.replace(/[:：]\s*$/, "");
+        if (heading.length <= 60 && REQUIREMENT_HEADING.test(heading)) current = "requirements";
+        else if (heading.length <= 60 && WORK_HEADING.test(heading)) current = "work";
+        else if (current) out[current].push(line);
+      });
+    return { requirements: out.requirements.join("\n"), work: out.work.join("\n") };
+  }
+
+  // Domain flags the work section describes and the requirements never name.
+  // Only when the posting has both sections: without headings there's nothing
+  // to compare.
+  function coreWorkOnly(patterns, text) {
+    const { requirements, work } = sections(text);
+    if (!requirements || !work) return [];
+    return matchedLabels(
+      patterns.filter((p) => p.re.test(work) && !p.re.test(requirements)),
+      work
+    );
+  }
+
   // --- the screen -----------------------------------------------------------
 
   // Everything Layer 1 decides about a posting, from a profile's keyword
@@ -306,7 +347,7 @@ var JOB_FIT_SCREEN = (function () {
       place,
       jobSearch || {}
     );
-    if (hardReject) return { hardReject, domainFlags: [], softWarnings: [], place: where };
+    if (hardReject) return { hardReject, domainFlags: [], learningFlags: [], coreWorkOnly: [], softWarnings: [], place: where };
 
     const warningPatterns = compileConfig(k.softWarnings, "softWarnings").filter(
       (entry) => gateOutcome(entry.gate, place, jobSearch || {}) !== "skip"
@@ -316,13 +357,20 @@ var JOB_FIT_SCREEN = (function () {
       ...matchedLabels(warningPatterns, body),
       ...computedWarnings(JOB_FIT_KEYWORDS.computedIds(k.softWarnings, "softWarnings"), body, place, jobSearch),
     ];
+    // A term on the learning list is informational only, even if it's still
+    // on the domain-flag list too: learning it is the more recent statement.
+    const learningFlags = matchedLabels(compileConfig(k.learningFlags, "learningFlags"), body);
+    const learning = new Set(learningFlags.map((l) => l.toLowerCase()));
+    const flagPatterns = compileConfig(k.domainFlags, "domainFlags");
     return {
       hardReject: null,
-      domainFlags: matchedLabels(compileConfig(k.domainFlags, "domainFlags"), body),
+      domainFlags: matchedLabels(flagPatterns, body).filter((l) => !learning.has(l.toLowerCase())),
+      learningFlags,
+      coreWorkOnly: coreWorkOnly(flagPatterns, body).filter((l) => !learning.has(l.toLowerCase())),
       softWarnings,
       place: where,
     };
   }
 
-  return { compileConfig, matchedLabels, cleanMatch, findHardReject, screen, requiredLanguages, timeZoneRequirement, gateOutcome };
+  return { compileConfig, matchedLabels, cleanMatch, findHardReject, screen, sections, requiredLanguages, timeZoneRequirement, gateOutcome };
 })();

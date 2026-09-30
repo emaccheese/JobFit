@@ -1,5 +1,5 @@
 // Translation for everything JobFit shows: the popup, the setup wizard,
-// Tracked jobs, the banner on job pages and the service worker's messages.
+// Tracked jobs, the card on job pages and the service worker's messages.
 //
 // Chrome's own chrome.i18n can't do this: it always follows the browser's
 // language and can't be switched from inside the extension. So the messages
@@ -94,7 +94,7 @@ var JOB_FIT_I18N = (function () {
     return lang;
   }
 
-  // Keeps a long-lived context (the service worker, an open banner) in the
+  // Keeps a long-lived context (the service worker, an open card) in the
   // language the user just picked elsewhere.
   function watch(onChange) {
     try {

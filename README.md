@@ -25,7 +25,7 @@ The extension talks to any OpenAI-compatible endpoint, so LM Studio is the defau
 but not a requirement.
 
 **Or use the OpenAI API.** If you'd rather not run a model locally, set the provider
-to **OpenAI API** (in the setup wizard, or the popup under **Model**), paste your API
+to **OpenAI API** (in the setup wizard, or **Settings → Model**), paste your API
 key and pick a tier: **Economy** (gpt-6-luna, about $0.05 per 100 postings),
 **Balanced** (gpt-6-sol, about $1 per 100, the default) or **Best** (gpt-6-astra,
 about $5 per 100), or any other chat model your key has. Bulk re-evaluations from
@@ -71,12 +71,28 @@ computed in code, because local models are unreliable at it and fail confidently
 
 - **Salary comparison.** The model extracts numbers; the comparison against your
   expected range is arithmetic done in JavaScript. It once reported a posting as
-  "within your range" while also stating a ceiling below the floor.
+  "within your range" while also stating a ceiling below the floor. When the posting
+  gives numbers without a currency, the currency comes from the job's country (and
+  says so), and "most offers fall between the minimum and the midpoint" makes the
+  midpoint the realistic top.
 - **Seniority check.** Keyword presence plus a threshold, and only ever against a
   salary the posting actually stated — never against the model's own estimate,
   which made the check circular.
+- **Experience level.** A posting asking for far fewer years than you have ("2+
+  years, academic experience acceptable" against your 8) is flagged *likely below
+  your level* and capped at 70.
 - **Score caps.** The prompt asks the model to cap its own score for uncovered
-  required skills; the cap is then enforced in code regardless.
+  required skills; the cap is then enforced in code regardless — but only for a
+  skill the job really requires. A requirement worded as a low bar ("familiarity
+  with", "exposure to") or offered as one of several options ("OpenCV, NumPy, … or
+  PIL") costs 10 points instead.
+- **The verdict.** Apply at 75 and up, borderline 55–74, skip below 55, from the
+  final score. A posting that doesn't mention sponsorship gets an amber warning (when
+  you'd need it there), not a lower verdict.
+
+**Learning.** Skills you're picking up (OpenCV, GoogleTest, ONNX Runtime…) go in
+**Settings → Screening rules → Learning**. They're flagged for your information and
+never cap the score, unlike domain flags, which mark real mismatches.
 
 ## Setup
 
@@ -106,33 +122,55 @@ computed in code, because local models are unreliable at it and fail confidently
      posting (or one you paste) that isn't saved to your tracked jobs.
 
    Everything saves as you go. Close the tab early and the popup offers
-   **Continue setup**. To run it again later, use **Manage profiles → Run setup
-   wizard for this profile** in the popup, or **Data → Run setup wizard…** on the
-   tracked jobs page. **New** profile also opens it. Every setting stays editable
-   in the popup too.
+   **Continue setup**. To run it again later, use **Run setup wizard for this
+   profile** in **Settings → Profile**; **New profile…** there opens it too.
+   Every setting stays editable in **Settings** (the ⚙ in the popup, or
+   right-click the JobFit icon → **Options**).
 
-Then open a job posting and click **Evaluate this tab**.
+Then open a job posting and click **Evaluate this job**.
 
 ## Using it
 
 **Evaluate.** Open the posting and press **⌘⇧E** on a Mac, or **Alt+Shift+E** on
 Windows and Linux. It works on any site, with no clicks. You can also click the
-JobFit icon, then **Evaluate this tab**. You can change the shortcut at
-`chrome://extensions/shortcuts`, or from the popup under **Shortcuts**.
+JobFit icon, then **Evaluate this job**. You can change the shortcut at
+`chrome://extensions/shortcuts`, or from **Settings → On-page button and shortcut**.
 
-**On-page button (optional).** On a job board you use a lot, tick **Show the JobFit
-button on {site}** in the popup. Chrome asks for access to that one site; after that,
-a card sits in the bottom-left corner of its job postings. One click evaluates the
-posting, and if you've scored it before, the card already shows the score when you open
-the page. It never evaluates on its own. Hover it for **–** to shrink it to just the
-score, or **×** (twice) to turn it off for the site and give the access back — or
-remove the site under **Shortcuts and on-page button** in the popup.
+**The popup** is for the job in front of you. If you've scored it before, it shows
+the saved score and verdict, when it was scored and whether it's out of date (another
+model, or a profile you've edited since), with **Show on page**, **Re-evaluate** and
+**Open in Tracked jobs**. Below that it says whether the model is reachable, with a
+**Fix in Settings** link when it isn't, and how the queue is doing. Everything you set
+once lives in **Settings**, a full page with a section for each: profile and CV,
+salary, screening rules, model, the on-page button, language, and backups.
 
-A banner appears in the page with the score, verdict and a one-line read;
-**Details** expands to matches, gaps, required gaps, warnings and salary.
+**On-page button (optional).** A card in the corner of job postings that evaluates the
+posting with one click, and already shows the score when you open a job you've scored
+before. It never evaluates on its own, and it's off everywhere until you turn it on:
+
+- **For a whole job board** (LinkedIn, Indeed, Greenhouse, Workday): in
+  **Settings → On-page button and shortcut**, tick the board or press **Turn on for all
+  job boards**. Or open a posting on that board and tick **Show the JobFit button on all
+  {board} job pages** in the popup. A board is one Chrome permission covering all of it:
+  every Indeed country, LinkedIn's country sites, every employer's Workday site.
+  Greenhouse needs no prompt, because JobFit already has access there.
+- **For a company's own career site** (Jibe, Eightfold, a Greenhouse board embedded on
+  the company's domain): open it and tick **Show the JobFit button on {site}** in the
+  popup. On a site with an embedded Greenhouse board, the card shows the job in the
+  embed.
+
+Hover the card for **–** to shrink it to just the score, or **×** (twice) to turn it off
+for that board or site and give the access back. You can also do that in Settings.
+
+The result opens in a panel from a card in the corner of the page, whichever way
+you started it: the score, the verdict and a one-line read, then sections for
+required gaps, matches, gaps, warnings and salary, with **Re-evaluate** and
+**Tracked jobs**. The card doesn't cover the site's navigation. Drag it up either
+edge, or use **⇄** to move it to the other side; the spot is remembered per site.
+Press Esc to close the panel.
 
 **Queue.** Clicking Evaluate on a second posting while the first is still running
-queues it — up to 10. Click through a search page, queue everything that looks
+queues it — up to 50. Click through a search page, queue everything that looks
 plausible, and come back later; the toolbar badge counts down. The queue survives
 browser restarts and pauses itself (rather than burning through every item) if
 LM Studio goes away.
@@ -140,9 +178,14 @@ LM Studio goes away.
 **Tracked jobs.** Everything evaluated is kept, sortable by score, with an
 application status pipeline (not applied → applied → interviewing → offer /
 rejected / ghosted), free-text notes, search across the posting body, and CSV
-export.
+export. On a wide window the list and the selected job's details sit side by side;
+narrower, a job opens under its row. The status chips (Needs attention, Not applied,
+Waiting, In play, Closed) are the filter; the exact status and *Hide hard rejects* are
+under **More filters**. It works from the keyboard: `/` search, `j` / `k` next and
+previous job, `Enter` or `o` details, `1`–`7` set the status, `x` tick for
+re-evaluation, `Esc` back, and `?` lists them all.
 
-**Backup.** *Back up all data* writes a JSON file containing your profiles,
+**Backup** (in **Settings → Data**). *Back up all data* writes a JSON file containing your profiles,
 LM Studio settings and every tracked job — status, notes and briefs included,
 all of which the CSV leaves out. *Restore from backup* merges a file back in
 and **never overwrites anything already present**, so restoring an old backup
@@ -162,8 +205,9 @@ posting evaluated for two people is two records.
 
 - **No posting or CV is sent anywhere except your own `localhost`.** There is no
   cloud mode and no telemetry.
-- The on-page button is off everywhere by default. Each site you switch it on for is a
-  separate Chrome permission you grant (and can revoke) for that site alone.
+- The on-page button is off everywhere by default. Each job board or site you switch it
+  on for is a separate Chrome permission you grant (and can revoke) for that board or
+  site alone.
 - Host permissions are `localhost`, `127.0.0.1`, and `*://*.greenhouse.io/*`. The
   last one exists only so the extension can read a Greenhouse job board that a
   company career site embeds in a cross-origin iframe — without it Chrome won't

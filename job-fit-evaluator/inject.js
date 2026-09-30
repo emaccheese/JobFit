@@ -1,11 +1,12 @@
 // Starting an evaluation = injecting the page scripts into the tab; content.js
-// takes it from there (extract, screen, queue, banner). Shared by the popup's
+// takes it from there (extract, screen, queue, show the result on the card). Shared by the popup's
 // button, the toolbar icon on job pages and the keyboard shortcut, which all
 // used to be the popup alone — loaded by popup.html and importScripts()'d by
 // the service worker.
 
 const JOB_FIT_CONTENT_FILES = [
   "i18n.js",
+  "ui-shared.js",
   "geo.js",
   "defaults.js",
   "provider.js",
@@ -22,8 +23,14 @@ const JOB_FIT_CONTENT_FILES = [
   "extractors/indeed.js",
   "extractors/eightfold.js",
   "jobkey.js",
+  "card.js",
   "content.js",
 ];
+
+// Just enough to tell which job a tab shows: the extractors and job identity.
+// No content.js, which starts an evaluation the moment it loads — the popup
+// uses these to look the job up in history before anyone clicks anything.
+const JOB_FIT_LOOKUP_FILES = JOB_FIT_CONTENT_FILES.filter((f) => f.startsWith("extractors/") || f === "jobkey.js");
 
 // The page scripts plus the messages they need: English (the fallback) and
 // the language in use, read from storage so a page never carries all four.
@@ -58,7 +65,7 @@ function injectionErrorMessage(err) {
 // Failures here are reported but never rethrown: the top frame has already
 // been injected by this point, and losing that to an iframe problem would be
 // worse than the iframe being missed.
-async function injectJobFrames(tabId, files, { withCss = true } = {}) {
+async function injectJobFrames(tabId, files, { prelude = null } = {}) {
   const report = (info) =>
     chrome.scripting
       .executeScript({
@@ -127,9 +134,7 @@ async function injectJobFrames(tabId, files, { withCss = true } = {}) {
   for (const frame of candidates) {
     const frameIds = [frame.frameId];
     try {
-      if (withCss) {
-        await chrome.scripting.insertCSS({ target: { tabId, frameIds }, files: ["content.css"] });
-      }
+      if (prelude) await chrome.scripting.executeScript({ target: { tabId, frameIds }, func: prelude });
       await chrome.scripting.executeScript({ target: { tabId, frameIds }, files });
       injected.push(frame.frameId);
       outcomes.push({ id: frame.frameId, url: frame.url, injected: true });
@@ -142,17 +147,25 @@ async function injectJobFrames(tabId, files, { withCss = true } = {}) {
   return injected;
 }
 
+// Runs in the page before content.js: the next run skips the saved result and
+// scores the posting again (the popup's Re-evaluate). Read once and cleared.
+function markIgnoreCacheOnce() {
+  window.__jobFitIgnoreCacheOnce = true;
+}
+
 // Returns { ok: true } or { ok: false, error } with a message for a person.
-async function startEvaluation(tabId) {
+// `ignoreCache` re-scores a job that already has a saved result.
+async function startEvaluation(tabId, { ignoreCache = false } = {}) {
   try {
     const files = await jobFitContentFiles();
-    await chrome.scripting.insertCSS({ target: { tabId }, files: ["content.css"] });
+    const prelude = ignoreCache ? markIgnoreCacheOnce : null;
+    if (prelude) await chrome.scripting.executeScript({ target: { tabId }, func: prelude });
     await chrome.scripting.executeScript({ target: { tabId }, files });
     // Find cross-origin iframes that host job content (e.g. embedded
     // Greenhouse boards on custom-domain career sites) and inject into those
     // specifically. allFrames: true would reject the entire call if ANY frame
     // in the tab (ads, analytics) is on a domain we lack permission for.
-    await injectJobFrames(tabId, files);
+    await injectJobFrames(tabId, files, { prelude });
     return { ok: true };
   } catch (err) {
     return { ok: false, error: injectionErrorMessage(err) };

@@ -18,7 +18,9 @@ importScripts(
   "evalstore.js",
   "queue.js",
   "lmstudio-ui.js",
-  "inject.js"
+  "inject.js",
+  "boards.js",
+  "ui-shared.js"
 );
 
 // Messages this worker writes (errors, score-cap reasons, briefs) are in the
@@ -33,7 +35,7 @@ Return ONLY a JSON object, no prose, no markdown fences.
 Schema:
 {
   "score": <integer 0-100>,
-  "verdict": "apply" | "borderline" | "skip",
+  "verdict": "apply" | "borderline" | "skip"  (follows the score: apply at 75 and up, borderline 55–74, skip below 55),
   "location": "<city, country or 'remote' or 'unknown'>",
   "sponsorship": "explicit_yes" | "explicit_no" | "unstated",
   "matches": ["<up to 6 short phrases FROM THE POSTING the candidate clearly satisfies>"],
@@ -41,9 +43,9 @@ Schema:
   "required_gaps": ["<items from gaps that appear under REQUIRED, not preferred, in the posting>"],
   "salary": {
     "posting_stated": "<salary/range exactly as stated in the posting, with currency and period, or 'not stated'>",
-    "posting_stated_min": <integer, annual, or null if not stated>,
-    "posting_stated_max": <integer, annual, or null if not stated>,
-    "posting_stated_currency": "<ISO 4217 code, e.g. USD/CAD/MXN, or null if not stated>",
+    "posting_stated_min": <plain integer (no commas, no "k"), annual, or null if not stated>,
+    "posting_stated_max": <plain integer (no commas, no "k"), annual, or null if not stated>,
+    "posting_stated_currency": "<ISO 4217 code, e.g. USD/CAD/MXN, only if the posting shows it (a code or a symbol like C$); null if the numbers have no currency — it's inferred from the job's country separately>",
     "estimated_market_range": "<your estimate of a reasonable market range for this exact role, seniority, and location, in the posting's currency if it stated one, otherwise the candidate's expected currency>",
     "estimated_market_min": <integer, annual>,
     "estimated_market_max": <integer, annual>,
@@ -65,6 +67,8 @@ CRITICAL — classify every gap before placing it: for each item in "gaps", expl
 
 CRITICAL — domain flags are informational and must never be listed as required gaps on their own. A DETECTED DOMAIN-FLAG TERM only means a keyword scan saw that word somewhere in the posting (possibly the job title, the company blurb, or one side of an "or"). It is a prompt to check the posting, not evidence of a gap. Judge it exactly like any other requirement from how the posting actually phrases it: if it appears only in the title or company description, it is not a requirement; if it is one alternative of an "or"/"and/or" requirement the profile already satisfies another way, it is a match, not a gap.
 
+CRITICAL — the job's location is never a gap: do not list its city, region, commute, relocation, on-site or in-office requirement in "gaps" or "required_gaps", and do not lower the score for it. The candidate is willing to relocate; location is screened separately by keyword rules.
+
 CRITICAL — salary numbers only, no verdict: extract/estimate the numeric min/max/currency fields as accurately as you can. Do not compare them to the candidate's expectation yourself — that comparison is computed separately from your numbers, so just report what the posting states and your market estimate.
 
 Scoring guidance:
@@ -73,8 +77,11 @@ Scoring guidance:
 - A required language the candidate lacks (e.g. C#) caps the score at 60.
 - "distributed systems" as a requirement caps at 45.
 - Domain match (image/video/color/GPU/embedded) adds up to +15.
-- A DETECTED DOMAIN-FLAG TERM (listed below, if present) is effectively required when the posting marks it required OR when the responsibilities describe the hire doing that work themselves — regardless of where, or whether, it appears in the qualifications. Listing it only as preferred doesn't make it optional if the day-to-day job is that work. Working alongside a team that does it, or using its output, is not doing it. Appearing in the job title or company description alone does not make it required, and neither does being one alternative of an "or"/"and/or" requirement the profile satisfies another way. If any effectively required term isn't substantively covered by the candidate profile, cap the score at 50 and list it in required_gaps.
+- A requirement worded as a low bar — "familiarity with", "exposure to", "working knowledge of", "introductory", "basic understanding of", "some experience with" — can be a gap, but costs at most 10 points and never triggers a cap.
+- A DETECTED DOMAIN-FLAG TERM (listed below, if present) is effectively required when the posting marks it required OR when the responsibilities describe the hire doing that work themselves — regardless of where, or whether, it appears in the qualifications. Listing it only as preferred doesn't make it optional if the day-to-day job is that work. Working alongside a team that does it, or using its output, is not doing it. Appearing in the job title or company description alone does not make it required. Neither does being one alternative of an "or" / "and/or" / "such as" list — that requirement is a gap only if the profile covers none of the alternatives, and even then it is not a cap — nor being worded as a low bar (above). If any effectively required term isn't substantively covered by the candidate profile, cap the score at 50 and list it in required_gaps.
+- A DETECTED LEARNING TERM (listed below, if present) is a skill the candidate is actively learning. A requirement for one is at most a minor gap (a few points), never a cap and never a reason to skip.
 - Salary is informational only — do not let it influence the score or verdict either way.
+- The verdict follows the score (apply 75+, borderline 55–74, skip below 55). A posting that doesn't mention sponsorship is not a reason to say "borderline" — that is reported separately as a warning.
 
 CANDIDATE SITUATION, when given, says where the candidate lives, which countries they apply in, their work authorization in each, and the work arrangements they accept. Use it to judge practical fit in "one_line" and to read "sponsorship" correctly for the posting's country, but do NOT lower the score for location, arrangement or work authorization — those are screened separately, and the score is about qualifications.`;
 
@@ -187,12 +194,18 @@ function trimPosting(postingText) {
   return { text: postingText.slice(0, headChars) + marker + postingText.slice(-tailChars), truncated: true };
 }
 
-function buildUserPrompt(profile, postingText, expectedSalary, domainFlags, { jobSearch, place } = {}) {
+function buildUserPrompt(profile, postingText, expectedSalary, domainFlags, { jobSearch, place, learningFlags, coreWorkOnly } = {}) {
   const { text: trimmed, truncated } = trimPosting(postingText);
   const domainFlagsLine =
-    domainFlags && domainFlags.length
+    (domainFlags && domainFlags.length
       ? `\n\nDETECTED DOMAIN-FLAG TERMS IN POSTING (keyword scan, cross-check each against the profile per the scoring guidance): ${domainFlags.join(", ")}`
-      : "";
+      : "") +
+    (learningFlags && learningFlags.length
+      ? `\n\nDETECTED LEARNING TERMS IN POSTING (the candidate is actively learning these; a minor gap at most, never a cap): ${learningFlags.join(", ")}`
+      : "") +
+    (coreWorkOnly && coreWorkOnly.length
+      ? `\n\nREQUIREMENTS AND CORE WORK DIVERGE: the responsibilities describe ${coreWorkOnly.join(", ")}, which the requirements list doesn't name. Judge fit on the work described, per the scoring guidance.`
+      : "");
   // Everything that's the same on every call comes first — the system prompt,
   // then this profile and its salary expectations — and everything that
   // changes per posting comes last. Providers cache a repeated prefix (OpenAI
@@ -756,34 +769,112 @@ async function callLmStudio(systemPrompt, userPrompt, { signal, bulk = false } =
   }
 }
 
+// --- reading the model's salary numbers ---------------------------------------
+//
+// The schema asks for plain integers, but models return "140,000", "140k" or
+// "$140K" often enough, and a string compared with a number is always false:
+// a posting capped at $140K came out "within" a $160K floor that way.
+function toAmount(value) {
+  if (typeof value === "number") return Number.isFinite(value) ? value : null;
+  if (typeof value !== "string") return null;
+  const m = value.replace(/[\s,]/g, "").match(/(\d+(?:\.\d+)?)([kK])?/);
+  return m ? Math.round(Number(m[1]) * (m[2] ? 1000 : 1)) : null;
+}
+
+// The amounts in a stated range ("84,000 to 156,000", "$120K–$140K"),
+// annualized when the text says per month or per hour. Used only when the
+// model put the range in posting_stated but left the numeric fields empty.
+function amountsIn(text) {
+  const source = String(text || "");
+  const amounts = [];
+  for (const m of source.matchAll(/(\d{1,3}(?:[,.\s]\d{3})+|\d+(?:\.\d+)?)\s*([kK])?\b/g)) {
+    const n = Number(m[1].replace(/[,.\s](?=\d{3}\b)/g, "")) * (m[2] ? 1000 : 1);
+    if (n >= 10) amounts.push(n);
+  }
+  if (!amounts.length) return [];
+  const factor = /\b(per|a|\/)\s*(month|mo)\b|\bmonthly\b|mensual|mensuel|mensal/i.test(source)
+    ? 12
+    : /\b(per|an|\/)\s*(hour|hr)\b|\bhourly\b|por hora|de l'heure/i.test(source)
+      ? 2080
+      : 1;
+  return amounts.map((n) => Math.round(n * factor));
+}
+
+// A currency the posting shows next to its numbers, or none.
+const CURRENCY_SIGNS = [
+  [/\bC(?:A)?\$|\bCAD\b/i, "CAD"],
+  [/\bMX\$|\bMXN\b|\bpesos\b/i, "MXN"],
+  [/\bUS\$|\bUSD\b/i, "USD"],
+  [/R\$|\bBRL\b/i, "BRL"],
+  [/€|\bEUR\b/i, "EUR"],
+  [/£|\bGBP\b/i, "GBP"],
+];
+
+function currencyShownIn(text) {
+  const found = CURRENCY_SIGNS.find(([re]) => re.test(String(text || "")));
+  return found ? found[1] : null;
+}
+
+// "Most offers fall between the minimum and the midpoint of the range": the
+// realistic ceiling is the midpoint, not the top of the band.
+const MIDPOINT_RE =
+  /\b(most|majority|typically|usually|generally|expected to)\b[^.\n]{0,100}\b(between|from)\b[^.\n]{0,40}\b(minimum|min|low(er)? end|bottom|start(ing point)?)\b[^.\n]{0,40}\b(mid-?point|middle|mid)\b|\b(lower|bottom) half of (the|this) (range|band)\b/i;
+
 // Local models are unreliable at comparing two numeric ranges correctly
 // (observed: claiming "within" while also saying the posting's ceiling is
 // below the candidate's floor). Range comparison is pure arithmetic, so do
-// it ourselves instead of trusting the model's stated verdict.
-function compareSalary(salary, expectedSalary) {
+// it ourselves instead of trusting the model's stated verdict. The numbers
+// it uses are written back onto the result, so the seniority check below
+// reads the same ones.
+function compareSalary(salary, expectedSalary, { place = null, postingText = "" } = {}) {
   if (!salary) return salary;
+  const out = { ...salary };
+  const notes = [];
 
-  let min = salary.posting_stated_min;
-  let max = salary.posting_stated_max;
-  let currency = salary.posting_stated_currency;
-  let basisNote = "";
+  let min = toAmount(salary.posting_stated_min);
+  let max = toAmount(salary.posting_stated_max);
+  if (min == null && max == null && salary.posting_stated && !/not stated/i.test(salary.posting_stated)) {
+    const found = amountsIn(salary.posting_stated);
+    if (found.length) {
+      min = Math.min(...found);
+      max = Math.max(...found);
+    }
+  }
 
-  if (min == null && max == null) {
-    min = salary.estimated_market_min;
-    max = salary.estimated_market_max;
+  let currency = null;
+  if (min != null || max != null) {
+    // The model's code first, then a sign in the stated text, then the job's
+    // country: "84,000 to 156,000" in Ottawa is Canadian dollars.
+    currency = salary.posting_stated_currency || currencyShownIn(salary.posting_stated);
+    if (!currency && place && place.country && JOB_FIT_GEO.currencyOf(place.country)) {
+      currency = JOB_FIT_GEO.currencyOf(place.country);
+      out.currency_inferred = true;
+      notes.push(t("bg.currencyInferred", { currency, country: JOB_FIT_I18N.countryName(place.country) }));
+    }
+    out.posting_stated_min = min;
+    out.posting_stated_max = max;
+    out.posting_stated_currency = currency;
+
+    if (min != null && max != null && max > min && MIDPOINT_RE.test(postingText)) {
+      max = Math.round((min + max) / 2);
+      out.posting_realistic_max = max;
+      notes.push(t("bg.midpointNote", { max: `${JOB_FIT_I18N.formatNumber(max)} ${currency || ""}`.trim() }));
+    }
+  } else {
+    min = toAmount(salary.estimated_market_min);
+    max = toAmount(salary.estimated_market_max);
     currency = salary.estimated_market_currency;
-    basisNote = ` ${t("bg.salaryBasisNote")}`;
+    if (min != null || max != null) notes.push(t("bg.salaryBasisNote"));
   }
 
-  if (min == null && max == null) {
-    return { ...salary, vs_candidate_expectation: "unknown" };
-  }
+  const note = [salary.note, ...notes].filter(Boolean).join(" ").trim();
+  if (min == null && max == null) return { ...out, note, vs_candidate_expectation: "unknown" };
 
   // Annual on both sides: the schema asks the model for annual figures, and a
   // monthly expectation is converted here.
   const expectedRange = annualExpectation(expectedSalary, currency);
   if (!expectedRange || (expectedRange.min == null && expectedRange.max == null)) {
-    return { ...salary, vs_candidate_expectation: "unknown" };
+    return { ...out, note, vs_candidate_expectation: "unknown" };
   }
 
   let verdict;
@@ -794,8 +885,7 @@ function compareSalary(salary, expectedSalary) {
   } else {
     verdict = "within";
   }
-
-  return { ...salary, vs_candidate_expectation: verdict, note: `${salary.note || ""}${basisNote}`.trim() };
+  return { ...out, note, vs_candidate_expectation: verdict };
 }
 
 const SENIORITY_REGEX = /\b(senior|sr\.?|staff|lead|principal|architect|l[íi]der|arquitect[oa]|s[êe]nior|principal|chef d'[ée]quipe|architecte|especialista)\b/i;
@@ -815,7 +905,7 @@ function checkSeniorityMismatch(postingText, salary, expectedSalary) {
   // model's hunch about the role's seniority produced the estimate, the estimate
   // tripped the flag, and the flag capped the score at 40. A posting that states
   // no salary gives us nothing to check, so it gets no flag.
-  const max = salary.posting_stated_max;
+  const max = toAmount(salary.posting_realistic_max) ?? toAmount(salary.posting_stated_max);
   const currency = salary.posting_stated_currency;
   if (max == null || !currency) return null;
 
@@ -832,23 +922,156 @@ function checkSeniorityMismatch(postingText, salary, expectedSalary) {
   return null;
 }
 
-// Backstop for the domain-flag score cap: the prompt asks the model to cap
-// its own score, but prompt-only guidance for this kind of conditional
-// arithmetic has already proven unreliable (see salary comparison above).
-// Enforce it here regardless of whether the model applied it itself.
-function applyScoreCaps(data, { domainFlags, seniorityFlag }) {
+// --- experience level -----------------------------------------------------------
+//
+// A "2+ years, academic experience acceptable" role scored 100 for someone
+// with eight: every skill matched, and nothing said the level was wrong.
+// Years are arithmetic, so it's checked here. The largest number of years the
+// posting asks for is used, so "5+ years of C++, 2+ of Python" reads as 5.
+
+const YEARS_RE = /(\d{1,2})\s*\+?\s*(?:(?:-|–|to|a|à)\s*\d{1,2}\s*)?(?:years?|yrs?|años|ans|anos)\b/gi;
+const EXPERIENCE_RE = /experien|exp\.|trayectoria|exp[ée]rience|experi[êe]ncia/i;
+const ENTRY_LEVEL_RE =
+  /\b(entry[- ]level|new grad(uate)?s?|recent (college )?graduates?|academic experience (is |will be )?(acceptable|accepted|considered|counts)|reci[ée]n egresad[oa]s?|nivel de entrada|d[ée]butant|jeune dipl[ôo]m[ée])\b/i;
+
+function candidateYears(profileText) {
+  const m = String(profileText || "").match(/(\d{1,2})\s*\+?\s*(?:years?|yrs?|años|ans|anos)\b/i);
+  return m ? Number(m[1]) : null;
+}
+
+function postingYears(postingText) {
+  const text = String(postingText || "");
+  const years = [];
+  for (const m of text.matchAll(YEARS_RE)) {
+    const around = text.slice(Math.max(0, m.index - 60), m.index + m[0].length + 60);
+    if (EXPERIENCE_RE.test(around)) years.push(Number(m[1]));
+  }
+  return years.length ? Math.max(...years) : null;
+}
+
+function checkLevel(postingText, profileText) {
+  const yours = candidateYears(profileText);
+  if (yours == null || yours < 4) return null;
+  const asked = postingYears(postingText);
+  if (asked != null && asked <= Math.floor(yours / 2)) return t("bg.belowLevel", { years: asked, yours });
+  if (ENTRY_LEVEL_RE.test(postingText) && (asked == null || asked < yours - 2)) return t("bg.belowLevelEntry", { yours });
+  return null;
+}
+
+// --- gaps that are really the job's location ----------------------------------
+//
+// Location is screened by the keyword rules (must be local, no relocation),
+// and the candidate is relocating: "Tijuana-to-Mountain-View relocation" or
+// "San Mateo, CA" as a required gap only dragged the score down twice.
+const LOCATION_GAP_RE =
+  /\b(relocat\w*|commut\w*|based in|located in|local to|live (in|near|within)|resid\w+ (in|near|within)|on-?site in|in[- ]office in)\b|^[A-Z][\w .'-]+,\s*[A-Z]{2}$/i;
+
+function dropLocationGaps(data, location) {
+  const city = String(location || "").split(/[,(|·•]/)[0].trim();
+  const cityRe = city.length >= 3 ? new RegExp(`\\b${city.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}\\b`, "i") : null;
+  const isLocation = (gap) => LOCATION_GAP_RE.test(String(gap).trim()) || Boolean(cityRe && cityRe.test(String(gap)));
+  const keep = (list) => (Array.isArray(list) ? list.filter((g) => !isLocation(g)) : list);
+  return { ...data, gaps: keep(data.gaps), required_gaps: keep(data.required_gaps) };
+}
+
+// --- score caps -----------------------------------------------------------------
+//
+// Backstop for the caps the prompt describes: prompt-only guidance for this
+// kind of conditional arithmetic has proven unreliable (see salary comparison
+// above), so they're enforced here whether or not the model applied them.
+//
+// The domain-flag cap is for a flagged skill the job really requires. It used
+// to fire on any required gap whose text merely contained the flag as a
+// substring, which capped a 90 at 50 for "familiarity with … OpenCV, NumPy,
+// SciPy, scikit-image, or PIL" (a low bar, and one of five alternatives), and
+// matched "go" inside "Google Test". Now a flag counts only as a whole word,
+// and a requirement that's worded as a low bar or offered as one of several
+// alternatives costs 10 points instead of the cap.
+
+const LOW_BAR_RE =
+  /\b(familiar(ity)? with|exposure to|working knowledge|introductory|basic (knowledge|understanding|familiarity|experience)|some (experience|exposure|familiarity|knowledge)|awareness of|a plus|nice to have|bonus)\b/i;
+const ALTERNATIVES_RE = /\bor\b|\band\/or\b|\bsuch as\b|\be\.g\.|\bfor example\b|\bone or more of\b|\bany of\b/i;
+// How close an "or" must be to count as listing alternatives to the term,
+// rather than being some other "or" in a long sentence.
+const ALTERNATIVES_REACH = 60;
+const SOFT_GAP_COST = 10;
+
+function termRegex(term) {
+  const source = JOB_FIT_KEYWORDS.phraseToPattern(term);
+  return source ? new RegExp(source, JOB_FIT_KEYWORDS.isShortToken(term) ? "" : "i") : null;
+}
+
+// The sentences of the posting a term appears in.
+function sentencesWith(text, re) {
+  return String(text || "")
+    .split(/(?<=[.;!?])\s+|\n+/)
+    .filter((s) => re.test(s));
+}
+
+// A gap phrase the model wrote: short, so anywhere in it counts.
+function isSoftGap(text) {
+  return LOW_BAR_RE.test(text) || ALTERNATIVES_RE.test(text);
+}
+
+// A sentence of the posting: a low bar anywhere in it, or alternatives listed
+// right around the term itself.
+function isSoftMention(sentence, re) {
+  if (LOW_BAR_RE.test(sentence)) return true;
+  const m = sentence.match(re);
+  if (!m) return false;
+  const around = sentence.slice(Math.max(0, m.index - ALTERNATIVES_REACH), m.index + m[0].length + ALTERNATIVES_REACH);
+  return ALTERNATIVES_RE.test(around);
+}
+
+// For each domain flag that shows up in a required gap: "hard" when the job
+// really requires it, "soft" when every mention (the gap itself, or every
+// sentence of the posting that names it) is a low bar or one of several
+// alternatives.
+function classifyFlagGaps(domainFlags, requiredGaps, postingText) {
+  const hard = [];
+  const soft = [];
+  (domainFlags || []).forEach((flag) => {
+    const re = termRegex(flag);
+    if (!re) return;
+    const gaps = (requiredGaps || []).map(String).filter((g) => {
+      if (re.test(g)) return true;
+      // "Kubernetes" as the gap for a "Kubernetes operators" flag.
+      const gapRe = g.split(/\s+/).length <= 3 ? termRegex(g) : null;
+      return Boolean(gapRe && gapRe.test(flag));
+    });
+    if (!gaps.length) return;
+    const mentions = sentencesWith(postingText, re);
+    const lowBar = gaps.every(isSoftGap) || (mentions.length > 0 && mentions.every((s) => isSoftMention(s, re)));
+    (lowBar ? soft : hard).push(flag);
+  });
+  return { hard, soft };
+}
+
+function verdictFor(score) {
+  if (typeof score !== "number") return null;
+  if (score >= JOB_FIT_UI.GREEN_FROM) return "apply";
+  if (score >= JOB_FIT_UI.AMBER_FROM) return "borderline";
+  return "skip";
+}
+
+function applyScoreCaps(data, { domainFlags, seniorityFlag, levelFlag, postingText = "" }) {
   let score = data.score;
   const capReasons = [];
 
   if (typeof score === "number" && domainFlags && domainFlags.length && Array.isArray(data.required_gaps)) {
-    const requiredGapsLower = data.required_gaps.map((g) => String(g).toLowerCase());
-    const uncoveredDomainFlag = domainFlags.some((flag) =>
-      requiredGapsLower.some((g) => g.includes(flag.toLowerCase()) || flag.toLowerCase().includes(g))
-    );
-    if (uncoveredDomainFlag && score > 50) {
+    const { hard, soft } = classifyFlagGaps(domainFlags, data.required_gaps, postingText);
+    if (hard.length && score > 50) {
       score = 50;
       capReasons.push(t("bg.capDomain"));
+    } else if (!hard.length && soft.length) {
+      score = Math.max(0, score - SOFT_GAP_COST);
+      capReasons.push(t("bg.capSoftDomain", { terms: soft.join(", "), points: SOFT_GAP_COST }));
     }
+  }
+
+  if (typeof score === "number" && levelFlag && score > 70) {
+    score = 70;
+    capReasons.push(t("bg.capBelowLevel"));
   }
 
   if (typeof score === "number" && seniorityFlag && score > 40) {
@@ -860,12 +1083,28 @@ function applyScoreCaps(data, { domainFlags, seniorityFlag }) {
   // so seeing only the capped number leaves no way to judge whether the cap was
   // fair — "40, seniority/comp mismatch" reads very differently once you know
   // the model scored it 78.
+  //
+  // The verdict follows the final score. The model's own verdict drifted from
+  // it (a 90 came back "borderline" because sponsorship wasn't mentioned), and
+  // the thresholds are the same ones the card and Tracked jobs colour by.
+  const verdict = verdictFor(score) || data.verdict;
   return {
     ...data,
     score,
+    verdict,
+    model_verdict: data.verdict && data.verdict !== verdict ? data.verdict : undefined,
     raw_score: capReasons.length ? data.score : undefined,
     score_cap_reasons: capReasons.length ? capReasons : undefined,
   };
+}
+
+// "Sponsorship not stated" is worth knowing before applying — when the
+// candidate needs sponsorship in the posting's country — but it's a warning
+// beside the score, not a reason to lower the verdict.
+function sponsorshipWarning(data, jobSearch, place) {
+  if (!data || data.sponsorship !== "unstated" || !place || !place.country) return null;
+  const auth = (jobSearch && jobSearch.workAuth) || {};
+  return auth[JOB_FIT_GEO.authCountry(place.country)] === "sponsor" ? t("bg.sponsorshipUnstated") : null;
 }
 
 // expectedSalary arrives in the message rather than being read from storage
@@ -873,21 +1112,35 @@ function applyScoreCaps(data, { domainFlags, seniorityFlag }) {
 // independent read could land on a different profile if the user switched in
 // between, scoring a posting against one profile's keywords and another's
 // salary expectations.
-async function evaluateWithLmStudio({ profile, postingText, domainFlags, expectedSalary, jobSearch, place }, signal, { bulk = false } = {}) {
+async function evaluateWithLmStudio(
+  { profile, postingText, domainFlags, learningFlags, coreWorkOnly, expectedSalary, jobSearch, place, location },
+  signal,
+  { bulk = false } = {}
+) {
   await i18nReady;
-  const { prompt, truncated } = buildUserPrompt(profile, postingText, expectedSalary, domainFlags, { jobSearch, place });
+  const { prompt, truncated } = buildUserPrompt(profile, postingText, expectedSalary, domainFlags, {
+    jobSearch,
+    place,
+    learningFlags,
+    coreWorkOnly,
+  });
   const result = await callLmStudio(systemPrompt(), prompt, { signal, bulk });
 
   if (result.ok && result.data) {
-    // Surfaced in the banner: a score produced from a partial posting is worth
+    // Surfaced in the result panel: a score produced from a partial posting is worth
     // knowing about, and silently dropping text is what made this a bug.
     result.data.input_truncated = truncated;
     if (result.data.salary) {
-      result.data.salary = compareSalary(result.data.salary, expectedSalary);
+      result.data.salary = compareSalary(result.data.salary, expectedSalary, { place, postingText });
     }
     const seniorityFlag = checkSeniorityMismatch(postingText, result.data.salary, expectedSalary);
+    const levelFlag = checkLevel(postingText, profile);
     result.data.seniority_flag = seniorityFlag;
-    result.data = applyScoreCaps(result.data, { domainFlags, seniorityFlag });
+    result.data.level_flag = levelFlag;
+    result.data = dropLocationGaps(result.data, location);
+    result.data = applyScoreCaps(result.data, { domainFlags, seniorityFlag, levelFlag, postingText });
+    result.data.sponsorship_warning = sponsorshipWarning(result.data, jobSearch, place);
+    result.data.core_work_only = coreWorkOnly && coreWorkOnly.length ? coreWorkOnly : undefined;
   }
 
   return result;
@@ -1066,7 +1319,7 @@ function runCancellable(callId, run) {
 // Fixed fields rather than one free-text summary, assembled into text in
 // code. With a single "summary" string every model chose its own layout and
 // its own idea of what mattered — and some reported a score, which the model
-// is never given and was copying from JobFit's own banner text on the page.
+// is never given and was copying from JobFit's own result text on the page.
 // Fields make the brief look the same whichever model wrote it, and an
 // explicit "not stated" is kept visible rather than silently missing.
 const SUMMARIZE_SYSTEM_PROMPT = `You condense a job posting into a structured brief for another AI assistant that will assess candidate fit. That assistant already has the candidate's full profile/CV — it only needs the posting, stripped of bloat.
@@ -1156,7 +1409,7 @@ async function setBadge(count, state) {
   try {
     await chrome.action.setBadgeText({ text: count ? String(count) : "" });
     if (count) {
-      await chrome.action.setBadgeBackgroundColor({ color: state === "paused" ? "#b7791f" : "#3574d6" });
+      await chrome.action.setBadgeBackgroundColor({ color: state === "paused" ? "#9a6300" : "#2f6bd0" });
     }
   } catch (err) {
     // Badge is cosmetic; never let it break processing.
@@ -1232,6 +1485,8 @@ async function screenQueuedItem(item) {
     return {
       hardReject: null,
       domainFlags: item.domainFlags || [],
+      learningFlags: item.learningFlags || [],
+      coreWorkOnly: [],
       softWarnings: item.softWarnings || [],
       place: { country: place.country, region: place.region, arrangement: place.arrangement },
     };
@@ -1276,6 +1531,8 @@ async function runQueuedEvaluation(item) {
         score: 0,
         verdict: "hard reject",
         domainFlags: [],
+        learningFlags: [],
+        coreWorkOnly: [],
         softWarnings: [],
       });
     } catch (err) {
@@ -1290,9 +1547,12 @@ async function runQueuedEvaluation(item) {
       profile: snapshot.profile,
       postingText: item.postingText,
       domainFlags: screened.domainFlags,
+      learningFlags: screened.learningFlags,
+      coreWorkOnly: screened.coreWorkOnly,
       expectedSalary: snapshot.expectedSalary,
       jobSearch: snapshot.jobSearch,
       place: screened.place,
+      location: item.location,
     },
     undefined,
     // Set on re-evaluations queued in bulk from Tracked jobs: eligible for Flex.
@@ -1314,7 +1574,11 @@ async function runQueuedEvaluation(item) {
       score: result.data.score,
       verdict: result.data.verdict,
       domainFlags: screened.domainFlags,
-      softWarnings: screened.softWarnings,
+      learningFlags: screened.learningFlags || [],
+      coreWorkOnly: screened.coreWorkOnly || [],
+      // "Sponsorship not stated" sits with the other amber warnings, where
+      // it's something to ask about, not a lower verdict.
+      softWarnings: [...(screened.softWarnings || []), ...(result.data.sponsorship_warning ? [result.data.sponsorship_warning] : [])],
     });
   } catch (err) {
     return { ok: false, failure: "storage", error: t("bg.scoredNotSaved", { error: err.message }) };
@@ -1413,13 +1677,13 @@ chrome.runtime.onInstalled.addListener((details) => {
 
 // Evaluating without the popup has nowhere to show an error, so it goes on
 // the icon: a red "!" for this tab, with the reason as the tooltip.
-async function evaluateTab(tab) {
+async function evaluateTab(tab, { ignoreCache = false } = {}) {
   if (!tab || tab.id == null) return;
   await i18nReady;
-  const started = await startEvaluation(tab.id);
+  const started = await startEvaluation(tab.id, { ignoreCache });
   if (started.ok) return;
   try {
-    await chrome.action.setBadgeBackgroundColor({ tabId: tab.id, color: "#c0392b" });
+    await chrome.action.setBadgeBackgroundColor({ tabId: tab.id, color: "#b3261e" });
     await chrome.action.setBadgeText({ tabId: tab.id, text: "!" });
     await chrome.action.setTitle({ tabId: tab.id, title: `JobFit — ${started.error}` });
     setTimeout(() => {
@@ -1440,35 +1704,50 @@ chrome.commands.onCommand.addListener((command, tab) => {
 });
 
 // ---------------------------------------------------------------------------
-// On-page button (float.js), opt-in per site.
+// On-page button (float.js), opt-in per site or per job board.
 //
 // JobFit reads nothing on a page until asked, and installs with no access to
-// job boards. The button needs to run on a site before anyone clicks, so each
-// site is switched on in the popup, which asks Chrome for that site alone
-// (optional_host_permissions). The sites live in `floatingButtonSites`
-// (origins), and one dynamically registered content script covers exactly
-// the ones whose permission is still held — revoking it in Chrome's own
-// settings takes the button away too.
+// job boards. The button needs to run on a site before anyone clicks, so it's
+// switched on in the popup or Settings, which ask Chrome for exactly that
+// (optional_host_permissions): one site (`floatingButtonSites`, origins), or
+// a whole job board (`floatingButtonBoards`, ids from boards.js) — every
+// Indeed country, every Workday employer — as one permission. One dynamically
+// registered content script covers exactly what's still granted, so revoking
+// access in Chrome's own settings takes the button away too.
 // ---------------------------------------------------------------------------
 
 const FLOAT_SCRIPT_ID = "jobfit-float";
+const FLOAT_FRAME_SCRIPT_ID = "jobfit-float-frame";
 
 // The extractors and job identity (to know which job is on screen), the
-// stores (to show its saved score), and the messages. content.js is left out:
-// it starts an evaluation the moment it loads, and the button only does that
-// on a click.
+// stores (to show its saved score), the card and the messages. content.js is
+// left out: it starts an evaluation the moment it loads, and the button only
+// does that on a click.
 function floatFiles() {
   const pageFiles = JOB_FIT_CONTENT_FILES.filter((f) => f !== "content.js" && f !== "screening.js" && f !== "geo.js");
-  return ["locales/en.js", "locales/es.js", "locales/fr.js", "locales/pt.js", ...pageFiles, "float.js"];
+  return ["locales/en.js", "locales/es.js", "locales/fr.js", "locales/pt.js", ...pageFiles, "boards.js", "float.js"];
+}
+
+// A Greenhouse board embedded in a company's career site: just enough to say
+// which job the embed shows (float-frame.js).
+function floatFrameFiles() {
+  return ["extractors/text.js", "extractors/greenhouse.js", "jobkey.js", "float-frame.js"];
 }
 
 function sitePattern(origin) {
   return `${origin}/*`;
 }
 
-async function floatSites() {
-  const { floatingButtonSites } = await chrome.storage.local.get("floatingButtonSites");
-  return Array.isArray(floatingButtonSites) ? floatingButtonSites : [];
+async function floatState() {
+  const { floatingButtonSites, floatingButtonBoards } = await chrome.storage.local.get(["floatingButtonSites", "floatingButtonBoards"]);
+  return {
+    sites: Array.isArray(floatingButtonSites) ? floatingButtonSites : [],
+    boards: Array.isArray(floatingButtonBoards) ? floatingButtonBoards.filter((id) => JOB_FIT_BOARDS.byId(id)) : [],
+  };
+}
+
+async function floatEnabledFor(url) {
+  return JOB_FIT_BOARDS.enabledFor(url, await floatState());
 }
 
 // Serialized: registering while an earlier call is still unregistering would
@@ -1478,25 +1757,46 @@ let floatSync = Promise.resolve();
 function syncFloatScripts() {
   floatSync = floatSync
     .then(async () => {
-      const sites = await floatSites();
-      const granted = [];
+      const { sites, boards } = await floatState();
+      const grantedSites = [];
       for (const origin of sites) {
-        if (await chrome.permissions.contains({ origins: [sitePattern(origin)] })) granted.push(origin);
+        if (await chrome.permissions.contains({ origins: [sitePattern(origin)] })) grantedSites.push(origin);
       }
-      if (granted.length !== sites.length) await chrome.storage.local.set({ floatingButtonSites: granted });
+      const grantedBoards = [];
+      for (const id of boards) {
+        if (await chrome.permissions.contains({ origins: JOB_FIT_BOARDS.byId(id).patterns })) grantedBoards.push(id);
+      }
+      if (grantedSites.length !== sites.length || grantedBoards.length !== boards.length) {
+        await chrome.storage.local.set({ floatingButtonSites: grantedSites, floatingButtonBoards: grantedBoards });
+      }
       try {
-        await chrome.scripting.unregisterContentScripts({ ids: [FLOAT_SCRIPT_ID] });
+        await chrome.scripting.unregisterContentScripts({ ids: [FLOAT_SCRIPT_ID, FLOAT_FRAME_SCRIPT_ID] });
       } catch (err) {
-        /* wasn't registered */
+        // Not both registered; take away whichever was.
+        await chrome.scripting.unregisterContentScripts({ ids: [FLOAT_SCRIPT_ID] }).catch(() => {});
+        await chrome.scripting.unregisterContentScripts({ ids: [FLOAT_FRAME_SCRIPT_ID] }).catch(() => {});
       }
-      if (!granted.length) return;
+      const matches = Array.from(
+        new Set([...grantedSites.map(sitePattern), ...grantedBoards.flatMap((id) => JOB_FIT_BOARDS.byId(id).patterns)])
+      );
+      if (!matches.length) return;
       await chrome.scripting.registerContentScripts([
         {
           id: FLOAT_SCRIPT_ID,
-          matches: granted.map(sitePattern),
+          matches,
           js: floatFiles(),
           runAt: "document_idle",
           allFrames: false,
+          persistAcrossSessions: true,
+        },
+        // Embedded boards: runs in any greenhouse.io embed frame, asks whether
+        // the page around it is switched on, and reads nothing if not.
+        {
+          id: FLOAT_FRAME_SCRIPT_ID,
+          matches: ["https://*.greenhouse.io/embed/*"],
+          js: floatFrameFiles(),
+          runAt: "document_idle",
+          allFrames: true,
           persistAcrossSessions: true,
         },
       ]);
@@ -1505,16 +1805,18 @@ function syncFloatScripts() {
   return floatSync;
 }
 
+// Shown straight away, without reloading the tab.
+function showFloatNow(tabId) {
+  if (tabId != null) chrome.scripting.executeScript({ target: { tabId }, files: floatFiles() }).catch(() => {});
+}
+
 async function setFloatSite(origin, enabled, tabId) {
   if (!/^https?:\/\/[^/]+$/.test(String(origin || ""))) return { ok: false };
-  const sites = await floatSites();
+  const { sites } = await floatState();
   const next = enabled ? Array.from(new Set([...sites, origin])) : sites.filter((s) => s !== origin);
   await chrome.storage.local.set({ floatingButtonSites: next, floatPending: null });
   await syncFloatScripts();
-  if (enabled && tabId != null) {
-    // Shown straight away, without reloading the tab.
-    chrome.scripting.executeScript({ target: { tabId }, files: floatFiles() }).catch(() => {});
-  }
+  if (enabled) showFloatNow(tabId);
   if (!enabled) {
     // Give the access back. Fails harmlessly for a site the manifest itself
     // needs (greenhouse.io).
@@ -1523,13 +1825,47 @@ async function setFloatSite(origin, enabled, tabId) {
   return { ok: true, sites: next };
 }
 
+// Switches whole boards on or off. A site the board now covers loses its own
+// entry and permission: the board's is the one that counts, and a leftover
+// grant would be access nothing uses.
+async function setFloatBoards(ids, enabled, tabId) {
+  const valid = (ids || []).filter((id) => JOB_FIT_BOARDS.byId(id));
+  if (!valid.length) return { ok: false };
+  const state = await floatState();
+  const boards = enabled ? Array.from(new Set([...state.boards, ...valid])) : state.boards.filter((id) => !valid.includes(id));
+  let sites = state.sites;
+  if (enabled) {
+    const covered = sites.filter((origin) => {
+      const board = JOB_FIT_BOARDS.boardForUrl(origin);
+      return board && valid.includes(board.id);
+    });
+    sites = sites.filter((origin) => !covered.includes(origin));
+    covered.forEach((origin) => chrome.permissions.remove({ origins: [sitePattern(origin)] }).catch(() => {}));
+  }
+  await chrome.storage.local.set({ floatingButtonBoards: boards, floatingButtonSites: sites, floatPending: null });
+  await syncFloatScripts();
+  if (enabled) showFloatNow(tabId);
+  if (!enabled) {
+    valid
+      .map(JOB_FIT_BOARDS.byId)
+      .filter((board) => !board.alwaysGranted)
+      .forEach((board) => chrome.permissions.remove({ origins: board.patterns }).catch(() => {}));
+  }
+  return { ok: true, sites, boards };
+}
+
 // The popup asks for the permission; if Chrome's prompt closes the popup
 // before it hears the answer, this finishes the job.
 chrome.permissions.onAdded.addListener(async (added) => {
   const { floatPending } = await chrome.storage.local.get("floatPending");
   if (!floatPending || Date.now() - floatPending.ts > 5 * 60 * 1000) return;
-  if ((added.origins || []).includes(sitePattern(floatPending.origin))) {
+  const origins = added.origins || [];
+  if (floatPending.origin && origins.includes(sitePattern(floatPending.origin))) {
     setFloatSite(floatPending.origin, true, floatPending.tabId);
+  } else if (Array.isArray(floatPending.boards)) {
+    const boards = floatPending.boards.map(JOB_FIT_BOARDS.byId).filter(Boolean);
+    const allGranted = boards.every((board) => board.alwaysGranted || board.patterns.every((p) => origins.includes(p)));
+    if (boards.length && allGranted) setFloatBoards(floatPending.boards, true, floatPending.tabId);
   }
 });
 
@@ -1559,16 +1895,55 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
     });
     return true;
   }
-  // The on-page button's click: exactly what the keyboard shortcut does.
+  // The on-page card's click: exactly what the keyboard shortcut does. Its
+  // Re-evaluate asks for the saved result to be skipped.
   if (message?.type === "JOB_FIT_EVALUATE_TAB") {
-    if (sender.tab) evaluateTab(sender.tab);
+    if (sender.tab) evaluateTab(sender.tab, { ignoreCache: Boolean(message.ignoreCache) });
     sendResponse({ ok: Boolean(sender.tab) });
+    return false;
+  }
+  // card.js in a frame (an embedded Greenhouse board) draws nothing itself:
+  // its calls go to the card in the page's top frame. Through here rather
+  // than postMessage, which the embedding site could read — the result says
+  // how well its own posting fits your CV.
+  if (message?.type === "JOB_FIT_CARD_RELAY") {
+    if (sender.tab && sender.frameId !== 0 && typeof message.method === "string") {
+      chrome.tabs
+        .sendMessage(sender.tab.id, { type: "JOB_FIT_CARD_CALL", method: message.method, args: message.args || [] }, { frameId: 0 })
+        .catch(() => {});
+    }
     return false;
   }
   if (message?.type === "JOB_FIT_FLOAT_SITE") {
     const origin = message.origin || (sender.tab && sender.tab.url ? new URL(sender.tab.url).origin : null);
     setFloatSite(origin, Boolean(message.enabled), message.tabId ?? (sender.tab && sender.tab.id)).then(sendResponse);
     return true;
+  }
+  if (message?.type === "JOB_FIT_FLOAT_BOARD") {
+    setFloatBoards(message.boards, Boolean(message.enabled), message.tabId ?? (sender.tab && sender.tab.id)).then(sendResponse);
+    return true;
+  }
+  // float-frame.js, in a Greenhouse board embedded in a company's site: is
+  // the page around it switched on? Asked before it reads anything.
+  if (message?.type === "JOB_FIT_FRAME_ENABLED") {
+    if (!sender.tab || sender.frameId === 0) {
+      sendResponse(false);
+      return false;
+    }
+    floatEnabledFor(sender.tab.url).then(sendResponse);
+    return true;
+  }
+  // …and which job it shows, for the card in the page's top frame.
+  if (message?.type === "JOB_FIT_FRAME_JOB") {
+    if (sender.tab && sender.frameId !== 0 && message.job && typeof message.job.jobKey === "string") {
+      floatEnabledFor(sender.tab.url).then((on) => {
+        if (!on) return;
+        chrome.tabs
+          .sendMessage(sender.tab.id, { type: "JOB_FIT_FRAME_JOB", job: message.job }, { frameId: 0 })
+          .catch(() => {});
+      });
+    }
+    return false;
   }
   if (message?.type === "JOB_FIT_PROBE") {
     recordProbe(message.probe).then(() => sendResponse({ ok: true }));

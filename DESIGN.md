@@ -68,8 +68,8 @@ A Chrome/Edge extension that reads a job posting on the current tab, applies det
 job-fit-evaluator/
 ├── manifest.json
 ├── background.js        # API call, storage access
-├── content.js           # DOM extraction + banner injection
-├── content.css          # banner styles
+├── content.js           # DOM extraction, screening, queueing; results go to card.js
+├── card.js              # JOB_FIT_CARD — the on-page card and result panel (shadow root)
 ├── defaults.js          # JOB_FIT_DEFAULTS — shipped defaults
 ├── i18n.js              # JOB_FIT_I18N — interface language, t(), dates/numbers
 ├── locales/             # en.js, es.js, fr.js, pt.js — every visible string
@@ -86,9 +86,16 @@ job-fit-evaluator/
 ├── wizard.html          # setup wizard (first install, new profile, re-run)
 ├── wizard.js
 ├── lmstudio-ui.js       # shared by popup + wizard: messaging, /v1/models probe
-├── float.js             # on-page button (opt-in per site, registered dynamically)
-├── popup.html
+├── ui.css               # shared tokens (colour, type, radius, dark mode) + base controls
+├── ui-shared.js         # JOB_FIT_UI — score bands, live-region announce, two-step confirm
+├── float.js             # on-page button (opt-in per site or job board, registered dynamically)
+├── float-frame.js       # reads the job in an embedded Greenhouse board for the top frame's card
+├── boards.js            # JOB_FIT_BOARDS — job boards, their match patterns, "is it on here?"
+├── popup.html           # the job in this tab, readiness, where next (no settings)
 ├── popup.js
+├── options.html         # Settings (options_ui, opened in a tab)
+├── options.js
+├── backup.js            # JOB_FIT_BACKUP — backup, restore, extraction-coverage report
 ├── extractors/
 │   ├── greenhouse.js    # site-specific selectors
 │   ├── lever.js
@@ -278,6 +285,80 @@ A second, separate editable list — **not** a return to the old soft-warning/po
 
 ---
 
+## Scoring corrections from testing (2026-09-30)
+
+A real test run turned up scores that were wrong in ways the code, not the model,
+was responsible for. The VIAVI "Software Development Engineer (Image Processing)"
+posting is the clearest: the model scored it 90–92, the domain-flag cap cut it to 50,
+and the right answer was about 80, apply.
+
+- **The domain-flag cap only fires for a skill the job really requires.** It used to
+  check whether a required gap's text merely *contained* a flag as a substring, so
+  "Familiarity with common image processing and numerical libraries such as OpenCV,
+  NumPy, SciPy, scikit-image, or PIL" capped at 50 because OpenCV is a flag. That
+  requirement is a low bar and offers five alternatives. Now, for each flag in a
+  required gap:
+  - The flag must appear in the gap as a whole word (the same compiler as screening).
+    "go" used to match inside "Google Test".
+  - It's **soft** when the gap is worded as a low bar ("familiarity with", "exposure
+    to", "working knowledge", "introductory", "basic understanding", "a plus") or
+    lists alternatives ("or", "and/or", "such as", "e.g."). It's also soft when every
+    sentence of the posting that names it is. For alternatives, the "or" must be
+    within ~60 characters of the term, so an unrelated "or" in a long sentence
+    doesn't count.
+  - A **hard** hit caps at 50, as before. Soft hits alone cost **10 points**, and the
+    reason says so. The model's own score is kept as `raw_score` either way.
+- **Learning list** (`keywords.learningFlags`, Settings › Screening rules). Skills
+  being picked up are given to the model as "a minor gap at most, never a cap". A term
+  on it is taken off the domain flags, and it never reaches the cap. It joins the
+  profile fingerprint only once it has something in it, so adding the list didn't
+  mark every saved score out of date.
+- **Keyword matching.**
+  - A hyphen counts as part of a word, so "go" no longer matches "go-to-market", and
+    a trailing `+` or `#` does too, so "C" isn't "C++" or "C#".
+  - One- or two-letter phrases with a capital ("Go", "R", "C") match case-sensitively.
+  - A few words skip phrases where they mean something else (`FALSE_FRIENDS`):
+    "cloud" skips "point cloud" and "word cloud", and "go" skips "go live", "go to".
+- **The verdict comes from the final score** (75 / 55, the card's colour bands), not
+  from the model. A 90 came back "borderline" only because sponsorship wasn't stated.
+  The model's word is kept as `model_verdict` when it differs.
+- **"Sponsorship not stated"** is added to the amber warnings when the candidate needs
+  sponsorship in the posting's country, and nowhere else.
+- **Location is never a gap.** Gaps naming relocation, commuting, "based in", a bare
+  "City, ST" or the posting's own city are dropped, and the prompt says so. Location
+  matters only through the keyword rules (must be local, no relocation).
+- **Salary.**
+  - Amounts the model returned as strings ("140,000", "140k") are read as numbers. A
+    string compared with a number is always false, which is how a $140K ceiling came
+    out "within" a $160K floor.
+  - When the numeric fields are empty, the amounts are read from `posting_stated`.
+  - A missing currency is taken from a sign in the text (C$, MX$…), then from the
+    job's country: "84,000 to 156,000" in Ottawa is CAD, and the note says it was
+    inferred.
+  - "Most offers fall between the minimum and the midpoint" makes the midpoint the
+    realistic top (`posting_realistic_max`).
+- **Experience level.** The largest number of years the posting asks for, next to
+  the word "experience", against the first number of years in the profile. Asking
+  for half or less (2 against 8), or entry-level / new-graduate wording, flags
+  "likely below your level" and caps at **70**.
+- **Requirements and core work diverge.** `screening.js` splits the posting on its
+  headings (Requirements / Qualifications vs. Responsibilities / What you'll do). A
+  domain flag the work section describes but the requirements never name is flagged
+  as a heads-up and given to the model.
+- **Hard rejects that were missed:**
+  - "does not **currently** sponsor … visas" (an adverb slipped past the old pattern).
+  - "must not / do not require sponsorship now or in the future".
+  - A bare "now or in the future" is still deliberately not a pattern: it would
+    reject every posting whose application form asks "Will you now or in the future
+    require sponsorship?".
+  - Roblox's "may not be able to employ candidates who have … certain U.S. visa
+    categories" is an amber warning.
+  - GE HealthCare's "will only employ those who are legally authorized" stays a
+    warning, by decision: employers who write it often still transfer visas.
+- **Scoring the full posting** was already the case: evaluations send the extracted
+  text, never a brief, and postings over 12,000 characters lose part of the middle,
+  never the end, where the legal boilerplate sits.
+
 ## Layer 2 — local model scoring (only if Layer 1 passes)
 
 > **Alternatives in requirements** (found in testing, 2026-09-17): the model was
@@ -431,7 +512,7 @@ Expected salary is **three** dedicated structured fields (min/max for USD, CAD, 
 - **`extractJson()` falls back to scanning `reasoning_content` for a balanced `{...}` JSON object when `content` comes back empty.** Two different "thinking" models (a Gemma variant and a Qwen variant) were both observed writing the complete, correct final JSON answer *inside* their own reasoning trace and never separately emitting it as `content` before stopping — `finish_reason` can even say `"stop"` (a clean finish) while `content` is still `""`. The fallback scans for balanced-brace `{...}` spans (not just first-`{`-to-last-`}`, which would span unrelated braces in surrounding prose) and tries each from last to first, since a later block is more likely to be the model's final corrected answer than an earlier draft it talked itself through on the way there.
 - **Known limitation:** the local model extracts requirements much more reliably from bulleted postings than from narrative/prose ones — a prose-summarized posting scores noticeably worse than the full raw text. "Evaluate this tab" always uses the full extracted text for this reason. "Summarize this tab" (below) produces a condensed brief for pasting into a *different* LLM that already has your profile — don't feed that condensed output back into this tool's own evaluation, and expect any LLM (local or not) to do worse on a summarized posting than the original.
 
-### Candidate profiles (multiple, stored, editable in popup)
+### Candidate profiles (multiple, stored, editable in Settings)
 
 The tool holds **a list of profiles**, one per person (or per job family for the
 same person), selected from a dropdown at the top of the popup. Added so a
@@ -441,7 +522,8 @@ have postings evaluated against their own CV without overwriting the first.
 **A profile owns:** the candidate text, `expectedSalary` per currency, and all
 three keyword lists (hard rejects, warnings, domain flags).
 
-**Popup layout.** Everything is collapsed by default — profile management,
+**Popup layout (superseded 2026-09-28 — see "Settings page and a slimmer popup").**
+Everything was collapsed by default — profile management,
 the CV textarea, LM Studio, expected salary, and the three keyword lists — so
 the popup opens
 short and you expand only what you're editing. The profile **dropdown is the
@@ -688,7 +770,7 @@ Dispatch by hostname, fall back to generic. Log which extractor fired.
 ## Queue
 
 Clicking **Evaluate this tab** adds the posting to a serial queue instead of
-running it there and then. Up to 10 jobs; click through a search page, queue
+running it there and then. Up to 50 jobs; click through a search page, queue
 them all, come back later.
 
 ### Why the queue owns the work
@@ -833,6 +915,52 @@ What stayed from that work:
 - **One code path:** starting an evaluation (injecting the page scripts, including into
   Greenhouse iframes) lives in `inject.js`, shared by the popup and the service worker.
 
+### On-page button for whole job boards (2026-09-28)
+
+One site at a time didn't fit how job boards are built. Indeed is a subdomain per
+country, LinkedIn's public job pages are too, and Workday gives every employer its own
+tenant, so "every Workday job" was dozens of prompts. `boards.js` lists the boards with
+one match pattern each:
+
+| Board | Pattern |
+|---|---|
+| LinkedIn | `https://*.linkedin.com/*` |
+| Indeed | `https://*.indeed.com/*` |
+| Greenhouse | `https://*.greenhouse.io/*` |
+| Workday | `https://*.myworkdayjobs.com/*` |
+
+A board is switched on as a whole. The ids are in `floatingButtonBoards`, next to
+`floatingButtonSites` (origins).
+
+- **One prompt.** Settings lists the boards with **Turn on for all job boards**, which
+  asks for every pattern in one `permissions.request`. In the popup, on a page of a
+  known board, the toggle offers the whole board ("on all LinkedIn job pages") instead
+  of the one site. Greenhouse is already in the manifest's `host_permissions`, so it's
+  granted without a prompt and can't be given back. Turning it off just stops the
+  button.
+- **Covered sites fold in.** Turning a board on removes any origin it covers from the
+  site list and gives that origin's own permission back, so no grant is left that
+  nothing uses. `permissions.onAdded` finishes a board grant if Chrome's prompt closed
+  the popup (`floatPending.boards`).
+- **The card knows why it's there.** `float.js` passes the board to `attach("site",
+  scope)`, so **×** asks "Hide on LinkedIn?" and turns the whole board off. A site
+  switched on by itself still turns off by itself.
+- **Embedded Greenhouse boards on company sites.** The posting is inside an iframe the
+  top frame can't read. A second registered script, `jobfit-float-frame`, runs
+  `float-frame.js` in `*.greenhouse.io/embed/*` frames (all frames; the manifest
+  already has that host).
+  - It first asks the worker whether the page around it is switched on
+    (`JOB_FIT_FRAME_ENABLED`, checked against `sender.tab.url`) and reads nothing if
+    not.
+  - Otherwise it reads the job with the Greenhouse extractor and sends
+    `JOB_FIT_FRAME_JOB`. The worker checks again and passes it to frame 0 only.
+  - `float.js` then prefers that job over the page's own reading, as an evaluation
+    does. The page around an embed is the company's site, and it's the embed that
+    `content.js` scores.
+- Both scripts are registered only while at least one board or site is on, and the
+  registration is rebuilt from what's still granted on startup, on update and on
+  `permissions.onRemoved`.
+
 ### On-page button, opt-in per site (2026-09-27)
 
 A card in the bottom-left corner of job pages (`float.js`) evaluates the posting on
@@ -882,7 +1010,9 @@ the smaller part.
   are sequenced, so a slow one can't paint over a newer one. State updates come
   from `storage.onChanged`: the record's key, `queue`, the active profile, the
   language and the minimized setting.
-- **Look and controls:** a white card with a 46px coloured badge, two lines of text
+- **Look and controls** (drawn by `card.js` since 2026-09-28, see "On-page card and
+  result panel"; dragging, the other side and the result panel were added there): a
+  white card with a 46px coloured badge, two lines of text
   (what it is, and what clicking does), a spring-in entrance and a "pop" on the badge
   only when the news changes (a score arriving, another job), not on every redraw.
   Hovering shows **–** (minimize to just the badge, remembered per site in
@@ -892,9 +1022,78 @@ the smaller part.
   the card cancels. Animations are off under `prefers-reduced-motion`.
 - **Isolated from the site:** a closed shadow root, so no site CSS reaches it. The host
   id starts with `job-fit-`, so `textFrom` never reads the pill into a posting.
-  Pointer events stop at the host, for the same Radix-dialog reason as the banner.
+  Pointer events stop at the host, for the same Radix-dialog reason as the panel.
   **Bottom-left**, beside LinkedIn's job list: the bottom-right corner belongs to
   LinkedIn's messaging bar and Indeed's chat bubble.
+
+## Shared UI foundation (2026-09-28)
+
+The popup, Tracked jobs, the wizard and the on-page surfaces grew one at a time
+and ended up with their own colours, four different ambers among them, and badge
+colours that failed contrast (white on the old amber was 3.3:1). One set now:
+
+- **`ui.css`** holds the tokens and the base controls (buttons, inputs, focus
+  ring, `.sr-only`) for every extension page. A plain colour (`--green`) is a fill
+  that takes white text; `-fg` is the same hue as text on a page surface; `-soft`
+  and `-line` are its tinted background and border. Every text pair meets WCAG AA
+  4.5:1 and every control border and the focus ring 3:1, **in both themes**: the
+  tokens are redefined under `prefers-color-scheme: dark`, so a page that only
+  uses tokens gets dark mode for free.
+- **Nothing below 12px.** Badges are sentence case at 12px rather than 10px
+  uppercase.
+- **`ui-shared.js`** (`JOB_FIT_UI`) holds the score bands (`scoreClass`, 75 and
+  55, also the "strong match" threshold in Needs attention), `announce()` for a
+  polite live region, and `armConfirm()`, the two-step confirm every destructive
+  button uses: the first click turns it red with the confirm wording and
+  announces it, a second click within 5s acts, Esc or the timeout disarms. It is
+  injected with the page scripts too, so the card and the pages agree on the bands.
+- The on-page card lives in a shadow root on someone else's page, which
+  `ui.css` can't reach; it carries a copy of the same values.
+
+## Settings page and a slimmer popup (2026-09-28)
+
+The popup had become the settings page: nine collapsible sections, about 2,500px
+tall when open, in a window Chrome caps at 600px and destroys whenever it loses
+focus. Editing a CV there was a race against a stray click, and the popup's
+autosave-on-blur and remembered-open-sections code existed only to work around
+where the settings lived. Meanwhile the one thing the popup is opened for, the job
+in the tab, got a single line ("LinkedIn posting detected").
+
+- **Settings is `options.html`** (`options_ui`, `open_in_tab`), laid out like the
+  wizard: a side nav whose highlight follows the scroll, and one card per section:
+  Profile (CV, profile management, the wizard), Expected salary, Screening rules
+  (hard rejects, warnings, domain flags), Model, On-page button and shortcut,
+  Language, and Data (backup, restore, extraction coverage). Each card says whether
+  it belongs to the active profile ("For “Erik — backend”") or is shared by every
+  profile, and the active profile is picked in the sticky header.
+- **Saves are scoped to what the page owns.** Settings can stay open for hours next
+  to a wizard tab that writes the same storage, so a save never writes back a copy
+  held since load: profile fields are merged onto the stored profile, model fields
+  onto the stored model settings (keeping fields the page doesn't show). A change
+  made elsewhere refreshes the form, but never under a field you're typing in; it
+  waits for focus to leave. One indicator in the header: *Saving…*, *All changes
+  saved*, or the error.
+- **Deep links.** The popup's **Fix in Settings** and **Add it in Settings** leave
+  `settingsJump` in storage and call `openOptionsPage()`, which focuses the Settings
+  tab if one is open; the page scrolls to the section and moves focus to its heading.
+  A `#hash` alone couldn't reach an already-open tab.
+- **The popup** is three blocks in reading order, one primary button at a time:
+  1. **This job**: the site probe, then the saved result for the active profile.
+     The popup injects only the extractors and `jobkey.js` (`JOB_FIT_LOOKUP_FILES`),
+     never `content.js`, which would start an evaluation. It then looks the job up:
+     score, verdict, age, and whether it's out of date (another model, or an edited
+     profile). **Show on page** is primary for a current score, **Re-evaluate** for
+     an out-of-date one. Re-evaluate sets `__jobFitIgnoreCacheOnce` in the page
+     before injecting, so that run skips the saved result.
+  2. **Ready to score?**: the model check (`describeModelReadiness`, shared with
+     Settings › Model) with **Fix in Settings** when it isn't green, and the queue.
+  3. **Tracked jobs** and the shortcut tip.
+
+  The profile switcher stays in the popup, because which profile is active is what
+  you have to see before evaluating. Unfinished setup and a profile with no CV each
+  get a notice with a way to fix it.
+- **Backup, restore and the extraction-coverage report** moved into `backup.js`,
+  used by Settings › Data and (until its own redesign) Tracked jobs.
 
 ## Popup readiness
 
@@ -913,31 +1112,81 @@ being a surprise.
 
 ---
 
-## Banner UI (content.css)
+## On-page card and result panel (card.js, 2026-09-28)
 
-Inject a fixed bar at the top of the page:
-- Left: score (large) + verdict label.
-- Middle: one_line summary.
-- Right: "Details" toggle → expands matches / gaps / required_gaps / flagged phrases.
-- Below (collapsible): keyword highlights, red / amber / green.
-- Small "Re-evaluate" and "Log" buttons.
+Results used to appear in a bar fixed across the top of the page, at the maximum
+z-index, over the site's own navigation, and in the opposite corner from the
+on-page card you'd just clicked. Its styles lived in the page's DOM, so the site's
+CSS reached them. It's gone: every evaluation, whatever started it, now shows in
+**one card with a result panel that opens from it**.
 
-Keep it dismissable. Don't cover the page's own apply button.
-
-**Radix UI dialogs (my.greenhouse.io's candidate portal) treat any click outside their own DOM subtree as a dismiss signal**, and our banner lives in `document.body` — so clicking Evaluate/Details/Dismiss on the banner would close the job dialog underneath it. Fix: stop `pointerdown`/`mousedown`/`click` from bubbling past the banner and details panel elements, so the event never reaches the document-level listener Radix uses to detect outside clicks.
-
----
-
-The score is a coloured badge rather than text sharing weight with the verdict,
-using the same green/amber/red thresholds as the tracked-jobs page — the same
-number should look the same in both places. A hard reject shows no badge, since
-its `0` is a marker rather than a score.
-
-A **Tracked jobs** action opens the page deep-linked to that record
-(`history.html?profile=…&job=…`). Content scripts cannot open tabs, so the
-worker does it. On arrival the page clears any filter that would hide the job,
-expands it, scrolls to it and flashes it — landing at the top of a long list
-would defeat the point.
+- **Two ways onto a page.** `site` mode is the on-page button (`float.js`): the card
+  is there before anyone clicks, and its **×** turns the button off for the site
+  (asking first). `page` mode is an evaluation started from the shortcut, the popup
+  or Re-evaluate on a site without the button: the card appears with the result,
+  its **×** just dismisses it, and it leaves when a single-page board moves on to
+  another job. `page` never downgrades `site`.
+- **One module draws.** `card.js` (`JOB_FIT_CARD`) owns the card, the panel, the
+  job's live state (queued / scoring / score / hard reject, from `queue` and the
+  record in storage), dragging and the per-site preferences. `float.js` only decides
+  whether the site is on and which job is on screen (`attach`, `setJob`,
+  `setLoading`). `content.js` only says what happened: `starting(job)` as soon as it
+  knows the job, then `showResult(resultFromRecord(record, …))` or `showNotice({…})`.
+  `resultFromRecord`, `staleNoteFor` and `duplicateNoteFor` are shared, so a fresh
+  result, a saved one opened later and one opened from the popup read identically.
+- **The panel.** Score badge, verdict, job, the one-liner as wrapping text, when and
+  for which profile it was scored, then an amber **heads-up** box (out of date,
+  possible duplicate, not saved, truncated), then sections that open and close with a
+  count and a tone dot: required gaps (open by default), seniority, matches, gaps,
+  score caps, warnings, domain flags, salary. Footer: **Re-evaluate** (primary only
+  when the score is out of date) and **Tracked jobs**. Clicking the card on a saved
+  score opens the panel from storage, with no injection and no worker round trip.
+- **Notices** replace the bar's error states: *No posting found*, *Queue full*,
+  *Couldn't evaluate* (amber or red, with an "!" badge, opened, **Try again** or
+  **Tracked jobs**). Being queued is a quiet notice: the card already says *In queue
+  · #3*, and the panel, for whoever opens it, says what the keyword screen flagged
+  while it waits.
+- **Where it sits.** Bottom-left by default (the bottom-right corner belongs to
+  LinkedIn's messaging bar and Indeed's chat bubble). It can be dragged anywhere up
+  either edge and snaps to the nearer one on release, remembered per site in
+  `floatPosition`; **Move to the other side** does the same without dragging
+  (WCAG 2.5.7). The pointer is captured on press, so a quick flick that leaves the
+  card still drags, and a press that moves less than 5px is still a click. The spot
+  is clamped to the window on resize. The panel opens upward, or downward when the
+  card has been dragged near the top, and never exceeds the space it has.
+- **Accessibility.**
+  - The card is a button whose label carries the score ("JobFit: 82/100, apply…"),
+    with `aria-expanded` / `aria-controls` when it opens the panel.
+  - The panel is a non-modal `role="dialog"` labelled by its title. Opening it from
+    the card moves focus to the title; Esc or its × closes it and returns focus to
+    the card.
+  - A result that arrives later opens the panel without taking focus, and a polite
+    live region in the shadow root reads the score out ("JobFit score 82: apply").
+    Notices and the hide confirmation are read out too.
+  - The controls (–, ⇄, ×) show on hover and focus, while the panel is open, and
+    always on touch screens (`hover: none`), at 26px.
+  - Colours are the shared AA tokens, with a dark set under `prefers-color-scheme`.
+    Animations are off under `prefers-reduced-motion`.
+- **Embedded boards.** A company site that embeds a Greenhouse board scores the
+  posting inside the iframe, where a fixed card would be clipped to the embed. In a
+  frame, `card.js` draws nothing: every call is sent as `JOB_FIT_CARD_RELAY` to the
+  worker, which forwards it to frame 0 as `JOB_FIT_CARD_CALL`. The top frame always
+  has `card.js`, because the page scripts are injected there first and `content.js`
+  defers from it. Not `postMessage`: the embedding page could read the message, and
+  the result says how well its own posting fits your CV.
+- **Isolated from the site:**
+  - A closed shadow root, so no site CSS reaches it (tested against a page that
+    forces every `button` hot pink).
+  - The host id starts with `job-fit-`, so `textFrom` never reads the card into a
+    posting.
+  - Pointer events stop at the host, because Radix UI dialogs (my.greenhouse.io)
+    treat any click outside their own subtree as a dismiss.
+  - A host left behind by an earlier copy of the script (after an extension reload)
+    is removed rather than stacked.
+- **Tracked jobs** in the panel opens the page deep-linked to the record
+  (`history.html?profile=…&job=…`), through the worker because content scripts can't
+  open tabs. The page clears any filter that would hide the job, expands it, scrolls
+  to it and flashes it.
 
 ---
 
@@ -1087,17 +1336,68 @@ is the view that tells you to follow up or let it go.
 
 ### Page
 
-The list is what the page is for, so the chrome above it is kept small. The
-standing Backup panel became one **Data** control in the toolbar, and the
-controls bar is sized to stay on a single row — it was wrapping and costing
-60px directly above the first job.
+The list is what the page is for, so the chrome above it is kept small.
 
-**Funnel chips** (All / Not applied / Waiting / In play / Closed) replace the
-grey count line and double as filters, because the question the page should
-answer is "what do I do next?", not "what happened?". Chips and the Status
-dropdown are mutually exclusive — using one clears the other — so the list is
-never filtered by two controls at once. A bucket with nothing in it is hidden
-unless it is the one selected.
+**Layout (2026-09-28).** The page header holds the title, the **profile** being
+viewed (it changes the whole data set, so it isn't one of the filters), **Export
+CSV** and **Settings**. Backup, restore, the setup wizard and the extraction report
+moved to Settings, so the Data menu is gone. From 1100px wide the list and a sticky
+**details pane** sit side by side, like Huntr's or Teal's trackers. Selecting a job
+(click, or `j`/`k`) shows it in the pane and puts it in the address (`#job=…`), so a
+reload or Back lands on the same job. Narrower, the details open under the row as
+before. The pane reads in the order you work a job:
+1. Title, **Open posting**, the site, the status.
+2. Every badge.
+3. The duplicate box.
+4. Verdict and reasoning.
+5. Re-evaluate and Delete.
+6. Notes.
+7. Then reference material: earlier scores, the brief, the full posting.
+
+Deleting moves the pane on to the next job instead of going blank. With nothing
+tracked, the empty state takes the full width and says how to start: the
+shortcut, and a link to set up the on-page button.
+
+**Rows.**
+- The title is a real `<button>`: it used to be a click handler on a `<div>`,
+  which Tab never reached, so a job couldn't be opened without a mouse. It
+  carries `aria-expanded` / `aria-controls` narrow and `aria-current` wide, and
+  its accessible name starts with the score ("Score 84: …") because the coloured
+  box is decoration to a screen reader.
+- The status menu is labelled with the job ("Application status for …").
+- **Open posting ↗** is on the row, not buried in the details.
+- Only the most decisive badge shows, leading the second line so the title keeps
+  the first: hard reject, then needs attention, then possible duplicate, then out
+  of date, then summary only. The details show all of them.
+- The copy button is a 24px target, and the chevron is `aria-hidden`.
+
+**One status filter.** The funnel chips are the filter. The exact-status menu
+and *Hide hard rejects* moved under **More filters**, whose label counts what's
+on inside it ("More filters (1)"), so a list narrowed from a closed menu doesn't
+look like one missing jobs. No matches shows **Clear filters**.
+
+**Keyboard.**
+
+| Key | Action |
+|---|---|
+| `/` | search |
+| `j` / `k` | move through the list, onto the next page past the end, and select in the pane when wide |
+| `Enter` / `o` | open the details, moving focus into the pane when wide |
+| `1`–`7` | set the status of the current job |
+| `x` | tick it for re-evaluation |
+| `Esc` | back to the list, or collapse |
+| `?` | a dialog listing all of them |
+
+Keys are ignored while typing in a field and never override Enter on a button or
+link. Every render rebuilds the rows, so focus is put back on the same control in
+the same row afterwards; a status set with a number key would otherwise drop
+focus to the top of the page. Status changes, notes saved, copies and deletions
+are announced through a polite live region.
+
+**Funnel chips** (All / Not applied / Waiting / In play / Closed) replaced the
+grey count line and double as the filter, because the question the page should
+answer is "what do I do next?", not "what happened?". A bucket with nothing in it
+is hidden unless it is the one selected.
 
 **Order: status on top, then filters, then the list** (2026-09-25). The queue
 moved to the top, away from the list, because it's status, not something you

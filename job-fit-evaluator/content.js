@@ -15,19 +15,7 @@
     }
   }
 
-  // Screening helpers are shared with the service worker's queue (screening.js).
-  const { cleanMatch } = JOB_FIT_SCREEN;
   const t = JOB_FIT_I18N.t;
-
-  // The pattern is still worth showing for a hard reject — it's the thing
-  // you'd go and edit — but labelled as a rule rather than presented as prose.
-  function describeHardReject(hardReject) {
-    return `"${cleanMatch(hardReject.matchedText)}" — ${hardReject.label}`;
-  }
-
-  function verdictLabel(verdict) {
-    return verdict && JOB_FIT_I18N.has(`verdict.${verdict}`) ? t(`verdict.${verdict}`) : verdict || "";
-  }
 
   // --- JSON-LD probe -------------------------------------------------------
   //
@@ -177,131 +165,6 @@
     return [text, remote ? "Remote" : null].filter(Boolean).join(" · ");
   }
 
-  function removeExistingBanner() {
-    document.getElementById("job-fit-banner")?.remove();
-    document.getElementById("job-fit-details")?.remove();
-  }
-
-  // Sites built on Radix UI (e.g. my.greenhouse.io's candidate portal) treat
-  // any click outside the dialog's own DOM subtree as a "dismiss" signal.
-  // Our banner/details live in document.body, so without this they'd close
-  // the job dialog every time you clicked Evaluate/Details/Dismiss.
-  function stopOutsideClickDetection(el) {
-    ["pointerdown", "mousedown", "click"].forEach((evt) =>
-      el.addEventListener(evt, (e) => e.stopPropagation())
-    );
-  }
-
-  function renderDetailsPanel(sections) {
-    const existing = document.getElementById("job-fit-details");
-    if (existing) {
-      existing.remove();
-      return;
-    }
-
-    const panel = document.createElement("div");
-    panel.id = "job-fit-details";
-    stopOutsideClickDetection(panel);
-
-    // The stylesheet's 48px offset is a magic number that never matched: the
-    // banner measures 50px, so the panel's first rows sat under it on every
-    // render, not just in some edge case. The banner's height comes from its
-    // padding and button sizing (the summary is nowrap + ellipsis, so it never
-    // wraps), which means any later change to either would silently widen the
-    // gap again. Measure it instead of guessing.
-    const banner = document.getElementById("job-fit-banner");
-    if (banner) panel.style.top = `${Math.round(banner.getBoundingClientRect().height)}px`;
-
-    sections.forEach(({ title, items, tagClass }) => {
-      if (!items || items.length === 0) return;
-      const h = document.createElement("h4");
-      h.textContent = title;
-      panel.appendChild(h);
-      items.forEach((text) => {
-        const tag = document.createElement("span");
-        tag.className = `jf-tag ${tagClass}`;
-        tag.textContent = text;
-        panel.appendChild(tag);
-      });
-    });
-
-    document.body.appendChild(panel);
-  }
-
-  function renderBanner({ status, label, summary, sections, extraActions, score }) {
-    removeExistingBanner();
-
-    const banner = document.createElement("div");
-    banner.id = "job-fit-banner";
-    banner.className = `jf-${status}`;
-    stopOutsideClickDetection(banner);
-
-    const main = document.createElement("div");
-    main.className = "jf-main";
-
-    if (score != null) {
-      const scoreEl = document.createElement("span");
-      scoreEl.className = `jf-score ${statusForScore(score)}`;
-      scoreEl.textContent = String(score);
-      main.appendChild(scoreEl);
-    }
-
-    const labelEl = document.createElement("span");
-    labelEl.className = "jf-label";
-    labelEl.textContent = label;
-
-    const summaryEl = document.createElement("span");
-    summaryEl.className = "jf-summary";
-    summaryEl.textContent = summary;
-
-    main.appendChild(labelEl);
-    main.appendChild(summaryEl);
-
-    const actions = document.createElement("div");
-    actions.className = "jf-actions";
-
-    // The banner line is single-line with an ellipsis, so a long one_line
-    // (or a long error message) gets cut off. Lead the Details panel with
-    // the full text so it's always readable somewhere.
-    const detailSections = [
-      summary ? { title: t("banner.summary"), items: [summary], tagClass: "jf-tag-neutral" } : null,
-      ...(sections || []),
-    ].filter(Boolean);
-
-    if (detailSections.length) {
-      const detailsBtn = document.createElement("button");
-      detailsBtn.type = "button";
-      detailsBtn.textContent = t("banner.details");
-      detailsBtn.addEventListener("click", () => renderDetailsPanel(detailSections));
-      actions.appendChild(detailsBtn);
-    }
-
-    (extraActions || []).forEach(({ label: btnLabel, onClick }) => {
-      const btn = document.createElement("button");
-      btn.type = "button";
-      btn.textContent = btnLabel;
-      btn.addEventListener("click", onClick);
-      actions.appendChild(btn);
-    });
-
-    const dismissBtn = document.createElement("button");
-    dismissBtn.type = "button";
-    dismissBtn.textContent = t("banner.dismiss");
-    dismissBtn.addEventListener("click", removeExistingBanner);
-    actions.appendChild(dismissBtn);
-
-    banner.appendChild(main);
-    banner.appendChild(actions);
-
-    document.body.appendChild(banner);
-  }
-
-  function statusForScore(score) {
-    if (score >= 75) return "green";
-    if (score >= 55) return "amber";
-    return "red";
-  }
-
   // A genuine embedded board: hosted on greenhouse.io AND served from an embed
   // path. Substring matching the whole src is what produced the false positive
   // described above.
@@ -316,141 +179,27 @@
     });
   }
 
-  function timeAgo(ts) {
-    const days = Math.floor((Date.now() - ts) / 86400000);
-    const rtf = new Intl.RelativeTimeFormat(JOB_FIT_I18N.locale(), { numeric: "auto" });
-    if (days < 30) return rtf.format(-days, "day");
-    return rtf.format(-Math.floor(days / 30), "month");
-  }
-
-  // Single renderer for both a fresh evaluation and one read back out of
-  // history, so the two can't drift into showing different things.
-  function openInTrackedJobs(record) {
-    // Content scripts can't open tabs, so the worker does it — and it carries
-    // the job key so the page can scroll to and expand that record rather than
-    // dropping you at the top of a long list.
-    sendMessageWithRetry({
-      type: "JOB_FIT_OPEN_HISTORY",
-      profileId: record.profileId,
-      jobKey: record.jobKey,
-    }).catch(() => {});
-  }
-
-  // The job this banner is currently showing, so a late duplicate check can't
-  // paint its warning onto a different job's banner.
-  let bannerJobKey = null;
-
-  // Same posting, tracked from another site under this profile? Flag only —
-  // the two records are left alone; Tracked jobs is where you pick one.
-  async function duplicateNoteFor(record) {
-    if (!record.jobKey || !record.profileId) return null;
-    try {
-      const others = await JOB_FIT_EVALSTORE.list(record.profileId);
-      const dups = JOB_FIT_EVALSTORE.findDuplicatesOf(record, others);
-      if (!dups.length) return null;
-      const d = dups[0];
-      const score = d.hardReject ? t("result.hardReject") : d.score != null ? d.score : t("result.noScore");
-      const when = JOB_FIT_I18N.formatDate(JOB_FIT_EVALSTORE.activityTs(d), { month: "short", day: "numeric" });
-      const status = d.status && d.status !== "not_applied" ? `, ${JOB_FIT_EVALSTORE.statusLabel(d.status).toLowerCase()}` : "";
-      return t("banner.duplicate", { site: JOB_FIT_EVALSTORE.siteLabel(d), detail: `${score}, ${when}${status}` });
-    } catch (err) {
-      return null;
-    }
-  }
-
-  function renderResult(record, options) {
-    const { cached, profileName, onReevaluate, saveError, staleNote, duplicateNote } = options;
-    bannerJobKey = record.jobKey;
-    // Checked after the banner is up rather than before, so a slow storage
-    // read never delays the result; redrawn with the note if there is one.
-    if (duplicateNote === undefined) {
-      duplicateNoteFor(record).then((note) => {
-        if (note && bannerJobKey === record.jobKey) renderResult(record, { ...options, duplicateNote: note });
-      });
-    }
-    const warnings = [];
-    if (duplicateNote) warnings.push(duplicateNote);
-    if (staleNote) warnings.push(staleNote);
-    if (saveError) warnings.push(t("banner.notSaved", { error: saveError }));
-    if (record.evaluation && record.evaluation.input_truncated) {
-      warnings.push(t("banner.truncated"));
-    }
-    const warningSection = warnings.length
-      ? [{ title: t("banner.headsUp"), items: warnings, tagClass: "jf-tag-amber" }]
-      : [];
-
-    const prefix = cached ? `[${t("banner.savedPrefix", { when: timeAgo(record.lastEvaluatedAt) })}] ` : "";
-    const extraActions = [
-      ...(cached ? [{ label: t("banner.reevaluate"), onClick: onReevaluate }] : []),
-      ...(record.jobKey ? [{ label: t("banner.trackedJobs"), onClick: () => openInTrackedJobs(record) }] : []),
-    ];
-
-    if (record.hardReject) {
-      renderBanner({
-        status: "red",
-        label: `✕ ${t("banner.reject")}`,
-        summary: `${prefix}${t("banner.hardRejectSummary", { match: cleanMatch(record.hardReject.matchedText) })}`,
-        sections: [
-          ...warningSection,
-          { title: t("banner.evaluatedAs"), items: [profileName], tagClass: "jf-tag-neutral" },
-          {
-            title: t("banner.rejectReason"),
-            items: [describeHardReject(record.hardReject)],
-            tagClass: "jf-tag-red",
-          },
-        ],
-        extraActions,
-      });
-      return;
-    }
-
-    const e = record.evaluation || {};
-    const salaryItems = e.salary
-      ? [
-          `${t("result.salaryPosting")}: ${e.salary.posting_stated}`,
-          `${t("result.salaryMarket")}: ${e.salary.estimated_market_range}`,
-          `${t("result.salaryVs")}: ${JOB_FIT_EVALSTORE.salaryVerdictLabel(e.salary.vs_candidate_expectation)}`,
-          e.salary.note,
-        ].filter(Boolean)
-      : [];
-
-    renderBanner({
-      status: statusForScore(e.score),
-      score: e.score,
-      label: verdictLabel(e.verdict),
-      summary: prefix + (e.one_line || ""),
-      sections: [
-        ...warningSection,
-        { title: t("banner.evaluatedAs"), items: [profileName], tagClass: "jf-tag-neutral" },
-        { title: t("result.matches"), items: e.matches, tagClass: "jf-tag-green" },
-        { title: t("result.gaps"), items: e.gaps, tagClass: "jf-tag-amber" },
-        { title: t("result.requiredGaps"), items: e.required_gaps, tagClass: "jf-tag-red" },
-        { title: t("result.seniority"), items: e.seniority_flag ? [e.seniority_flag] : [], tagClass: "jf-tag-red" },
-        {
-          title: t("result.scoreCap"),
-          items: (e.score_cap_reasons || []).map((reason) =>
-            e.raw_score != null ? `${reason} ${t("result.capDetail", { raw: e.raw_score, score: e.score })}` : reason
-          ),
-          tagClass: "jf-tag-amber",
-        },
-        {
-          title: t("banner.warningsTitle"),
-          items: record.softWarnings,
-          tagClass: "jf-tag-amber",
-        },
-        {
-          title: t("banner.domainFlagsTitle"),
-          items: record.domainFlags,
-          tagClass: "jf-tag-neutral",
-        },
-        { title: t("result.salary"), items: salaryItems, tagClass: "jf-tag-neutral" },
-      ],
-      extraActions,
+  // Everything JobFit shows on the page goes through the card (card.js): a
+  // fresh result, one read back out of history, and every notice. One
+  // renderer, so a new score and a saved one can't drift apart.
+  //
+  // The duplicate check runs after the result is up rather than before, so a
+  // slow storage read never delays it; the panel is updated with the note if
+  // there is one, and only while the page still shows this job.
+  function renderResult(record, { cached = false, profileName, saveError = null, staleNote = null } = {}) {
+    const build = (duplicateNote) =>
+      JOB_FIT_CARD.resultFromRecord(record, { cached, profileName, staleNote, duplicateNote, saveError });
+    JOB_FIT_CARD.showResult(build(null));
+    JOB_FIT_CARD.duplicateNoteFor(record).then((note) => {
+      if (!note) return;
+      const now = dispatchExtraction();
+      if (!now.result || JOB_FIT_JOBKEY.keyFor(now.result) !== record.jobKey) return;
+      JOB_FIT_CARD.showResult(build(note), { open: false });
     });
   }
 
   // The rendered result must not depend on the storage write succeeding: a
-  // throw here used to reject run() and leave the banner stuck on "scoring
+  // throw here used to reject run() and leave the card stuck on "scoring
   // with local model..." forever, discarding a generation that had just taken
   // several minutes. Save if we can, show it either way.
   async function saveAndRender(pending, profileName) {
@@ -495,12 +244,7 @@
     if (!result) {
       if (window !== window.top) return;
       console.log(`[Job Fit Evaluator] extraction failed on ${location.hostname} (no usable text found)`);
-      renderBanner({
-        status: "amber",
-        label: `⚠ ${t("banner.noText")}`,
-        summary: t("banner.noTextSummary"),
-        sections: [],
-      });
+      JOB_FIT_CARD.showNotice({ tone: "amber", title: t("float.noPosting"), summary: t("banner.noTextSummary") });
       return;
     }
 
@@ -519,6 +263,9 @@
     // through in the message now instead.
     const activeProfile = await JOB_FIT_PROFILES.getActive();
     const fingerprint = JOB_FIT_PROFILES.fingerprint(activeProfile);
+    const job = { jobKey, profileId: activeProfile.id, title: result.title, company: result.company };
+    // Something on screen straight away, where the answer will appear.
+    JOB_FIT_CARD.starting(job);
 
     const currentModel = JOB_FIT_PROVIDER.currentModel(await chrome.storage.local.get(JOB_FIT_PROVIDER.KEYS));
 
@@ -526,8 +273,8 @@
     if (cached) {
       // A saved result is shown even when a different model or an older
       // profile produced it — re-scoring is the user's call, made with the
-      // banner's Re-evaluate button, never something opening a page does on
-      // its own. The banner says why the score may be out of date.
+      // panel's Re-evaluate button, never something opening a page does on
+      // its own. The panel says why the score may be out of date.
       //
       // The exception is a hard reject under a changed profile: that verdict
       // came from the profile's own keyword lists, and re-checking it is a
@@ -536,19 +283,10 @@
       const modelChanged = !cached.hardReject && (cached.model || "") !== currentModel;
 
       if (!(cached.hardReject && profileChanged)) {
-        const reasons = [
-          modelChanged &&
-            t("banner.staleModel", {
-              model: cached.model || t("banner.aDifferentModel"),
-              current: currentModel || t("banner.notSet"),
-            }),
-          profileChanged && t("banner.staleProfile"),
-        ].filter(Boolean);
         renderResult(cached, {
           cached: true,
           profileName: activeProfile.name,
-          onReevaluate: () => start({ ignoreCache: true }),
-          staleNote: reasons.length ? t("banner.staleNote", { reasons: JOB_FIT_I18N.list(reasons) }) : null,
+          staleNote: (profileChanged || modelChanged) ? JOB_FIT_CARD.staleNoteFor(cached, activeProfile, currentModel) : null,
         });
         return;
       }
@@ -597,12 +335,8 @@
     }
 
     const domainFlagMatches = layer1.domainFlags;
+    const learningMatches = layer1.learningFlags || [];
     const softWarningMatches = layer1.softWarnings;
-
-    const flagNotes = [
-      domainFlagMatches.length ? `${t("banner.flagsNote")}: ${domainFlagMatches.join(", ")}` : null,
-      softWarningMatches.length ? `${t("banner.warningsNote")}: ${softWarningMatches.join(", ")}` : null,
-    ].filter(Boolean);
 
     // Handed to the service worker rather than run from here. Everything the
     // model needs is captured NOW — the posting text and a snapshot of the
@@ -630,55 +364,63 @@
           url: location.href,
           extractor: extractorName,
           domainFlags: domainFlagMatches,
+          learningFlags: learningMatches,
           softWarnings: softWarningMatches,
         },
       });
     } catch (err) {
-      renderBanner({
-        status: "amber",
-        label: `⚠ ${t("banner.error")}`,
+      JOB_FIT_CARD.showNotice({
+        ...job,
+        tone: "red",
+        title: t("float.failed"),
         summary: t("banner.noWorker", { detail: err.message }),
-        sections: [],
+        actions: ["evaluate"],
       });
       return;
     }
 
     if (!response || !response.ok) {
-      renderBanner({
-        status: "amber",
-        label: `⚠ ${t("banner.queueFull")}`,
-        summary:
-          response && response.full
-            ? t("banner.queueFullSummary", { count: response.max })
-            : (response && response.error) || t("banner.couldNotQueue"),
-        sections: [],
+      const full = response && response.full;
+      JOB_FIT_CARD.showNotice({
+        ...job,
+        tone: "amber",
+        title: full ? t("banner.queueFull") : t("float.failed"),
+        summary: full ? t("banner.queueFullSummary", { count: response.max }) : (response && response.error) || t("banner.couldNotQueue"),
+        actions: full ? ["tracked"] : ["evaluate"],
       });
       return;
     }
 
-    const flagSuffix = flagNotes.length ? ` — ${flagNotes.join(" · ")}` : "";
+    // Quiet: the card already says where the job is in the queue. This is
+    // for whoever opens it — what the keyword screen found while it waits.
     const queueNote =
       response.position <= 1
         ? t("banner.sendingNow")
         : t("banner.queuedPosition", { position: response.position, total: response.total });
-
-    renderBanner({
-      status: "neutral",
-      label: "…",
-      summary: response.duplicate
-        ? `[${activeProfile.name}] ${t("banner.alreadyQueued", { position: response.position })}`
-        : `[${activeProfile.name}] ${t("banner.passedLayer1")}${flagSuffix} — ${queueNote}`,
-      sections: [],
-    });
+    JOB_FIT_CARD.showNotice(
+      {
+        ...job,
+        tone: "neutral",
+        title: response.position <= 1 ? t("float.scoring") : t("float.queued", { position: response.position }),
+        summary: response.duplicate ? t("banner.alreadyQueued", { position: response.position }) : `${t("banner.passedLayer1")} — ${queueNote}.`,
+        meta: t("float.asProfile", { name: activeProfile.name }),
+        sections: [
+          { title: t("banner.domainFlagsTitle"), tone: "neutral", items: domainFlagMatches, open: true },
+          { title: t("result.learningFlags"), tone: "neutral", items: learningMatches, open: true },
+          { title: t("banner.warningsTitle"), tone: "amber", items: softWarningMatches, open: true },
+        ].filter((section) => section.items.length),
+      },
+      { open: false }
+    );
   }
 
   // Backstop so no unexpected throw — a storage read, a malformed stored
-  // record, an extractor blowing up on odd markup — can leave the banner
+  // record, an extractor blowing up on odd markup — can leave the card
   // stuck mid-progress with no explanation.
   //
   // Also the single-flight guard. The popup's Evaluate button has had one
   // since a double-click there fired two generations at once; Re-evaluate sits
-  // in the banner for minutes while a model runs and is far easier to click
+  // in the panel for minutes while a model runs and is far easier to click
   // twice, and LM Studio serving two requests at once roughly halves the
   // throughput of both.
   let inFlight = false;
@@ -689,11 +431,11 @@
     run(options)
       .catch((err) => {
         console.error("[Job Fit Evaluator] evaluation failed", err);
-        renderBanner({
-          status: "amber",
-          label: `⚠ ${t("banner.error")}`,
+        JOB_FIT_CARD.showNotice({
+          tone: "red",
+          title: t("float.failed"),
           summary: t("banner.somethingWrong", { detail: err && err.message ? err.message : String(err) }),
-          sections: [],
+          actions: ["evaluate"],
         });
       })
       .finally(() => {
@@ -702,7 +444,7 @@
   }
 
   // Installed once per page. content.js is re-injected on every click, and a
-  // second listener in the same isolated world would repaint the banner twice.
+  // second listener in the same isolated world would show the result twice.
   if (!window.__jobFit.resultListenerInstalled) {
     window.__jobFit.resultListenerInstalled = true;
 
@@ -724,5 +466,9 @@
     });
   }
 
-  start();
+  // The popup's Re-evaluate sets this just before injecting, so this run
+  // scores the posting again instead of showing the saved result.
+  const ignoreCache = Boolean(window.__jobFitIgnoreCacheOnce);
+  window.__jobFitIgnoreCacheOnce = false;
+  start({ ignoreCache });
 })();
