@@ -93,6 +93,12 @@
     if (record.evaluation && record.evaluation.input_truncated) notes.push(t("banner.truncated"));
     const coreWork = record.coreWorkOnly || (record.evaluation && record.evaluation.core_work_only) || [];
     if (coreWork.length) notes.push(t("result.coreWorkDiverges", { terms: coreWork.join(", ") }));
+    const disagreement = JOB_FIT_EVALSTORE.modelDisagreement(record);
+    if (disagreement) {
+      notes.push(
+        t("result.modelsDisagree", { spread: disagreement.spread, runs: disagreement.runs.map((r) => `${r.model} ${r.score}`).join(", ") })
+      );
+    }
 
     const when = record.lastEvaluatedAt ? t("float.evaluatedWhen", { when: timeAgo(record.lastEvaluatedAt) }) : null;
     const meta = [cached ? when : null, profileName ? t("float.asProfile", { name: profileName }) : null].filter(Boolean).join(" · ");
@@ -133,8 +139,10 @@
       : [];
     const sections = [
       { title: t("result.requiredGaps"), tone: "red", items: e.required_gaps, open: true },
-      { title: t("result.seniority"), tone: "red", items: [e.seniority_flag, e.level_flag].filter(Boolean) },
+      // Notes, not deductions, unless both are there (see score caps).
+      { title: t("result.seniority"), tone: "amber", items: [e.seniority_flag, e.level_flag].filter(Boolean) },
       { title: t("result.matches"), tone: "green", items: e.matches },
+      { title: t("result.unverifiedMatches"), tone: "amber", items: e.unverified_matches },
       { title: t("result.gaps"), tone: "amber", items: e.gaps },
       {
         title: t("result.scoreCap"),

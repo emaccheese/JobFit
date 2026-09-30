@@ -359,6 +359,47 @@ and the right answer was about 80, apply.
   text, never a brief, and postings over 12,000 characters lose part of the middle,
   never the end, where the legal boilerplate sits.
 
+### Second round (2026-09-30)
+
+A second list of findings from real use changed some of the rules above.
+
+- **Below level takes both signals.** Pay topping out below the candidate's floor
+  (from a stated salary only) and an experience bar at half the candidate's years or
+  less (or entry-level wording) are computed separately (`paySignal`,
+  `experienceSignal`). Either alone is an amber note. Both together take **20
+  points** off. This replaces the independent caps at 40 (pay) and 70 (years), and
+  `SENIORITY_REGEX` is gone: a senior title with a modest band is no longer
+  penalized on the band alone.
+- **The profile's own lines.** `JOB_FIT_KEYWORDS.termsFromProfile` reads
+  `Learning:` (and translations) into the Learning list, and `NOT:` / `Gaps:` into
+  the domain flags. `screen()` merges them with the Settings lists
+  (`context.profileText`, passed by the page, the worker and the wizard). A term is
+  a skill name: at most four words, with "no" / "not" / parentheticals dropped.
+- **The deduction ladder.**
+
+  | Kind | Effect |
+  |---|---|
+  | A real domain-flag requirement | caps at 50 |
+  | A low-bar or alternatives domain flag | −10 |
+  | A learning term in a required gap | −5 |
+
+  The soft costs add up, to at most 15. When every required gap is soft or
+  learning and the model scored 75 or more, they stop at 75. Meeting everything but
+  a "familiarity" item is an apply: an 84 used to drop to 74.
+- **Claimed matches are checked** against the profile (`verifyMatches`). A match
+  keeps its place when one of its specific words (not "experience", "strong",
+  "software"…) appears in the profile, by stem, so "image processing" is backed by
+  "imaging". Otherwise it moves to `unverified_matches`, shown as *Claimed but not in
+  your profile*. The score is untouched, because it's a word check, not proof.
+- **Monthly pay** (`looksMonthly`). The stated numbers are multiplied by 12 when the
+  posting says monthly next to numbers it shows exactly as the model reported them,
+  so they weren't converted already. They're also multiplied when the country
+  quotes pay per month (MX), no period is stated, and the figure is under a quarter
+  of the annual floor. Yearly wording always wins.
+- **Model disagreement** (`JOB_FIT_EVALSTORE.modelDisagreement`). The newest score
+  per model across the current result and `previous`. At 30+ points apart, the card
+  and Tracked jobs say the requirements and the core work may diverge.
+
 ## Layer 2 — local model scoring (only if Layer 1 passes)
 
 > **Alternatives in requirements** (found in testing, 2026-09-17): the model was

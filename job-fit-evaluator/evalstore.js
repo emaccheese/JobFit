@@ -458,6 +458,26 @@ var JOB_FIT_EVALSTORE = (function () {
     return duplicateGroups([record, ...others]).get(record.jobKey) || [];
   }
 
+  // When different models scored the same job 30 or more points apart, the
+  // posting is usually saying two things — short generic requirements over
+  // specialist work — and the gap is worth reading about rather than just two
+  // numbers side by side. The newest score per model counts. Null otherwise.
+  const DISAGREEMENT_POINTS = 30;
+
+  function modelDisagreement(record) {
+    if (!record) return null;
+    const byModel = new Map();
+    [{ model: record.model, score: record.score, hardReject: record.hardReject }, ...(record.previous || [])].forEach((run) => {
+      if (!run || run.hardReject || typeof run.score !== "number" || !run.model) return;
+      if (!byModel.has(run.model)) byModel.set(run.model, run.score);
+    });
+    if (byModel.size < 2) return null;
+    const runs = Array.from(byModel, ([model, score]) => ({ model, score }));
+    const scores = runs.map((r) => r.score);
+    const spread = Math.max(...scores) - Math.min(...scores);
+    return spread >= DISAGREEMENT_POINTS ? { spread, runs } : null;
+  }
+
   // Which site a record came from, for "also tracked from LinkedIn".
   const SITE_LABELS = {
     linkedin: "LinkedIn",
@@ -487,6 +507,7 @@ var JOB_FIT_EVALSTORE = (function () {
   }
 
   return {
+    modelDisagreement,
     STATUSES,
     recordKey,
     get,

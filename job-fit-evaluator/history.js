@@ -363,7 +363,8 @@ function evaluationTags(parent, e) {
   tagList(parent, t("result.matches"), e.matches, "tag-green");
   tagList(parent, t("result.gaps"), e.gaps, "tag-amber");
   tagList(parent, t("result.requiredGaps"), e.required_gaps, "tag-red");
-  tagList(parent, t("result.seniority"), [e.seniority_flag, e.level_flag].filter(Boolean), "tag-red");
+  tagList(parent, t("result.seniority"), [e.seniority_flag, e.level_flag].filter(Boolean), "tag-amber");
+  tagList(parent, t("result.unverifiedMatches"), e.unverified_matches, "tag-amber");
   tagList(parent, t("result.scoreCap"), e.score_cap_reasons, "tag-amber");
   if (e.salary) {
     tagList(
@@ -849,7 +850,19 @@ function renderJobDetails(record, { inline = false } = {}) {
     }
     evaluationTags(box, e);
     const coreWork = record.coreWorkOnly || e.core_work_only || [];
-    tagList(box, t("history.warnings"), [...(record.softWarnings || []), ...(coreWork.length ? [t("result.coreWorkDiverges", { terms: coreWork.join(", ") })] : [])], "tag-amber");
+    const disagreement = JOB_FIT_EVALSTORE.modelDisagreement(record);
+    tagList(
+      box,
+      t("history.warnings"),
+      [
+        ...(record.softWarnings || []),
+        ...(coreWork.length ? [t("result.coreWorkDiverges", { terms: coreWork.join(", ") })] : []),
+        ...(disagreement
+          ? [t("result.modelsDisagree", { spread: disagreement.spread, runs: disagreement.runs.map((r) => `${r.model} ${r.score}`).join(", ") })]
+          : []),
+      ],
+      "tag-amber"
+    );
     tagList(box, t("history.domainFlags"), record.domainFlags, "tag-neutral");
     tagList(box, t("result.learningFlags"), record.learningFlags, "tag-neutral");
   }

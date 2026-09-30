@@ -436,6 +436,48 @@ var JOB_FIT_KEYWORDS = (function () {
     return config;
   }
 
+  // --- terms from the candidate profile's own lines ----------------------------
+  //
+  // A profile can say what it's learning and what it isn't, in labelled lines:
+  //   Learning: OpenCV, GoogleTest, ONNX Runtime
+  //   NOT: Kubernetes, game engines, ML model training
+  // (Gaps: works the same as NOT.) Those terms join the Learning list and the
+  // domain flags, so the CV summary is the one place to keep them.
+  const LEARNING_LINE = /^\s*(?:learning(?:\s*\/\s*in progress)?|in progress|currently learning|aprendiendo|en aprendizaje|en apprentissage|apprentissage|aprendendo|em aprendizado)\s*[:：]\s*(.+)$/i;
+  const NOT_LINE = /^\s*(?:not|gaps?|carencias|brechas|lacunes|lacunas)\s*[:：]\s*(.+)$/i;
+  const MAX_TERM_WORDS = 4;
+
+  function splitTerms(list) {
+    return String(list)
+      .split(/[,;·•]|\s+\|\s+/)
+      .map((term) =>
+        term
+          .replace(/\([^)]*\)/g, " ")
+          .replace(/^\s*(?:and|or|no|not|never|without|y|o|sin|pas de|sans|sem|nem)\s+/i, "")
+          .replace(/[.\s]+$/, "")
+          .trim()
+      )
+      // A term is a skill name, not a sentence about one.
+      .filter((term) => term && term.length <= 40 && term.split(/\s+/).length <= MAX_TERM_WORDS);
+  }
+
+  function termsFromProfile(profileText) {
+    const out = { learning: [], not: [] };
+    String(profileText || "")
+      .split(/\n+/)
+      .forEach((line) => {
+        const learning = line.match(LEARNING_LINE);
+        if (learning) {
+          out.learning.push(...splitTerms(learning[1]));
+          return;
+        }
+        const not = line.match(NOT_LINE);
+        if (not) out.not.push(...splitTerms(not[1]));
+      });
+    const unique = (list) => Array.from(new Map(list.map((t) => [t.toLowerCase(), t])).values());
+    return { learning: unique(out.learning), not: unique(out.not) };
+  }
+
   function isEmpty(config) {
     if (!config) return true;
     return !(config.presets || []).length && !(config.phrases || []).length && !(config.patterns || []).length;
@@ -449,6 +491,7 @@ var JOB_FIT_KEYWORDS = (function () {
     computedIds,
     phraseToPattern,
     isShortToken,
+    termsFromProfile,
     patternToPhrase,
     compile,
     emptyConfig,

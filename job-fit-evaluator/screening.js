@@ -334,8 +334,21 @@ var JOB_FIT_SCREEN = (function () {
   // location. A hard reject short-circuits: its flags and warnings are empty,
   // as the page has always stored them. `place` is where the posting was
   // read to be: { country, countries, region, arrangement }.
+  // A config with extra phrases added — the terms from the profile's own
+  // Learning and NOT lines, joined to the lists in Settings.
+  function withPhrases(config, extra) {
+    if (!extra || !extra.length) return config;
+    const base = config || JOB_FIT_KEYWORDS.emptyConfig();
+    return { ...base, phrases: [...(base.phrases || []), ...extra] };
+  }
+
   function screen(text, keywords, context = {}) {
-    const k = keywords || {};
+    const fromProfile = JOB_FIT_KEYWORDS.termsFromProfile(context.profileText);
+    const k = {
+      ...(keywords || {}),
+      domainFlags: withPhrases((keywords || {}).domainFlags, fromProfile.not),
+      learningFlags: withPhrases((keywords || {}).learningFlags, fromProfile.learning),
+    };
     const body = String(text || "");
     const jobSearch = context.jobSearch || null;
     const place = JOB_FIT_GEO.postingPlace({ location: context.location, text: body });

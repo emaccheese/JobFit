@@ -310,6 +310,7 @@
     // authorization, so the rules that depend on the country apply to this
     // posting's country (screening.js).
     const layer1 = JOB_FIT_SCREEN.screen(result.text, activeProfile.keywords, {
+      profileText: activeProfile.profile,
       location: result.location,
       jobSearch: activeProfile.jobSearch,
     });
