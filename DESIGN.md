@@ -1214,17 +1214,68 @@ is the view that tells you to follow up or let it go.
 
 ### Page
 
-The list is what the page is for, so the chrome above it is kept small. The
-standing Backup panel became one **Data** control in the toolbar, and the
-controls bar is sized to stay on a single row — it was wrapping and costing
-60px directly above the first job.
+The list is what the page is for, so the chrome above it is kept small.
 
-**Funnel chips** (All / Not applied / Waiting / In play / Closed) replace the
-grey count line and double as filters, because the question the page should
-answer is "what do I do next?", not "what happened?". Chips and the Status
-dropdown are mutually exclusive — using one clears the other — so the list is
-never filtered by two controls at once. A bucket with nothing in it is hidden
-unless it is the one selected.
+**Layout (2026-09-28).** The page header holds the title, the **profile** being
+viewed (it changes the whole data set, so it isn't one of the filters), **Export
+CSV** and **Settings**. Backup, restore, the setup wizard and the extraction report
+moved to Settings, so the Data menu is gone. From 1100px wide the list and a sticky
+**details pane** sit side by side, like Huntr's or Teal's trackers. Selecting a job
+(click, or `j`/`k`) shows it in the pane and puts it in the address (`#job=…`), so a
+reload or Back lands on the same job. Narrower, the details open under the row as
+before. The pane reads in the order you work a job:
+1. Title, **Open posting**, the site, the status.
+2. Every badge.
+3. The duplicate box.
+4. Verdict and reasoning.
+5. Re-evaluate and Delete.
+6. Notes.
+7. Then reference material: earlier scores, the brief, the full posting.
+
+Deleting moves the pane on to the next job instead of going blank. With nothing
+tracked, the empty state takes the full width and says how to start: the
+shortcut, and a link to set up the on-page button.
+
+**Rows.**
+- The title is a real `<button>`: it used to be a click handler on a `<div>`,
+  which Tab never reached, so a job couldn't be opened without a mouse. It
+  carries `aria-expanded` / `aria-controls` narrow and `aria-current` wide, and
+  its accessible name starts with the score ("Score 84: …") because the coloured
+  box is decoration to a screen reader.
+- The status menu is labelled with the job ("Application status for …").
+- **Open posting ↗** is on the row, not buried in the details.
+- Only the most decisive badge shows, leading the second line so the title keeps
+  the first: hard reject, then needs attention, then possible duplicate, then out
+  of date, then summary only. The details show all of them.
+- The copy button is a 24px target, and the chevron is `aria-hidden`.
+
+**One status filter.** The funnel chips are the filter. The exact-status menu
+and *Hide hard rejects* moved under **More filters**, whose label counts what's
+on inside it ("More filters (1)"), so a list narrowed from a closed menu doesn't
+look like one missing jobs. No matches shows **Clear filters**.
+
+**Keyboard.**
+
+| Key | Action |
+|---|---|
+| `/` | search |
+| `j` / `k` | move through the list, onto the next page past the end, and select in the pane when wide |
+| `Enter` / `o` | open the details, moving focus into the pane when wide |
+| `1`–`7` | set the status of the current job |
+| `x` | tick it for re-evaluation |
+| `Esc` | back to the list, or collapse |
+| `?` | a dialog listing all of them |
+
+Keys are ignored while typing in a field and never override Enter on a button or
+link. Every render rebuilds the rows, so focus is put back on the same control in
+the same row afterwards; a status set with a number key would otherwise drop
+focus to the top of the page. Status changes, notes saved, copies and deletions
+are announced through a polite live region.
+
+**Funnel chips** (All / Not applied / Waiting / In play / Closed) replaced the
+grey count line and double as the filter, because the question the page should
+answer is "what do I do next?", not "what happened?". A bucket with nothing in it
+is hidden unless it is the one selected.
 
 **Order: status on top, then filters, then the list** (2026-09-25). The queue
 moved to the top, away from the list, because it's status, not something you

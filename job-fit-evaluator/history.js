@@ -24,7 +24,6 @@ const selectedKeys = new Set();
 let current = { model: "", fingerprint: null };
 
 const els = {
-  subtitle: document.getElementById("subtitle"),
   profileSelect: document.getElementById("profileSelect"),
   sortSelect: document.getElementById("sortSelect"),
   statusFilter: document.getElementById("statusFilter"),
@@ -35,6 +34,9 @@ const els = {
   pagerTop: document.getElementById("pagerTop"),
   pagerBottom: document.getElementById("pagerBottom"),
   staleChip: document.getElementById("staleChip"),
+  detailPane: document.getElementById("detailPane"),
+  pageStatus: document.getElementById("pageStatus"),
+  moreFiltersLabel: document.getElementById("moreFiltersLabel"),
 };
 
 // Paging. The list had grown past what reads as a list; the page size is a
@@ -174,6 +176,10 @@ function filteredRecords() {
 
 function buildStatusSelect(record, onChange) {
   const select = document.createElement("select");
+  select.className = "status-select";
+  // Without a label a screen reader announced a bare "Not applied" menu with
+  // no hint of which job it belonged to.
+  select.setAttribute("aria-label", t("history.statusFor", { title: record.title || t("history.untitled") }));
   JOB_FIT_EVALSTORE.STATUSES.forEach(({ value, label }) => {
     const opt = document.createElement("option");
     opt.value = value;
@@ -470,7 +476,7 @@ function profileDisplayName(record) {
 // One line, not two. Once you've applied, "applied 3d ago" is the fact that
 // matters; the absolute date is reference and moves to the tooltip.
 function buildWhen(record) {
-  const when = el("div", "when");
+  const when = el("span", "when");
   const activity = JOB_FIT_EVALSTORE.activityTs(record);
   if (record.appliedAt) {
     when.textContent = t("history.appliedAgo", { count: daysSince(record.appliedAt) });
@@ -495,6 +501,7 @@ function buildCopyNameButton(record) {
   btn.type = "button";
   const text = [record.title, record.company].filter(Boolean).join(" — ");
   btn.title = text ? t("history.copyTitle", { text }) : t("history.nothingToCopy");
+  btn.setAttribute("aria-label", btn.title);
   btn.disabled = !text;
   btn.addEventListener("click", async (event) => {
     // The row header toggles the card; copying shouldn't.
@@ -502,6 +509,7 @@ function buildCopyNameButton(record) {
     try {
       await navigator.clipboard.writeText(text);
       btn.textContent = t("history.copiedShort");
+      JOB_FIT_UI.announce(t("history.copiedShort"));
     } catch (err) {
       btn.textContent = t("history.failedShort");
     }
@@ -596,168 +604,564 @@ function renderDupChip() {
   host.appendChild(chip);
 }
 
-function renderJob(record) {
-  const card = el("div", "job");
-  // Closed rows fade rather than disappear: still findable, no longer competing
-  // with the ones that need something from you.
-  const statusClass = { none: "", waiting: "st-applied", active: "st-interviewing", closed: "st-closed" }[
-    statusGroupOf(record)
-  ];
-  if (record.status === "offer") card.classList.add("st-offer");
-  else if (record.status === "ghosted") card.classList.add("st-ghosted");
-  else if (statusClass) card.classList.add(statusClass);
+// Side by side at this width: the list, and the selected job's details in a
+// pane beside it. Narrower, a job's details open under its row instead.
+const wideQuery = matchMedia("(min-width: 1100px)");
 
-  const head = el("div", "job-head");
-  head.appendChild(el("span", "chev", "▶"));
-  head.appendChild(buildSelectBox(record));
+function isWide() {
+  return wideQuery.matches;
+}
 
-  const score = el("div", `score ${record.hardReject ? "red" : scoreClass(record.score)}`, String(record.score ?? "—"));
-  head.appendChild(score);
+// The job shown in the details pane (wide layout), by jobKey. Kept in the
+// address (#job=…) so a reload, or the back button, lands on the same job.
+let selectedKey = null;
 
-  const titleWrap = el("div", "job-title");
-  const strong = el("strong");
-  // Only the title text truncates; the copy button and badges after it stay
-  // visible however long the title is.
-  strong.appendChild(el("span", "title-text", record.title || t("history.untitled")));
-  strong.appendChild(buildCopyNameButton(record));
-  if (record.hardReject) strong.appendChild(el("span", "badge", t("result.hardReject")));
-  else if (record.score == null) strong.appendChild(el("span", "badge badge-muted", t("history.summaryOnly")));
-  // Shown on every qualifying row, not only when the filter is on, so the
-  // actionable jobs stand out while scanning the ordinary list.
+const ICON_OPEN =
+  '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M14 4h6v6M20 4l-9 9M18 14v5a1 1 0 0 1-1 1H5a1 1 0 0 1-1-1V7a1 1 0 0 1 1-1h5"/></svg>';
+
+function setStatusFor(record) {
+  return async (value) => {
+    markSelfWrite(record.jobKey);
+    const updated = await JOB_FIT_EVALSTORE.setStatus(viewProfileId, record.jobKey, value);
+    if (updated) Object.assign(record, updated);
+    JOB_FIT_UI.announce(t("history.statusSet", { status: JOB_FIT_EVALSTORE.statusLabel(value) }));
+    // A full re-render keeps the row in the right place under every sort and
+    // filter; focus is put back where it was (render()).
+    safeRender();
+  };
+}
+
+function openPostingLink(record, { withText = false } = {}) {
+  const link = document.createElement("a");
+  link.href = record.url;
+  link.target = "_blank";
+  link.rel = "noreferrer";
+  const title = record.title || t("history.untitled");
+  if (withText) {
+    link.innerHTML = ICON_OPEN;
+    link.prepend(document.createTextNode(`${t("history.openPosting")} `));
+  } else {
+    link.className = "open-link";
+    link.innerHTML = ICON_OPEN;
+    link.title = t("history.openPosting");
+    link.setAttribute("aria-label", t("history.openPostingFor", { title }));
+  }
+  link.addEventListener("click", (e) => e.stopPropagation());
+  return link;
+}
+
+// Every badge a job has, most decisive first. The row shows only the first,
+// so they don't crowd the title; the details show them all.
+function badgesFor(record) {
+  const list = [];
+  if (record.hardReject) list.push(el("span", "badge", t("result.hardReject")));
   const reason = attentionReason(record);
-  if (reason) strong.appendChild(el("span", "badge badge-attention", reason));
-  const outOfDate = staleReason(record);
-  if (outOfDate) strong.appendChild(el("span", "badge badge-muted badge-stale", outOfDate));
+  if (reason) list.push(el("span", "badge badge-attention", reason));
   const dups = dupGroups.get(record.jobKey);
   if (dups) {
     const badge = el("span", "badge badge-dup", t("history.possibleDuplicateBadge"));
     badge.title = dups.map((d) => t("history.alsoTracked", { what: duplicateSummary(d) })).join("\n");
-    strong.appendChild(badge);
+    list.push(badge);
   }
-  titleWrap.appendChild(strong);
-  titleWrap.appendChild(
-    el("span", null, [record.company, record.location].filter(Boolean).join(" · ") || record.url)
-  );
+  const outOfDate = staleReason(record);
+  if (outOfDate) list.push(el("span", "badge badge-muted", outOfDate));
+  if (!record.hardReject && record.score == null) list.push(el("span", "badge badge-muted", t("history.summaryOnly")));
+  return list;
+}
+
+// What a screen reader hears before the title, since the coloured score box
+// is decoration to it.
+function scoreWords(record) {
+  if (record.hardReject) return `${t("result.hardReject")}: `;
+  if (record.score == null) return "";
+  return `${t("history.scoreAria", { score: record.score })}: `;
+}
+
+function renderRow(record) {
+  const card = el("div", "job");
+  card.dataset.key = record.jobKey;
+  // Closed rows fade rather than disappear: still findable, no longer
+  // competing with the ones that need something from you.
+  const statusClass = { none: "", waiting: "st-applied", active: "st-interviewing", closed: "st-closed" }[statusGroupOf(record)];
+  if (record.status === "offer") card.classList.add("st-offer");
+  else if (record.status === "ghosted") card.classList.add("st-ghosted");
+  else if (statusClass) card.classList.add(statusClass);
+
+  const wide = isWide();
+  const selected = wide && selectedKey === record.jobKey;
+  const open = !wide && openKeys.has(record.jobKey);
+  card.classList.toggle("selected", selected);
+  card.classList.toggle("open", open);
+  const bodyId = `job-body-${CSS.escape(record.jobKey)}`;
+
+  const head = el("div", "job-head");
+  const chev = el("span", "chev", "▶");
+  chev.setAttribute("aria-hidden", "true");
+  head.appendChild(chev);
+  head.appendChild(buildSelectBox(record));
+  const score = el("div", `score ${record.hardReject ? "red" : scoreClass(record.score)}`, record.hardReject ? "✕" : String(record.score ?? "—"));
+  score.setAttribute("aria-hidden", "true");
+  head.appendChild(score);
+
+  const titleWrap = el("div", "job-title");
+  const line = el("div", "title-line");
+  // The title is the row's real control: a button, so a job opens from the
+  // keyboard. It used to be a click handler on a div, which Tab never reached.
+  const titleBtn = el("button", "title-btn");
+  titleBtn.type = "button";
+  titleBtn.appendChild(el("span", "sr-only", scoreWords(record)));
+  titleBtn.appendChild(document.createTextNode(record.title || t("history.untitled")));
+  if (wide) {
+    titleBtn.setAttribute("aria-controls", "detailPane");
+    if (selected) titleBtn.setAttribute("aria-current", "true");
+  } else {
+    titleBtn.setAttribute("aria-expanded", String(open));
+    titleBtn.setAttribute("aria-controls", bodyId);
+  }
+  titleBtn.addEventListener("click", (e) => {
+    e.stopPropagation();
+    activateRow(record.jobKey);
+  });
+  line.appendChild(titleBtn);
+  line.appendChild(buildCopyNameButton(record));
+  titleWrap.appendChild(line);
+  // The one badge that matters most leads the second line, so the title keeps
+  // the full width of the first.
+  const sub = el("span", "job-sub");
+  const [first] = badgesFor(record);
+  if (first) {
+    sub.appendChild(first);
+    sub.appendChild(document.createTextNode(" "));
+  }
+  sub.appendChild(document.createTextNode([record.company, record.location].filter(Boolean).join(" · ") || record.url));
+  sub.appendChild(document.createTextNode(" · "));
+  sub.appendChild(buildWhen(record));
+  titleWrap.appendChild(sub);
   head.appendChild(titleWrap);
 
-  head.appendChild(buildWhen(record));
+  head.appendChild(buildStatusSelect(record, setStatusFor(record)));
+  head.appendChild(openPostingLink(record));
 
-  head.appendChild(
-    buildStatusSelect(record, async (value) => {
-      markSelfWrite(record.jobKey);
-      const updated = await JOB_FIT_EVALSTORE.setStatus(viewProfileId, record.jobKey, value);
-      if (updated) Object.assign(record, updated);
-      // A full re-render is safe now that openKeys preserves expansion, and it
-      // keeps the row in the right place under every sort and filter — the
-      // old partial-update path only refreshed the date column.
-      safeRender();
-    })
-  );
-
-  if (openKeys.has(record.jobKey)) card.classList.add("open");
-  head.addEventListener("click", () => {
-    const nowOpen = card.classList.toggle("open");
-    if (nowOpen) openKeys.add(record.jobKey);
-    else openKeys.delete(record.jobKey);
+  // The rest of the row still works as a big click target for the mouse.
+  head.addEventListener("click", (e) => {
+    if (e.target.closest("button, a, input, select, label")) return;
+    activateRow(record.jobKey);
   });
   card.appendChild(head);
 
-  const body = el("div", "job-body");
+  if (open) {
+    const body = el("div", "job-body");
+    body.id = bodyId;
+    body.appendChild(renderJobDetails(record, { inline: true }));
+    card.appendChild(body);
+  }
+  return card;
+}
 
-  if (dups) body.appendChild(buildDuplicateSection(record, dups));
+// A row's title button: in the wide layout it shows the job in the pane,
+// narrower it opens the job under its row.
+function activateRow(jobKey) {
+  if (isWide()) {
+    selectJob(jobKey);
+    return;
+  }
+  if (openKeys.has(jobKey)) openKeys.delete(jobKey);
+  else openKeys.add(jobKey);
+  render({ focusKey: jobKey });
+}
 
-  body.appendChild(el("h3", null, t("history.link")));
-  const link = document.createElement("a");
-  link.href = record.url;
-  link.textContent = record.url;
-  link.target = "_blank";
-  link.rel = "noreferrer";
-  body.appendChild(link);
+function selectJob(jobKey, { focusPane = false } = {}) {
+  if (!records.some((r) => r.jobKey === jobKey)) return;
+  selectedKey = jobKey;
+  history.replaceState(null, "", `${location.pathname}${location.search}#job=${encodeURIComponent(jobKey)}`);
+  document.querySelectorAll("#list .job").forEach((row) => {
+    const on = row.dataset.key === jobKey;
+    row.classList.toggle("selected", on);
+    const btn = row.querySelector(".title-btn");
+    if (on) btn.setAttribute("aria-current", "true");
+    else btn.removeAttribute("aria-current");
+  });
+  renderDetailPane();
+  if (focusPane) {
+    const heading = els.detailPane.querySelector("h2");
+    if (heading) heading.focus();
+  }
+}
+
+// The details, in the order you read a job: what it is and where, what was
+// decided about it and why, what to do next, your notes, and the reference
+// material (earlier scores, the brief, the posting itself) last.
+function renderJobDetails(record, { inline = false } = {}) {
+  const box = el("div", inline ? "details-inline" : "details");
+
+  if (!inline) {
+    const head = el("div", "d-head");
+    const score = el("div", `score ${record.hardReject ? "red" : scoreClass(record.score)}`, record.hardReject ? "✕" : String(record.score ?? "—"));
+    score.setAttribute("aria-hidden", "true");
+    head.appendChild(score);
+    const titles = el("div");
+    const h2 = el("h2", null, record.title || t("history.untitled"));
+    h2.id = "detailTitle";
+    h2.tabIndex = -1;
+    titles.appendChild(h2);
+    titles.appendChild(el("div", "d-sub", [record.company, record.location].filter(Boolean).join(" · ")));
+    head.appendChild(titles);
+    box.appendChild(head);
+  }
+
+  const links = el("div", "d-links");
+  links.appendChild(openPostingLink(record, { withText: true }));
+  links.appendChild(el("span", "meta-line", JOB_FIT_EVALSTORE.siteLabel(record)));
+  if (!inline) links.appendChild(buildStatusSelect(record, setStatusFor(record)));
+  box.appendChild(links);
+
+  const badges = badgesFor(record);
+  if (badges.length) {
+    const row = el("div", "d-badges");
+    badges.forEach((b) => row.appendChild(b));
+    box.appendChild(row);
+  }
+
+  const dups = dupGroups.get(record.jobKey);
+  if (dups) box.appendChild(buildDuplicateSection(record, dups));
 
   if (record.hardReject) {
-    tagList(body, t("banner.rejectReason"), [`${record.hardReject.label}: "${record.hardReject.matchedText}"`], "tag-red");
+    tagList(box, t("banner.rejectReason"), [`${record.hardReject.label}: "${record.hardReject.matchedText}"`], "tag-red");
   }
 
   const e = record.evaluation;
   if (e) {
-    body.appendChild(el("h3", null, t("history.verdict")));
+    box.appendChild(el("h3", null, t("history.verdict")));
     const headline = el("div", "verdict-line");
     headline.appendChild(el("strong", null, `${record.score ?? "—"}/100`));
     if (e.verdict) headline.appendChild(el("span", "verdict-word", verdictLabel(e.verdict)));
-    if (record.hardReject) headline.appendChild(el("span", "badge", t("result.hardReject")));
-    body.appendChild(headline);
-    if (e.one_line) body.appendChild(el("div", null, e.one_line));
+    box.appendChild(headline);
+    if (e.one_line) box.appendChild(el("div", null, e.one_line));
     if (record.durationMs) {
-      body.appendChild(
+      const seconds = Math.round(record.durationMs / 1000);
+      box.appendChild(
         el(
           "div",
           "meta-line",
-          `${record.model ? t("history.scoredInBy", { seconds: Math.round(record.durationMs / 1000), model: record.model }) : t("history.scoredIn", { seconds: Math.round(record.durationMs / 1000) })}${usageText(record.usage)}`
+          `${record.model ? t("history.scoredInBy", { seconds, model: record.model }) : t("history.scoredIn", { seconds })}${usageText(record.usage)}`
         )
       );
     }
-    evaluationTags(body, e);
-    tagList(body, t("history.warnings"), record.softWarnings, "tag-amber");
-    tagList(body, t("history.domainFlags"), record.domainFlags, "tag-neutral");
+    evaluationTags(box, e);
+    tagList(box, t("history.warnings"), record.softWarnings, "tag-amber");
+    tagList(box, t("history.domainFlags"), record.domainFlags, "tag-neutral");
   }
 
-  if (!record.hardReject) body.appendChild(buildEvaluateActions(record));
-  appendPreviousResults(body, record);
-
-  body.appendChild(el("h3", null, t("history.condensedBrief")));
-  // Shown exactly as it's copied — the posting AND every model's score and
-  // reasoning. Showing only record.summary made the evaluations look missing
-  // from the brief, when they were being appended at copy time.
-  if (record.summary) {
-    body.appendChild(el("div", "desc", JOB_FIT_EVALSTORE.briefText(record, profileDisplayName(record))));
-    if (!record.lastEvaluatedAt && !(record.previous || []).length) {
-      body.appendChild(
-        el("div", "meta-line", t("history.noScoreYet"))
-      );
-    }
-  }
-  body.appendChild(buildBriefActions(record));
-
-  body.appendChild(el("h3", null, t("history.fullPosting")));
-  body.appendChild(el("div", "desc", record.text || t("history.notStored")));
-
-  body.appendChild(el("h3", null, t("history.notes")));
-  const notes = document.createElement("textarea");
-  notes.className = "notes";
-  notes.value = record.notes || "";
-  notes.placeholder = t("history.notesPlaceholder");
-  body.appendChild(notes);
-
-  const actions = el("div", "row-actions");
-  const savedMsg = el("span", "saved", "");
-  // Saved on blur rather than per keystroke: no debounce to get wrong, and a
-  // storage write per character is pointless.
-  notes.addEventListener("change", async () => {
-    markSelfWrite(record.jobKey);
-    await JOB_FIT_EVALSTORE.update(viewProfileId, record.jobKey, { notes: notes.value });
-    record.notes = notes.value;
-    savedMsg.textContent = t("history.notesSaved");
-    setTimeout(() => (savedMsg.textContent = ""), 1800);
-  });
-  actions.appendChild(savedMsg);
-
+  // Actions: score it again, or delete it.
+  const actions = el("div", "d-actions");
+  if (!record.hardReject) actions.appendChild(buildEvaluateActions(record));
+  actions.appendChild(el("span", "spacer"));
   const del = el("button", "danger", t("history.deleteEntry"));
   del.type = "button";
   JOB_FIT_UI.armConfirm(del, {
     confirmLabel: t("history.deleteAgain"),
     onConfirm: async () => {
+      // The pane moves on to the next job rather than going blank.
+      const order = lastShown.map((r) => r.jobKey);
+      const next = order[order.indexOf(record.jobKey) + 1] || order[order.indexOf(record.jobKey) - 1] || null;
       markSelfWrite(record.jobKey);
       await JOB_FIT_EVALSTORE.remove(viewProfileId, record.jobKey);
       records = records.filter((r) => r.jobKey !== record.jobKey);
       openKeys.delete(record.jobKey);
-      render();
+      if (selectedKey === record.jobKey) selectedKey = next;
+      JOB_FIT_UI.announce(t("history.deleted", { title: record.title || t("history.untitled") }));
+      render({ focusKey: next });
     },
   });
   actions.appendChild(del);
-  body.appendChild(actions);
+  box.appendChild(actions);
 
-  card.appendChild(body);
-  return card;
+  // Notes. Saved on change (blur) rather than per keystroke: no debounce to get
+  // wrong, and a storage write per character is pointless.
+  const notesId = `notes-${inline ? "inline-" : ""}${CSS.escape(record.jobKey)}`;
+  const notesLabel = el("h3");
+  const label = el("label", null, t("history.notes"));
+  label.htmlFor = notesId;
+  notesLabel.appendChild(label);
+  box.appendChild(notesLabel);
+  const notes = document.createElement("textarea");
+  notes.className = "notes";
+  notes.id = notesId;
+  notes.value = record.notes || "";
+  notes.placeholder = t("history.notesPlaceholder");
+  box.appendChild(notes);
+  const savedMsg = el("span", "saved", "");
+  notes.addEventListener("change", async () => {
+    markSelfWrite(record.jobKey);
+    await JOB_FIT_EVALSTORE.update(viewProfileId, record.jobKey, { notes: notes.value });
+    record.notes = notes.value;
+    savedMsg.textContent = t("history.notesSaved");
+    JOB_FIT_UI.announce(t("history.notesSaved"));
+    setTimeout(() => (savedMsg.textContent = ""), 1800);
+  });
+  box.appendChild(savedMsg);
+
+  appendPreviousResults(box, record);
+
+  box.appendChild(el("h3", null, t("history.condensedBrief")));
+  // Shown exactly as it's copied — the posting AND every model's score and
+  // reasoning.
+  if (record.summary) {
+    box.appendChild(el("div", "desc", JOB_FIT_EVALSTORE.briefText(record, profileDisplayName(record))));
+    if (!record.lastEvaluatedAt && !(record.previous || []).length) box.appendChild(el("div", "meta-line", t("history.noScoreYet")));
+  }
+  box.appendChild(buildBriefActions(record));
+
+  box.appendChild(el("h3", null, t("history.fullPosting")));
+  box.appendChild(el("div", "desc", record.text || t("history.notStored")));
+  return box;
+}
+
+function renderDetailPane() {
+  const pane = els.detailPane;
+  // Nothing tracked: the list's empty state gets the whole width rather than
+  // sitting next to an empty box.
+  pane.closest(".split").classList.toggle("no-jobs", !records.length);
+  if (!isWide() || !records.length) {
+    pane.innerHTML = "";
+    return;
+  }
+  const record = records.find((r) => r.jobKey === selectedKey);
+  // Same job as before: keep where the pane was scrolled to.
+  const keepScroll = pane.dataset.key === selectedKey ? pane.scrollTop : 0;
+  pane.innerHTML = "";
+  pane.dataset.key = record ? record.jobKey : "";
+  if (!record) {
+    pane.appendChild(el("div", "pane-empty", records.length ? t("history.selectJob") : ""));
+    return;
+  }
+  pane.appendChild(renderJobDetails(record));
+  pane.scrollTop = keepScroll;
+}
+
+// Where keyboard focus was in the list before a re-render, so it can be put
+// back: a status set with a number key rebuilds every row, and focus must not
+// fall back to the top of the page.
+function captureListFocus() {
+  const active = document.activeElement;
+  const row = active && active.closest && active.closest("#list .job");
+  if (!row) return null;
+  const kind = ["title-btn", "status-select", "select-box", "copy-name", "open-link"].find((c) => active.classList.contains(c)) || "title-btn";
+  return { key: row.dataset.key, kind };
+}
+
+function restoreListFocus(focus) {
+  if (!focus) return;
+  const row = Array.from(document.querySelectorAll("#list .job")).find((r) => r.dataset.key === focus.key);
+  const target = row && (row.querySelector(`.${focus.kind}`) || row.querySelector(".title-btn"));
+  if (target) target.focus({ preventScroll: false });
+}
+
+function rowFor(jobKey) {
+  return Array.from(document.querySelectorAll("#list .job")).find((r) => r.dataset.key === jobKey) || null;
+}
+
+function focusRow(jobKey) {
+  const row = rowFor(jobKey);
+  if (!row) return;
+  row.querySelector(".title-btn").focus();
+  row.scrollIntoView({ block: "nearest" });
+}
+
+// --- empty states -----------------------------------------------------------
+
+async function renderEmpty() {
+  const box = el("div", "empty");
+  box.appendChild(el("h2", null, t("history.emptyTitle")));
+  let shortcut = "";
+  try {
+    const cmd = (await chrome.commands.getAll()).find((c) => c.name === "evaluate-tab");
+    shortcut = (cmd && cmd.shortcut) || "";
+  } catch (err) {
+    /* commands API unavailable */
+  }
+  box.appendChild(el("p", null, shortcut ? t("history.emptyBody", { shortcut }) : t("history.emptyBodyNoShortcut")));
+  const actions = el("div", "actions");
+  const onPage = el("button", null, t("history.emptyOnPage"));
+  onPage.type = "button";
+  onPage.addEventListener("click", () => openSettings("onpage"));
+  actions.appendChild(onPage);
+  box.appendChild(actions);
+  return box;
+}
+
+function renderNoMatches() {
+  const box = el("div", "empty");
+  box.appendChild(el("p", null, t("history.noMatches")));
+  const actions = el("div", "actions");
+  const clear = el("button", null, t("history.clearFilters"));
+  clear.type = "button";
+  clear.addEventListener("click", () => {
+    groupFilter = null;
+    els.statusFilter.value = "all";
+    els.search.value = "";
+    els.hideRejects.checked = false;
+    resetPage();
+    render();
+    els.search.focus();
+  });
+  actions.appendChild(clear);
+  box.appendChild(actions);
+  return box;
+}
+
+// "More filters" says how many of its filters are on, so a list narrowed from
+// inside the closed menu doesn't look like a list with jobs missing.
+function renderMoreFiltersLabel() {
+  const count = (els.statusFilter.value !== "all" ? 1 : 0) + (els.hideRejects.checked ? 1 : 0);
+  els.moreFiltersLabel.textContent = count ? t("history.moreFiltersCount", { count }) : t("history.moreFilters");
+}
+
+// --- keyboard ---------------------------------------------------------------
+//
+// One key per action, ignored while typing in a field, so they never get in
+// the way of search or notes. The same list is in the "?" dialog.
+
+const SHORTCUTS = [
+  { keys: ["/"], label: () => t("history.kbSearch") },
+  { keys: ["j", "k"], label: () => t("history.kbMove") },
+  { keys: ["Enter", "o"], label: () => t("history.kbOpen") },
+  { keys: ["x"], label: () => t("history.kbSelect") },
+  { keys: ["1", "…", "7"], label: () => t("history.kbStatus", { list: JOB_FIT_EVALSTORE.STATUSES.map((s, i) => `${i + 1} ${s.label}`).join(", ") }) },
+  { keys: ["Esc"], label: () => t("history.kbClose") },
+  { keys: ["?"], label: () => t("history.kbHelp") },
+];
+
+function renderShortcutsList() {
+  const list = document.getElementById("shortcutsList");
+  list.innerHTML = "";
+  SHORTCUTS.forEach(({ keys, label }) => {
+    const dt = el("dt");
+    keys.forEach((k, i) => {
+      if (k === "…") {
+        dt.appendChild(document.createTextNode(" – "));
+        return;
+      }
+      if (i && keys[i - 1] !== "…") dt.appendChild(document.createTextNode(" "));
+      dt.appendChild(el("kbd", null, k));
+    });
+    list.appendChild(dt);
+    list.appendChild(el("dd", null, label()));
+  });
+}
+
+function openShortcuts() {
+  const dialog = document.getElementById("shortcutsDialog");
+  renderShortcutsList();
+  if (!dialog.open) dialog.showModal();
+}
+
+function currentKey() {
+  const active = document.activeElement;
+  const row = active && active.closest && active.closest("#list .job");
+  if (row) return row.dataset.key;
+  if (active && els.detailPane.contains(active)) return selectedKey;
+  return isWide() ? selectedKey : null;
+}
+
+function moveBy(delta) {
+  const order = lastShown.map((r) => r.jobKey);
+  if (!order.length) return;
+  // Nothing in the list has focus yet: the first press lands on the job the
+  // pane is already showing rather than skipping past it.
+  const active = document.activeElement;
+  const inList = active && ((active.closest && active.closest("#list .job")) || els.detailPane.contains(active));
+  if (!inList && isWide() && order.includes(selectedKey)) {
+    focusRow(selectedKey);
+    return;
+  }
+  const from = order.indexOf(currentKey());
+  let index = from === -1 ? (delta > 0 ? 0 : order.length - 1) : from + delta;
+  const pages = ui.pageSize ? Math.ceil(lastVisible.length / ui.pageSize) : 1;
+  // Past the end of the page: carry on onto the next (or previous) one.
+  if (index >= order.length && page < pages - 1) {
+    goToPage(page + 1);
+    index = 0;
+  } else if (index < 0 && page > 0) {
+    goToPage(page - 1);
+    index = lastShown.length - 1;
+  }
+  const keys = lastShown.map((r) => r.jobKey);
+  const key = keys[Math.max(0, Math.min(keys.length - 1, index))];
+  if (isWide()) selectJob(key);
+  focusRow(key);
+}
+
+function onKeydown(e) {
+  if (e.defaultPrevented || e.metaKey || e.ctrlKey || e.altKey) return;
+  if (document.getElementById("shortcutsDialog").open) return; // the dialog handles its own keys
+  const target = e.target;
+  const typing = target.isContentEditable || /^(INPUT|TEXTAREA|SELECT)$/.test(target.tagName);
+
+  if (e.key === "Escape") {
+    if (target === els.search && els.search.value) return; // native: clears the search
+    if (typing) {
+      target.blur();
+      return;
+    }
+    const key = currentKey();
+    if (els.detailPane.contains(document.activeElement) && key) {
+      e.preventDefault();
+      focusRow(key);
+    } else if (!isWide() && key && openKeys.has(key)) {
+      e.preventDefault();
+      activateRow(key);
+    }
+    return;
+  }
+  if (typing) return;
+
+  const key = currentKey();
+  switch (e.key) {
+    case "/":
+      e.preventDefault();
+      els.search.focus();
+      els.search.select();
+      return;
+    case "j":
+      e.preventDefault();
+      moveBy(1);
+      return;
+    case "k":
+      e.preventDefault();
+      moveBy(-1);
+      return;
+    case "?":
+      e.preventDefault();
+      openShortcuts();
+      return;
+    case "o":
+    case "Enter": {
+      // Enter on a button or link already does what it says.
+      if (e.key === "Enter" && target.closest("button, a, summary")) return;
+      if (!key) return;
+      e.preventDefault();
+      if (isWide()) selectJob(key, { focusPane: true });
+      else activateRow(key);
+      return;
+    }
+    case "x": {
+      const box = key && rowFor(key) && rowFor(key).querySelector(".select-box");
+      if (box && !box.disabled) {
+        e.preventDefault();
+        box.click();
+      }
+      return;
+    }
+    default:
+      if (/^[1-9]$/.test(e.key) && key) {
+        const status = JOB_FIT_EVALSTORE.STATUSES[Number(e.key) - 1];
+        const record = records.find((r) => r.jobKey === key);
+        if (!status || !record) return;
+        e.preventDefault();
+        setStatusFor(record)(status.value);
+      }
+  }
 }
 
 // ---------------------------------------------------------------------------
@@ -1037,7 +1441,14 @@ function watchForChanges() {
   });
 }
 
-function render() {
+// Every render rebuilds the rows. What the user was doing survives it: which
+// jobs are open or ticked (held outside the DOM), the job in the details pane,
+// and where keyboard focus was.
+let renderToken = 0;
+
+function render({ focusKey } = {}) {
+  const token = ++renderToken;
+  const focus = focusKey ? { key: focusKey, kind: "title-btn" } : captureListFocus();
   dupGroups = JOB_FIT_EVALSTORE.duplicateGroups(records);
   if (groupFilter === "duplicates" && !dupGroups.size) groupFilter = null;
   renderDupChip();
@@ -1046,6 +1457,7 @@ function render() {
     if (!records.some((r) => r.jobKey === key && canReevaluate(r))) selectedKeys.delete(key);
   }
   renderStaleChip();
+  renderMoreFiltersLabel();
   const visible = visibleRecords();
 
   // Clamped rather than reset: a job leaving the list (deleted, or no longer
@@ -1055,26 +1467,28 @@ function render() {
   page = Math.min(page, pages - 1);
   const shown = ui.pageSize ? visible.slice(page * size, page * size + size) : visible;
 
+  // The pane always shows a job the list can reach: the one asked for, or
+  // the first on screen when that one is filtered out.
+  if (isWide()) {
+    if (!visible.some((r) => r.jobKey === selectedKey)) selectedKey = shown.length ? shown[0].jobKey : null;
+  }
+
   els.list.innerHTML = "";
   if (!records.length) {
-    els.list.appendChild(
-      el("div", "empty", t("history.empty"))
-    );
+    renderEmpty().then((box) => {
+      if (token === renderToken) els.list.appendChild(box);
+    });
   } else if (!visible.length) {
-    els.list.appendChild(el("div", "empty", t("history.noMatches")));
+    els.list.appendChild(renderNoMatches());
   } else {
-    shown.forEach((record) => els.list.appendChild(renderJob(record)));
+    shown.forEach((record) => els.list.appendChild(renderRow(record)));
   }
 
   renderToolbar(visible, shown);
   renderPager(els.pagerTop, visible.length, pages, { withSize: true });
   renderPager(els.pagerBottom, visible.length, pages, { withSize: false });
-
-  const profileName = (store.profiles.find((p) => p.id === viewProfileId) || {}).name || "";
-  els.subtitle.textContent =
-    visible.length === records.length
-      ? profileName
-      : t("history.showingOf", { name: profileName, shown: visible.length, total: records.length });
+  renderDetailPane();
+  restoreListFocus(focus);
 }
 
 function goToPage(n) {
@@ -1227,31 +1641,13 @@ function renderProfileOptions() {
   els.profileSelect.value = store.profiles.some((p) => p.id === wanted) ? wanted : store.profiles[0].id;
 }
 
-// ---------------------------------------------------------------------------
-// Backup / restore (backup.js; also in Settings › Data)
-// ---------------------------------------------------------------------------
-
-function showBackupStatus(text, isError = false) {
-  const box = document.getElementById("backupStatus");
-  box.textContent = text;
-  // Explicitly reset: the probe report leaves a monospace neutral style here.
-  box.className = `backup-status${isError ? " error" : ""}`;
-  box.hidden = false;
-}
-
-async function exportData() {
-  showBackupStatus(await JOB_FIT_BACKUP.exportAll());
-}
-
-async function importData(file) {
-  const result = await JOB_FIT_BACKUP.importFile(file);
-  showBackupStatus(result.text, !result.ok);
-  if (!result.ok) return;
-  // The module-level store, not a local copy: the selector below is rebuilt
-  // from it, and an imported profile has to appear there.
-  store = await JOB_FIT_PROFILES.load();
-  renderProfileOptions();
-  await loadProfile(els.profileSelect.value);
+// Results of a bulk action (re-evaluating the ticked jobs), in a status box
+// under the filters. Backup, restore and the extraction report are in
+// Settings › Data.
+function showPageStatus(text, isError = false) {
+  els.pageStatus.textContent = text;
+  els.pageStatus.className = `page-status${isError ? " error" : ""}`;
+  els.pageStatus.hidden = false;
 }
 
 async function loadCurrentScoring() {
@@ -1486,23 +1882,19 @@ async function requeueSelected(btn) {
   }
 
   const left = selectedKeys.size;
-  showBackupStatus(full ? t("history.bulkQueuedFull", { queued, count: left }) : t("history.bulkQueued", { count: queued }));
+  showPageStatus(full ? t("history.bulkQueuedFull", { queued, count: left }) : t("history.bulkQueued", { count: queued }));
   render();
   refreshQueue();
 }
 
-async function showProbeReport() {
-  const report = await JOB_FIT_BACKUP.probeReport();
-  const box = document.getElementById("backupStatus");
-  box.className = "backup-status neutral";
-  box.textContent = report.text;
-  box.hidden = false;
-}
+let viewProfileIdLoaded = null;
 
 async function loadProfile(profileId) {
   viewProfileId = profileId;
   openKeys.clear();
   selectedKeys.clear();
+  if (profileId !== viewProfileIdLoaded) selectedKey = null;
+  viewProfileIdLoaded = profileId;
   await loadCurrentScoring();
   groupFilter = null;
   resetPage();
@@ -1545,39 +1937,39 @@ async function init() {
     relist();
   });
   els.search.addEventListener("input", relist);
-  const dataMenu = document.getElementById("dataMenu");
-  const closeDataMenu = () => dataMenu.removeAttribute("open");
+  // The filter menu closes when you click elsewhere, like any menu.
+  const moreFilters = document.getElementById("moreFilters");
   document.addEventListener("click", (e) => {
-    if (dataMenu.open && !dataMenu.contains(e.target)) closeDataMenu();
+    if (moreFilters.open && !moreFilters.contains(e.target)) moreFilters.removeAttribute("open");
+  });
+  moreFilters.addEventListener("keydown", (e) => {
+    if (e.key === "Escape" && moreFilters.open) {
+      e.stopPropagation();
+      moreFilters.removeAttribute("open");
+      moreFilters.querySelector("summary").focus();
+    }
   });
 
-  document.getElementById("exportCsv").addEventListener("click", () => {
-    closeDataMenu();
-    exportCsv();
+  document.getElementById("exportCsv").addEventListener("click", exportCsv);
+  document.getElementById("openSettings").addEventListener("click", () => openSettings());
+
+  // Keyboard shortcuts, and the list of them.
+  document.addEventListener("keydown", onKeydown);
+  const shortcuts = document.getElementById("shortcutsDialog");
+  document.getElementById("showShortcuts").addEventListener("click", openShortcuts);
+  document.getElementById("closeShortcuts").addEventListener("click", () => shortcuts.close());
+  shortcuts.addEventListener("click", (e) => {
+    if (e.target === shortcuts) shortcuts.close(); // a click on the backdrop
   });
-  document.getElementById("exportData").addEventListener("click", () => {
-    closeDataMenu();
-    exportData();
+
+  // Crossing the width where the list and the details sit side by side.
+  wideQuery.addEventListener("change", () => render());
+  // A #job= typed or pasted into the address, or reached with Back.
+  window.addEventListener("hashchange", () => {
+    const wanted = new URLSearchParams(location.hash.slice(1)).get("job");
+    if (wanted && wanted !== selectedKey) revealJob(wanted);
   });
-  document.getElementById("probeReport").addEventListener("click", () => {
-    closeDataMenu();
-    showProbeReport();
-  });
-  // For whichever profile this page is showing, not the popup's active one:
-  // this is where you're looking at that profile's scores.
-  document.getElementById("runWizard").addEventListener("click", () => {
-    closeDataMenu();
-    openSetupWizard({ mode: "edit", profile: els.profileSelect.value });
-  });
-  document.getElementById("importData").addEventListener("click", () => {
-    closeDataMenu();
-    document.getElementById("importFile").click();
-  });
-  document.getElementById("importFile").addEventListener("change", async (e) => {
-    const file = e.target.files && e.target.files[0];
-    e.target.value = ""; // so picking the same file twice still fires
-    if (file) await importData(file);
-  });
+
   document.getElementById("queuePill").addEventListener("click", () =>
     document.getElementById("queuePanel").scrollIntoView({ behavior: "smooth", block: "start" })
   );
@@ -1596,7 +1988,9 @@ async function init() {
   // on the right job, rather than at the top of a long list.
   const params = new URLSearchParams(location.search);
   const wantedProfile = params.get("profile");
-  const wantedJob = params.get("job");
+  // ?job= from the card; #job= is this page's own, kept as you select jobs.
+  const hashJob = new URLSearchParams(location.hash.slice(1)).get("job");
+  const wantedJob = params.get("job") || hashJob;
   if (wantedProfile && store.profiles.some((p) => p.id === wantedProfile)) {
     els.profileSelect.value = wantedProfile;
   }
@@ -1605,27 +1999,26 @@ async function init() {
   if (wantedJob) revealJob(wantedJob);
 }
 
+// Brings one job into view, clearing any filter that would hide it: selected in
+// the details pane (wide) or opened under its row (narrow), then flashed so it
+// stands out among identical-looking rows.
 function revealJob(jobKey) {
   if (!records.some((r) => r.jobKey === jobKey)) return;
-  openKeys.add(jobKey);
-  // Clear any filter that would hide the job we were asked to show.
   groupFilter = null;
   els.statusFilter.value = "all";
   els.search.value = "";
   els.hideRejects.checked = false;
-  // Open the page the job is on, then find its card on that page.
   const visible = visibleRecords();
   const index = visible.findIndex((r) => r.jobKey === jobKey);
   page = ui.pageSize && index > 0 ? Math.floor(index / ui.pageSize) : 0;
-  render();
-
-  const cards = Array.from(document.querySelectorAll(".job"));
-  const onPage = ui.pageSize ? index - page * ui.pageSize : index;
-  const card = index === -1 ? null : cards[onPage];
-  if (!card) return;
-  card.scrollIntoView({ block: "center", behavior: "smooth" });
-  card.classList.add("flash");
-  setTimeout(() => card.classList.remove("flash"), 1600);
+  if (isWide()) selectedKey = jobKey;
+  else openKeys.add(jobKey);
+  render({ focusKey: jobKey });
+  const row = rowFor(jobKey);
+  if (!row) return;
+  row.scrollIntoView({ block: "center", behavior: "smooth" });
+  row.classList.add("flash");
+  setTimeout(() => row.classList.remove("flash"), 1600);
 }
 
 init();

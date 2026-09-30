@@ -152,9 +152,14 @@ LM Studio goes away.
 **Tracked jobs.** Everything evaluated is kept, sortable by score, with an
 application status pipeline (not applied → applied → interviewing → offer /
 rejected / ghosted), free-text notes, search across the posting body, and CSV
-export.
+export. On a wide window the list and the selected job's details sit side by side;
+narrower, a job opens under its row. The status chips (Needs attention, Not applied,
+Waiting, In play, Closed) are the filter; the exact status and *Hide hard rejects* are
+under **More filters**. It works from the keyboard: `/` search, `j` / `k` next and
+previous job, `Enter` or `o` details, `1`–`7` set the status, `x` tick for
+re-evaluation, `Esc` back, and `?` lists them all.
 
-**Backup.** *Back up all data* writes a JSON file containing your profiles,
+**Backup** (in **Settings → Data**). *Back up all data* writes a JSON file containing your profiles,
 LM Studio settings and every tracked job — status, notes and briefs included,
 all of which the CSV leaves out. *Restore from backup* merges a file back in
 and **never overwrites anything already present**, so restoring an old backup
