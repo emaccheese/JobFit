@@ -170,12 +170,18 @@ function modelSettingsToStore() {
       model: (state.lm.model || "").trim(),
       timeoutSeconds: Number(state.lm.timeoutSeconds) || JOB_FIT_DEFAULTS.lmStudio.timeoutSeconds,
     },
+    // Without the key, which goes to the vault (saveModelSettings).
     openai: {
-      ...state.oa,
-      apiKey: (state.oa.apiKey || "").trim(),
+      ...Object.fromEntries(Object.entries(state.oa).filter(([k]) => k !== "apiKey")),
       model: (state.oa.model || "").trim(),
     },
   };
+}
+
+async function saveModelSettings() {
+  const settings = modelSettingsToStore();
+  if (await JOB_FIT_VAULT.saveOpenAiKey(state.oa.apiKey)) settings.openai.keySavedAt = Date.now();
+  await chrome.storage.local.set(settings);
 }
 
 // Re-reads the store and replaces only this profile, so an edit made to a
@@ -217,7 +223,7 @@ async function saveNow() {
   setSaveState(t("wiz.saving"));
   try {
     if (state.modelDirty) {
-      await chrome.storage.local.set(modelSettingsToStore());
+      await saveModelSettings();
       state.modelDirty = false;
     }
     if (state.persisted) await saveProfile();
@@ -760,6 +766,22 @@ function renderModelStatus(probe) {
   }
   if (probe.reason === "invalid-url") {
     host.appendChild(callout("bad", t("wiz.model.badUrl")));
+    return;
+  }
+  if (probe.reason === "insecure") {
+    host.appendChild(callout("bad", t("popup.lmInsecure", { origin: probe.origin })));
+    return;
+  }
+  // Off this machine: your CV would go there, so it's your call, made here.
+  if (probe.reason === "not-approved") {
+    const allow = button(t("model.allowEndpoint", { origin: probe.origin }));
+    allow.style.marginTop = "8px";
+    allow.addEventListener("click", async () => {
+      allow.disabled = true;
+      await setEndpointApproved(probe.origin, true);
+      testConnection();
+    });
+    host.appendChild(callout("warn", [el("div", null, t("model.notApprovedHere", { origin: probe.origin })), allow]));
     return;
   }
   if (!probe.ok) {
@@ -1790,6 +1812,8 @@ async function init() {
   const stored = await chrome.storage.local.get([...JOB_FIT_PROVIDER.KEYS, "wizardProgress"]);
   state.lm = { ...JOB_FIT_DEFAULTS.lmStudio, ...(stored.lmStudio || {}) };
   state.oa = { ...JOB_FIT_DEFAULTS.openai, ...(stored.openai || {}) };
+  await JOB_FIT_VAULT.migrate();
+  state.oa.apiKey = (await JOB_FIT_VAULT.openAiKey()) || "";
   state.provider = stored.modelProvider === "openai" ? "openai" : "lmstudio";
 
   let mode = params.get("mode");

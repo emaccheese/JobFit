@@ -642,7 +642,8 @@ function setStatusFor(record) {
 
 function openPostingLink(record, { withText = false } = {}) {
   const link = document.createElement("a");
-  link.href = record.url;
+  // Only ever a web address (a stored record is not trusted to be one).
+  if (JOB_FIT_EVALSTORE.isWebUrl(record.url)) link.href = record.url;
   link.target = "_blank";
   link.rel = "noreferrer";
   const title = record.title || t("history.untitled");

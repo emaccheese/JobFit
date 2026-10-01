@@ -97,9 +97,18 @@ var JOB_FIT_BACKUP = (function () {
     // backup can't silently repoint your endpoint at theirs.
     const current = await chrome.storage.local.get("lmStudio");
     let settingsNote = "";
-    if (payload.lmStudio && !(current.lmStudio && current.lmStudio.model)) {
-      await chrome.storage.local.set({ lmStudio: payload.lmStudio });
-      settingsNote = `\n${t("backup.lmRestored")}`;
+    if (payload.lmStudio && typeof payload.lmStudio === "object" && !(current.lmStudio && current.lmStudio.model)) {
+      // Never an endpoint off this machine: a shared backup would otherwise
+      // send every later evaluation, CV included, wherever it said. That one
+      // is named instead, to set in Settings › Model if it's really yours.
+      const restored = { ...payload.lmStudio };
+      const policy = JOB_FIT_PROVIDER.endpointPolicy(restored.url);
+      if (policy.kind !== "loopback") {
+        restored.url = (current.lmStudio && current.lmStudio.url) || JOB_FIT_DEFAULTS.lmStudio.url;
+        if (policy.origin) settingsNote += `\n${t("backup.urlNotRestored", { origin: policy.origin })}`;
+      }
+      await chrome.storage.local.set({ lmStudio: restored });
+      settingsNote = `\n${t("backup.lmRestored")}${settingsNote}`;
     } else if (payload.lmStudio) {
       settingsNote = `\n${t("backup.lmKept")}`;
     }

@@ -302,7 +302,7 @@
           <div class="field">
             <label class="field-label" for="openAiKey" data-i18n="popup.openAiKey">OpenAI API key</label>
             <input id="openAiKey" type="password" autocomplete="off" spellcheck="false" placeholder="sk-…" aria-describedby="openAiKeyHint">
-            <div class="hint" id="openAiKeyHint" data-i18n="popup.openAiKeyHint">Stored in this browser's extension storage only. Never included in backups.</div>
+            <div class="hint" id="openAiKeyHint" data-i18n="popup.openAiKeyHint">Kept in JobFit's own key store in this browser, out of reach of the job sites you visit. Never included in backups.</div>
           </div>
           <div class="field">
             <label class="field-label" for="openAiTier" data-i18n="popup.model">Model</label>
@@ -410,6 +410,7 @@
   <script src="i18n.js"></script>
   <script src="geo.js"></script>
   <script src="defaults.js"></script>
+  <script src="vault.js"></script>
   <script src="provider.js"></script>
   <script src="keywords.js"></script>
   <script src="profiles.js"></script>

@@ -367,6 +367,10 @@ let lastModelWrite = {};
 // fields this page doesn't show (LM Studio's seed, say) survive a save.
 async function saveModelSettings() {
   const stored = await chrome.storage.local.get(["lmStudio", "openai"]);
+  // The key goes to the vault, not storage; the stamp tells other pages and
+  // the worker it changed.
+  const keyChanged = await JOB_FIT_VAULT.saveOpenAiKey(els.openAiKey.value);
+  const { apiKey, ...storedOpenAi } = stored.openai || {};
   const next = {
     modelProvider: els.modelProvider.value === "openai" ? "openai" : "lmstudio",
     lmStudio: {
@@ -379,8 +383,8 @@ async function saveModelSettings() {
       enableThinking: els.lmStudioEnableThinking.checked,
     },
     openai: {
-      ...(stored.openai || {}),
-      apiKey: els.openAiKey.value.trim(),
+      ...storedOpenAi,
+      keySavedAt: keyChanged ? Date.now() : storedOpenAi.keySavedAt || null,
       model: selectedOpenAiModel(),
       flex: els.openAiFlex.value,
       reasoningEffort: $("openAiReasoningSection").hidden
@@ -399,7 +403,8 @@ async function fillModelFields() {
   const lmStudio = stored.lmStudio || JOB_FIT_DEFAULTS.lmStudio;
   const openai = { ...JOB_FIT_DEFAULTS.openai, ...(stored.openai || {}) };
   els.modelProvider.value = stored.modelProvider === "openai" ? "openai" : "lmstudio";
-  els.openAiKey.value = openai.apiKey || "";
+  await JOB_FIT_VAULT.migrate();
+  els.openAiKey.value = await JOB_FIT_VAULT.openAiKey();
   els.openAiModel.value = openai.model || JOB_FIT_DEFAULTS.openai.model;
   els.openAiFlex.value = ["bulk", "always", "never"].includes(openai.flex) ? openai.flex : "bulk";
   renderTierOptions();
@@ -596,6 +601,21 @@ async function checkModel() {
   box.className = `callout ${verdict.state === "ok" ? "ok" : verdict.state === "warn" ? "warn" : "bad"}`;
   box.textContent = verdict.text;
   box.title = verdict.title || "";
+  // An endpoint off this machine: allowed here, by you, before your CV goes to
+  // it — and the way to stop, once it has been.
+  if (settings.provider !== "openai") {
+    const policy = JOB_FIT_PROVIDER.endpointPolicy(settings.url);
+    if (probe.reason === "not-approved") {
+      box.textContent = t("model.notApprovedHere", { origin: policy.origin });
+      box.appendChild(document.createTextNode(" "));
+      box.appendChild(endpointButton(t("model.allowEndpoint", { origin: policy.origin }), policy.origin, true));
+    } else if (policy.kind === "approval" && probe.reason !== "insecure") {
+      const line = el("div", "hint", t("model.endpointAllowed", { origin: policy.origin }));
+      line.appendChild(document.createTextNode(" "));
+      line.appendChild(endpointButton(t("model.revokeEndpoint"), policy.origin, false, "link"));
+      box.appendChild(line);
+    }
+  }
   if (settings.provider !== "openai" && probe.ok) {
     const list = $("lmModelList");
     list.innerHTML = "";
@@ -605,6 +625,18 @@ async function checkModel() {
       list.appendChild(opt);
     });
   }
+}
+
+function endpointButton(label, origin, allowed, className) {
+  const button = el("button", className || null, label);
+  button.type = "button";
+  button.addEventListener("click", async () => {
+    button.disabled = true;
+    await setEndpointApproved(origin, allowed);
+    JOB_FIT_UI.announce(allowed ? t("model.endpointAllowed", { origin }) : t("model.endpointRevoked", { origin }));
+    checkModel();
+  });
+  return button;
 }
 
 let modelCheckTimer = null;

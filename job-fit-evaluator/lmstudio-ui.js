@@ -35,9 +35,24 @@ function modelsUrlFrom(chatUrl) {
   }
 }
 
+// Whether an endpoint off this machine has been allowed. Only the worker and
+// the extension's pages can read the vault; anywhere else, no.
+async function endpointApproved(origin) {
+  return typeof JOB_FIT_VAULT !== "undefined" && (await JOB_FIT_VAULT.isApprovedOrigin(origin));
+}
+
+// Allowing (or no longer allowing) an endpoint. The stamp in storage is what
+// the worker watches, to resume a queue that paused waiting for this.
+async function setEndpointApproved(origin, allowed) {
+  if (allowed) await JOB_FIT_VAULT.approveOrigin(origin);
+  else await JOB_FIT_VAULT.revokeOrigin(origin);
+  await chrome.storage.local.set({ endpointApprovalStamp: Date.now() });
+}
+
 // Returns { ok, models, url } or { ok: false, reason, url }. `reason` is
-// "invalid-url", "unreachable", "no-key" or "unauthorized", so each caller can
-// word the failure for where it's shown.
+// "invalid-url", "insecure", "not-approved" (with `origin`), "unreachable",
+// "no-key" or "unauthorized", so each caller can word the failure for where
+// it's shown.
 //
 // Takes either a chat URL (LM Studio, the original signature) or a settings
 // object from JOB_FIT_PROVIDER.resolve(), which may point at OpenAI.
@@ -45,6 +60,18 @@ async function probeModels(target, timeoutMs = 2500) {
   const settings = typeof target === "string" ? { provider: "lmstudio", url: target } : target || {};
   const isOpenAi = settings.provider === "openai";
   if (isOpenAi && !settings.apiKey) return { ok: false, reason: "no-key", url: JOB_FIT_PROVIDER.OPENAI_MODELS_URL };
+
+  // An endpoint off this machine has to be allowed first (provider.js
+  // endpointPolicy): the probe itself sends nothing private, but scoring
+  // would, and "connected" would be the wrong answer.
+  if (!isOpenAi) {
+    const policy = JOB_FIT_PROVIDER.endpointPolicy(settings.url);
+    if (policy.kind === "invalid") return { ok: false, reason: "invalid-url", url: null };
+    if (policy.kind === "insecure") return { ok: false, reason: "insecure", url: settings.url, origin: policy.origin };
+    if (policy.kind === "approval" && !(await endpointApproved(policy.origin))) {
+      return { ok: false, reason: "not-approved", url: settings.url, origin: policy.origin };
+    }
+  }
 
   const url = isOpenAi ? JOB_FIT_PROVIDER.OPENAI_MODELS_URL : modelsUrlFrom(settings.url);
   if (!url) return { ok: false, reason: "invalid-url", url: null };
@@ -88,6 +115,8 @@ function describeModelReadiness(settings, probe) {
     return { state: "ok", text: `OpenAI — ${wanted}` };
   }
   if (probe.reason === "invalid-url") return { state: "bad", text: t("popup.lmBadUrl") };
+  if (probe.reason === "insecure") return { state: "bad", text: t("popup.lmInsecure", { origin: probe.origin }) };
+  if (probe.reason === "not-approved") return { state: "warn", text: t("popup.lmNotApproved", { origin: probe.origin }) };
   if (!probe.ok) return { state: "bad", text: t("popup.lmUnreachable"), title: probe.url };
   const loaded = probe.models;
   if (!wanted) {

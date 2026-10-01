@@ -384,6 +384,21 @@ var JOB_FIT_KEYWORDS = (function () {
 
   // Returns [{ source, label }]. The label is what the UI shows when something
   // matches — a category name or the user's own phrase, never a regex.
+  // Raw patterns come from Settings' advanced field or from a restored backup,
+  // and run against every posting — in the page and in the worker. A length
+  // cap, and no quantified group that itself holds a quantifier ((a+)+,
+  // (\w+\s?)*): the shape behind catastrophic backtracking, where one long
+  // posting freezes the tab. A pattern that fails is skipped, like an invalid
+  // one, and stays saved so it can be fixed. Presets and phrases are built by
+  // JobFit and never take this path.
+  const MAX_PATTERN_LENGTH = 300;
+  const NESTED_QUANTIFIER = /\((?:[^()\\]|\\.)*(?:[+*]|\{\d+,\d*\})(?:[^()\\]|\\.)*\)(?:[+*]|\{\d+,\d*\})/;
+
+  function isSafePattern(source) {
+    const text = String(source || "");
+    return text.length > 0 && text.length <= MAX_PATTERN_LENGTH && !NESTED_QUANTIFIER.test(text);
+  }
+
   function compile(config, kind) {
     const entries = [];
     if (!config) return entries;
@@ -404,7 +419,12 @@ var JOB_FIT_KEYWORDS = (function () {
     });
 
     (config.patterns || []).forEach((source) => {
-      if (String(source).trim()) entries.push({ source, label: String(source).trim() });
+      if (!String(source).trim()) return;
+      if (!isSafePattern(source)) {
+        console.warn(`[Job Fit Evaluator] keyword pattern skipped (too long, or nested repetition): ${String(source).slice(0, 80)}`);
+        return;
+      }
+      entries.push({ source, label: String(source).trim() });
     });
 
     return entries;

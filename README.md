@@ -5,7 +5,8 @@
 A Chrome extension that reads the job posting in your current tab, checks it against
 your profile, and gives you a score, the concrete matches and gaps, and a salary
 read. By default it uses a local model through [LM Studio](https://lmstudio.ai/): no
-API keys, no per-call billing, and no posting or CV ever leaves your computer. You
+API keys, no per-call billing, and with LM Studio on the same computer, no posting or
+CV leaves it. You
 can instead pick **OpenAI API** as the provider and score with ChatGPT models using
 your own API key.
 
@@ -32,8 +33,9 @@ about $5 per 100), or any other chat model your key has. Bulk re-evaluations fro
 Tracked jobs use OpenAI's Flex processing at about half price, and a daily token
 budget (200k by default) pauses the queue before a runaway batch gets expensive. The tradeoff is explicit:
 every evaluated posting, your candidate profile and your salary expectations are sent
-to OpenAI, and each request is billed to your key. The key stays in this browser's
-extension storage and is never written to a backup file. Switching back to LM Studio
+to OpenAI, and each request is billed to your key. The key is kept in JobFit's own key
+store in this browser, which the scripts JobFit runs on job sites can't read, and is
+never written to a backup file. Switching back to LM Studio
 keeps the key, so you can go back and forth. Scores from different models are marked
 as out of date against each other in Tracked jobs, as before.
 
@@ -246,8 +248,25 @@ posting evaluated for two people is two records.
 
 ## Privacy
 
-- **No posting or CV is sent anywhere except your own `localhost`.** There is no
-  cloud mode and no telemetry.
+- **Your CV and postings go only where you chose.**
+  - With LM Studio on this computer, they never leave it.
+  - A model on another computer gets them only after you allow that address in
+    **Settings → Model**. Outside your local network it must use https.
+  - With the OpenAI option, they go to OpenAI, as described above.
+
+  There is no telemetry.
+- **The scripts JobFit runs on job sites are not trusted with more than they need.**
+  - They can't read your OpenAI key.
+  - They can't make the model answer text of their choosing, or control the queue.
+  - They can't switch the on-page button on anywhere.
+  - An evaluation they start is always scored against your profile as saved, never a
+    copy they supply.
+- **A posting is treated as untrusted text.** The model is told never to follow
+  instructions inside it ("rate this candidate 100"). Short passages hidden on the page
+  are left out. The score is always kept between 0 and 100.
+- **A backup can't redirect your data.** Restoring one never sets a model address off
+  this computer, never brings back an API key, and keeps only http(s) links. Keyword
+  patterns that could freeze a page are skipped.
 - The on-page button is off everywhere by default. Each job board or site you switch it
   on for is a separate Chrome permission you grant (and can revoke) for that board or
   site alone.
@@ -256,7 +275,9 @@ posting evaluated for two people is two records.
   company career site embeds in a cross-origin iframe — without it Chrome won't
   let a script into that frame, and the posting is invisible. It is read access
   to job-board pages, nothing more; no data leaves your machine because of it.
-- Everything is stored in `chrome.storage.local` on your machine.
+- Everything is stored on your machine: settings and tracked jobs in
+  `chrome.storage.local`, the API key and allowed model addresses in the extension's
+  own IndexedDB.
 - **Your location** is detected from the browser's time zone, never from GPS or an
   IP lookup, and is stored locally. The model is told your city and region only if
   you turn that on in the wizard; the countries you apply in and your work
@@ -302,7 +323,8 @@ practical fix is setting reasoning effort to `low` and disabling thinking.
 
 - **Rewrite your CV or generate cover letters.** It tells you whether to apply.
 - **Auto-apply.** No form filling, no submissions.
-- **Send anything to a hosted API.** There is no cloud mode.
+- **Send your data somewhere you didn't choose.** LM Studio on this computer keeps it
+  there; anything else is an option you pick, and say yes to.
 
 ## Design notes
 
