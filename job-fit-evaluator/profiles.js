@@ -103,6 +103,7 @@ var JOB_FIT_PROFILES = (function () {
         softWarnings: clone(JOB_FIT_DEFAULTS.keywords.softWarnings),
         domainFlags: JOB_FIT_KEYWORDS.emptyConfig(),
         learningFlags: JOB_FIT_KEYWORDS.emptyConfig(),
+        positiveSignals: JOB_FIT_KEYWORDS.defaultConfig("positiveSignals"),
       },
       expectedSalary: normalizeSalary(JOB_FIT_DEFAULTS.expectedSalary),
       jobSearch: blankJobSearch(),
@@ -141,6 +142,11 @@ var JOB_FIT_PROFILES = (function () {
         learningFlags: keywords.learningFlags
           ? JOB_FIT_KEYWORDS.normalizeConfig(keywords.learningFlags, "learningFlags")
           : JOB_FIT_KEYWORDS.emptyConfig("learningFlags"),
+        // Good signs: on by default. Not in the fingerprint — they never
+        // change a score, so switching one off doesn't date saved results.
+        positiveSignals: keywords.positiveSignals
+          ? JOB_FIT_KEYWORDS.normalizeConfig(keywords.positiveSignals, "positiveSignals")
+          : JOB_FIT_KEYWORDS.defaultConfig("positiveSignals"),
       },
       expectedSalary: normalizeSalary(profile.expectedSalary),
       jobSearch: normalizeJobSearch(profile.jobSearch),

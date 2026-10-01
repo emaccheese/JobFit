@@ -258,6 +258,12 @@
   .dup-row .dup-what { font-weight: 600; }
   .dup-row .dup-notes { color: var(--muted); font-style: italic; }
   .dup-row button { padding: 3px 9px; font-size: var(--fs-xs); }
+  .company-line {
+    display: flex; flex-wrap: wrap; align-items: baseline; gap: 4px 12px; margin: 12px 0; padding: 8px 12px;
+    border: 1px solid var(--amber-line); background: var(--amber-soft); color: var(--amber-fg);
+    border-radius: var(--radius-sm); font-size: var(--fs-sm);
+  }
+  .company-line button.link { font-size: var(--fs-xs); }
   a { word-break: break-word; }
 
   /* --- empty states, footer, shortcuts ------------------------------------------ */
@@ -397,6 +403,7 @@
   <script src="keywords.js"></script>
   <script src="profiles.js"></script>
   <script src="evalstore.js"></script>
+  <script src="postingmeta.js"></script>
   <script src="lmstudio-ui.js"></script>
   <script src="ui-shared.js"></script>
   <script src="backup.js"></script>

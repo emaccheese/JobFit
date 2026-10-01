@@ -67,6 +67,21 @@ var JOB_FIT_EVALSTORE = (function () {
     };
   }
 
+  // A posting's requisition id and dates (postingmeta.js). Reading the page
+  // again replaces what it found; what it couldn't see this time — a board
+  // that dropped its "posted" line, a re-evaluation queued from Tracked jobs
+  // with no page at all — keeps what was read before.
+  function mergeMeta(older, newer) {
+    if (!newer) return older || null;
+    if (!older) return newer;
+    const merged = { ...older };
+    ["reqId", "deadline", "postedOn"].forEach((key) => {
+      if (newer[key]) merged[key] = newer[key];
+    });
+    if (newer.postedOn) merged.postedApprox = Boolean(newer.postedApprox);
+    return merged;
+  }
+
   // Writes an evaluation result, preserving the fields the user owns — status,
   // notes, when they applied, when the job was first seen. Re-evaluating a
   // posting must never reset the fact that you already applied to it.
@@ -91,6 +106,7 @@ var JOB_FIT_EVALSTORE = (function () {
       firstSeenAt: now,
       ...(existing || {}),
       ...record,
+      meta: mergeMeta(existing && existing.meta, record.meta),
       previous: kept,
       lastEvaluatedAt: now,
     };
@@ -125,6 +141,7 @@ var JOB_FIT_EVALSTORE = (function () {
       firstSeenAt: now,
       ...(existing || {}),
       ...record,
+      meta: mergeMeta(existing && existing.meta, record.meta),
       lastSummarizedAt: now,
     };
     await chrome.storage.local.set({ [recordKey(record.profileId, record.jobKey)]: merged });
@@ -387,48 +404,132 @@ var JOB_FIT_EVALSTORE = (function () {
   // three words. Containment rather than Jaccard: LinkedIn wraps the same
   // description in extra page text, which a symmetric measure would count
   // against it.
+  //
+  // Each run is kept as a 32-bit hash, sorted, rather than as a string in a
+  // Set: about 3.5 KB a posting instead of tens, which is what makes keeping
+  // them between calls affordable (below). Two different runs sharing a hash
+  // is a one-in-millions overcount, well inside the thresholds' slack.
+  function hashRun(text) {
+    let h = 0x811c9dc5;
+    for (let i = 0; i < text.length; i++) {
+      h ^= text.charCodeAt(i);
+      h = Math.imul(h, 0x01000193);
+    }
+    return h >>> 0;
+  }
+
   function shingles(text) {
     const words = normalizeTitle(String(text || "").slice(0, 4000)).split(" ").filter(Boolean);
-    const set = new Set();
-    for (let i = 0; i + 2 < words.length; i++) set.add(`${words[i]} ${words[i + 1]} ${words[i + 2]}`);
-    return set;
+    const runs = new Uint32Array(Math.max(0, words.length - 2));
+    for (let i = 0; i < runs.length; i++) runs[i] = hashRun(`${words[i]} ${words[i + 1]} ${words[i + 2]}`);
+    runs.sort();
+    let unique = 0;
+    for (let i = 0; i < runs.length; i++) if (i === 0 || runs[i] !== runs[i - 1]) runs[unique++] = runs[i];
+    return runs.subarray(0, unique);
   }
 
+  // Both sorted: one walk through each.
   function containment(a, b) {
-    if (!a.size || !b.size) return 0;
-    const [small, large] = a.size <= b.size ? [a, b] : [b, a];
+    if (!a.length || !b.length) return 0;
+    const [small, large] = a.length <= b.length ? [a, b] : [b, a];
     let shared = 0;
-    small.forEach((s) => {
-      if (large.has(s)) shared++;
-    });
-    return shared / small.size;
+    for (let i = 0, j = 0; i < small.length && j < large.length; ) {
+      if (small[i] === large[j]) {
+        shared++;
+        i++;
+        j++;
+      } else if (small[i] < large[j]) i++;
+      else j++;
+    }
+    return shared / small.length;
   }
 
+  // Kept per record object between calls. Building them is nearly all the
+  // cost, and Tracked jobs looks for duplicates on every render — each
+  // keystroke in its search box — over records that haven't changed. A record
+  // that's replaced (re-evaluated, re-read) is a new object; the text check
+  // covers one updated in place.
+  const shingleMemo = new WeakMap();
+
+  function shinglesOf(record) {
+    const kept = shingleMemo.get(record);
+    if (kept && kept.text === record.text) return kept.runs;
+    const runs = shingles(record.text);
+    shingleMemo.set(record, { text: record.text, runs });
+    return runs;
+  }
+
+  // Same title: most of the text in common is enough. Different titles need
+  // nearly all of it — two roles at one company share the About-us and the
+  // benefits, and a short description can be outweighed by them.
   const DUPLICATE_TEXT_THRESHOLD = 0.6;
+  const RETITLED_TEXT_THRESHOLD = 0.9;
+
+  // Words a title writes two ways, and qualifiers boards add ("- Remote",
+  // "(Hybrid)") that don't make it another job.
+  const TITLE_WORDS = { sr: "senior", snr: "senior", jr: "junior", mgr: "manager", engr: "engineer", eng: "engineer", dev: "developer" };
+  const ARRANGEMENT_WORD = /^(remote|hybrid|onsite|on-site|in-office|remoto|presencial|h[ií]brido|t[ée]l[ée]travail)$/;
+
+  function titleWords(title) {
+    return normalizeTitle(String(title || "").replace(/&/g, " and "))
+      .split(" ")
+      .map((w) => w.replace(/\.$/, ""))
+      .map((w) => TITLE_WORDS[w] || w)
+      .filter((w) => w && !ARRANGEMENT_WORD.test(w));
+  }
+
+  // "Sr. Software Engineer - Remote" and "Senior Software Engineer (Hybrid)"
+  // are one title; so are "Engineering Manager" and "Manager, Engineering".
+  // What follows " - " or " | " is usually a location or a team, and goes.
+  function titleKey(title) {
+    const raw = String(title || "").replace(/\([^)]*\)/g, " ");
+    const head = raw.split(/\s[-–—|]\s/)[0];
+    const words = titleWords(head).length ? titleWords(head) : titleWords(raw);
+    return words.sort().join(" ");
+  }
+
+  // The requisition id, read from the posting (postingmeta.js) or, for a
+  // Workday job saved before that, from its key — which is built on it.
+  function reqIdOf(record) {
+    const id = (record.meta && record.meta.reqId) || (/^workday:[^:]+:(.+)$/.exec(record.jobKey || "") || [])[1];
+    return id ? String(id).toUpperCase().replace(/[^A-Z0-9]/g, "") : null;
+  }
 
   function isDismissedPair(a, b) {
     return (a.notDuplicateOf || []).includes(b.jobKey) || (b.notDuplicateOf || []).includes(a.jobKey);
   }
 
-  // Map<jobKey, [other records]> over one profile's records. Title+company is
-  // the cheap bucket; the text check inside each bucket is what tells the
-  // same posting from two openings that happen to share a title.
+  // Two records at one company: the same opening? Requisition ids decide when
+  // both have one — the same role posted for three cities is three ids and
+  // three jobs, however alike the text. Otherwise the text does, with the
+  // bar depending on whether the titles agree; with no text, the title and
+  // the city.
+  function samePosting(a, b) {
+    const idA = reqIdOf(a);
+    const idB = reqIdOf(b);
+    if (idA && idB) return idA === idB;
+    const keyA = titleKey(a.title);
+    const sameTitle = Boolean(keyA) && keyA === titleKey(b.title);
+    if (a.text && b.text) {
+      return containment(shinglesOf(a), shinglesOf(b)) >= (sameTitle ? DUPLICATE_TEXT_THRESHOLD : RETITLED_TEXT_THRESHOLD);
+    }
+    return sameTitle && normalizeCity(a.location) === normalizeCity(b.location);
+  }
+
+  // Map<jobKey, [other records]> over one profile's records. Bucketed by
+  // company, the one thing every copy of a posting shares; within a company
+  // every pair is compared, since a retitled copy wouldn't share a title
+  // bucket.
   function duplicateGroups(records) {
     const buckets = new Map();
     (records || []).forEach((r) => {
-      const title = normalizeTitle(r.title);
-      if (!title) return;
-      const key = `${title}|${normalizeCompany(r.company)}`;
+      if (!r || !r.jobKey || !(r.title || r.text)) return;
+      const key = normalizeCompany(r.company);
       if (!buckets.has(key)) buckets.set(key, []);
       buckets.get(key).push(r);
     });
 
     const result = new Map();
-    const shingleCache = new Map();
-    const shinglesOf = (r) => {
-      if (!shingleCache.has(r.jobKey)) shingleCache.set(r.jobKey, shingles(r.text));
-      return shingleCache.get(r.jobKey);
-    };
     const add = (a, b) => {
       if (!result.has(a.jobKey)) result.set(a.jobKey, []);
       result.get(a.jobKey).push(b);
@@ -440,11 +541,7 @@ var JOB_FIT_EVALSTORE = (function () {
           const a = group[i];
           const b = group[j];
           if (a.jobKey === b.jobKey || isDismissedPair(a, b)) continue;
-          const same =
-            a.text && b.text
-              ? containment(shinglesOf(a), shinglesOf(b)) >= DUPLICATE_TEXT_THRESHOLD
-              : normalizeCity(a.location) === normalizeCity(b.location);
-          if (!same) continue;
+          if (!samePosting(a, b)) continue;
           add(a, b);
           add(b, a);
         }
@@ -453,9 +550,113 @@ var JOB_FIT_EVALSTORE = (function () {
     return result;
   }
 
+  // The connected sets in duplicateGroups(), as Map<jobKey, set id>: three
+  // copies of one job are one set even when only two pairs were matched.
+  function duplicateSets(groups) {
+    const setOf = new Map();
+    groups.forEach((_, key) => {
+      if (setOf.has(key)) return;
+      const stack = [key];
+      while (stack.length) {
+        const k = stack.pop();
+        if (setOf.has(k)) continue;
+        setOf.set(k, key);
+        (groups.get(k) || []).forEach((d) => stack.push(d.jobKey));
+      }
+    });
+    return setOf;
+  }
+
+  // Copies are only ever matched within a company, so only its jobs are
+  // compared: the rest of the history can't change the answer, and with a
+  // thousand jobs tracked it took the popup and the card ~400 ms to find that
+  // out.
   function findDuplicatesOf(record, records) {
-    const others = (records || []).filter((r) => r.jobKey !== record.jobKey);
+    const company = normalizeCompany(record.company);
+    const others = (records || []).filter((r) => r && r.jobKey !== record.jobKey && normalizeCompany(r.company) === company);
     return duplicateGroups([record, ...others]).get(record.jobKey) || [];
+  }
+
+  // The scored copy of `record` among `records` worth pointing to, or null:
+  // the model run a new evaluation would repeat. One you've applied to comes
+  // first — "you already applied there" is the thing not to miss — then the
+  // newest. A keyword reject doesn't count; re-checking one costs nothing.
+  function scoredDuplicateOf(record, records) {
+    const applied = (r) => (r.status && r.status !== "not_applied" ? 1 : 0);
+    const scored = findDuplicatesOf(record, records).filter((d) => d.evaluation && d.score != null && !d.hardReject);
+    return scored.sort((a, b) => applied(b) - applied(a) || (b.lastEvaluatedAt || 0) - (a.lastEvaluatedAt || 0))[0] || null;
+  }
+
+  // --- company history -----------------------------------------------------
+  //
+  // What happened the other times you went for a job at this company: two
+  // rejections and one still pending is worth knowing before applying a
+  // fourth time. Statuses only — a score says nothing about how they replied.
+
+  // Most decisive first, which is the order they're listed in.
+  const HISTORY_STATUSES = ["offer", "interviewing", "applied", "rejected", "ghosted", "withdrawn"];
+
+  // { tracked, applied, counts } over one profile's records at `company`.
+  // `exclude` drops jobKeys (the job being looked at). Copies of one posting
+  // count once: an application tracked from LinkedIn and from Workday is one
+  // application, with the status that changed last.
+  function companyHistory(records, company, { exclude = [] } = {}) {
+    const key = normalizeCompany(company);
+    if (!key) return null;
+    const skip = new Set(exclude);
+    const atCompany = (records || []).filter((r) => r && r.jobKey && !skip.has(r.jobKey) && normalizeCompany(r.company) === key);
+    const sets = duplicateSets(duplicateGroups(atCompany));
+    const movedAt = (r) => (r.status && r.status !== "not_applied" ? r.statusChangedAt || r.appliedAt || 1 : 0);
+    const jobs = new Map();
+    atCompany.forEach((r) => {
+      const set = sets.get(r.jobKey) || r.jobKey;
+      const kept = jobs.get(set);
+      if (!kept || movedAt(r) > movedAt(kept)) jobs.set(set, r);
+    });
+    const counts = {};
+    jobs.forEach((r) => {
+      if (HISTORY_STATUSES.includes(r.status)) counts[r.status] = (counts[r.status] || 0) + 1;
+    });
+    const applied = Object.values(counts).reduce((sum, n) => sum + n, 0);
+    return { tracked: jobs.size, applied, counts };
+  }
+
+  // "At Garmin: 2 rejections · 1 applied — 5 other jobs tracked there.", or
+  // null when nothing there has gone past Not applied. The record's own copies
+  // on other sites are left out — the duplicate note already covers them.
+  function companyHistoryNote(records, record) {
+    if (!record || !record.company) return null;
+    const exclude = [record.jobKey, ...findDuplicatesOf(record, records).map((d) => d.jobKey)];
+    const history = companyHistory(records, record.company, { exclude });
+    if (!history || !history.applied) return null;
+    const parts = HISTORY_STATUSES.filter((s) => history.counts[s]).map((s) =>
+      tr(`company.${s}`, { count: history.counts[s] }, `${history.counts[s]} ${s}`)
+    );
+    return tr(
+      "company.note",
+      { company: record.company, counts: parts.join(" · "), count: history.tracked },
+      `At ${record.company}: ${parts.join(" · ")} — ${history.tracked} other jobs tracked there.`
+    );
+  }
+
+  // When different models scored the same job 30 or more points apart, the
+  // posting is usually saying two things — short generic requirements over
+  // specialist work — and the gap is worth reading about rather than just two
+  // numbers side by side. The newest score per model counts. Null otherwise.
+  const DISAGREEMENT_POINTS = 30;
+
+  function modelDisagreement(record) {
+    if (!record) return null;
+    const byModel = new Map();
+    [{ model: record.model, score: record.score, hardReject: record.hardReject }, ...(record.previous || [])].forEach((run) => {
+      if (!run || run.hardReject || typeof run.score !== "number" || !run.model) return;
+      if (!byModel.has(run.model)) byModel.set(run.model, run.score);
+    });
+    if (byModel.size < 2) return null;
+    const runs = Array.from(byModel, ([model, score]) => ({ model, score }));
+    const scores = runs.map((r) => r.score);
+    const spread = Math.max(...scores) - Math.min(...scores);
+    return spread >= DISAGREEMENT_POINTS ? { spread, runs } : null;
   }
 
   // Which site a record came from, for "also tracked from LinkedIn".
@@ -487,6 +688,7 @@ var JOB_FIT_EVALSTORE = (function () {
   }
 
   return {
+    modelDisagreement,
     STATUSES,
     recordKey,
     get,
@@ -506,7 +708,13 @@ var JOB_FIT_EVALSTORE = (function () {
     formatEvaluation,
     briefText,
     duplicateGroups,
+    duplicateSets,
     findDuplicatesOf,
+    scoredDuplicateOf,
+    companyHistory,
+    companyHistoryNote,
+    mergeMeta,
+    titleKey,
     siteLabel,
     normalizeTitle,
     normalizeCompany,

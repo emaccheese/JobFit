@@ -1512,7 +1512,7 @@ async function runTest() {
 
   // Layer 1 runs here exactly as it does on a real page — the same rules, per
   // country — and a hard reject stops before the model is ever asked.
-  const screened = JOB_FIT_SCREEN.screen(posting, state.profile.keywords, { jobSearch: jobSearch() });
+  const screened = JOB_FIT_SCREEN.screen(posting, state.profile.keywords, { jobSearch: jobSearch(), profileText: state.profile.profile });
   if (screened.hardReject) {
     const box = el("div", "test-result");
     const line = el("div", "score-line");
@@ -1531,6 +1531,8 @@ async function runTest() {
       profile: state.profile.profile,
       postingText: posting,
       domainFlags: screened.domainFlags,
+      learningFlags: screened.learningFlags,
+      coreWorkOnly: screened.coreWorkOnly,
       expectedSalary: state.profile.expectedSalary,
       jobSearch: jobSearch(),
       place: screened.place,

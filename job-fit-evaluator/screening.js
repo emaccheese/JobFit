@@ -93,6 +93,8 @@ var JOB_FIT_SCREEN = (function () {
     if (gate === "sponsorship") return !status || status === "sponsor";
     if (gate === "citizenship") return status !== "citizen";
     if (gate === "usPerson") return auth.US !== "citizen";
+    // TN status is for Mexican and Canadian citizens working in the US.
+    if (gate === "tn") return JOB_FIT_GEO.authCountry(country) === "US" && (auth.MX === "citizen" || auth.CA === "citizen");
     return true;
   }
 
@@ -100,6 +102,7 @@ var JOB_FIT_SCREEN = (function () {
   function gateOutcome(gate, place, jobSearch) {
     if (!gate || !hasAuthAnswers(jobSearch)) return "fire";
     if (gate === "usPerson") return applies(gate, "US", jobSearch) ? "fire" : "skip";
+    if (gate === "tn") return applies(gate, place.country || "US", jobSearch) ? "fire" : "skip";
     const candidates = place.country
       ? [place.country]
       : place.countries && place.countries.length
@@ -299,20 +302,66 @@ var JOB_FIT_SCREEN = (function () {
   const WORK_HEADING =
     /^(?:(?:key |main |core |primary )?(?:responsibilities|duties)|what you(?:'ll| will) (?:do|be doing|work on)|the role|about the role|your (?:role|impact|mission)|in this role|day[- ]to[- ]day|responsabilidades|funciones|responsabilit[ée]s|atribui[çc][õo]es)\b/i;
 
-  function sections(text) {
-    const out = { requirements: [], work: [] };
-    let current = null;
+  // Company boilerplate: about-us, benefits, equal-opportunity and privacy
+  // text. Useful for nothing a keyword scan looks for except the legal lines
+  // (sponsorship, work authorization, export control), and full of words that
+  // aren't about the job — "a leading cloud company" flagged "cloud".
+  const BOILERPLATE_HEADING =
+    /^(?:who we are|our (?:mission|story|culture|values|company|people)|company (?:overview|description|profile)|why (?:join|work|you'll love)\b.*|(?:our |the )?benefits\b.*|perks\b.*|what we offer|we offer|compensation (?:and|&) benefits|total rewards|equal (?:employment )?opportunit(?:y|ies)\b.*|eeo\b.*|diversity\b.*|(?:reasonable )?accommodations?\b.*|privacy\b.*|disclaimer|legal notice|sobre nosotros|qui[ée]nes somos|nuestra (?:misi[óo]n|cultura)|beneficios|prestaciones|(?:[àa] )?propos de nous|qui sommes-nous|avantages|sobre n[óo]s|quem somos|benef[íi]cios)$/i;
+  // "About Acme" is the company; "About the role" / "About you" are the job.
+  const ABOUT_JOB = /^about (?:the |this )?(?:role|job|position|opportunity|you|team)\b/i;
+
+  function headingKind(line) {
+    const heading = line.replace(/[:：]\s*$/, "").trim();
+    if (!heading || heading.length > 60) return null;
+    if (REQUIREMENT_HEADING.test(heading)) return "requirements";
+    if (WORK_HEADING.test(heading) || ABOUT_JOB.test(heading)) return "work";
+    if (BOILERPLATE_HEADING.test(heading) || /^about\b/i.test(heading)) return "boilerplate";
+    // Any other short title-like line ("Location", "What we're looking for")
+    // starts a section of its own, so boilerplate never swallows what follows.
+    const words = heading.split(/\s+/);
+    if (words.length <= 7 && !/[.!?]$/.test(heading) && (/[:：]\s*$/.test(line) || /^[A-Z0-9]/.test(heading))) {
+      const titled = words.filter((w) => /^[A-Z0-9]/.test(w)).length >= Math.ceil(words.length / 2) || /[:：]\s*$/.test(line);
+      if (titled) return "other";
+    }
+    return null;
+  }
+
+  // The posting split into its sections, in order: { kind, lines }. Text
+  // before the first heading is "lead".
+  function segments(text) {
+    const out = [{ kind: "lead", lines: [] }];
     String(text || "")
       .split(/\n+/)
       .forEach((raw) => {
         const line = raw.trim();
         if (!line) return;
-        const heading = line.replace(/[:：]\s*$/, "");
-        if (heading.length <= 60 && REQUIREMENT_HEADING.test(heading)) current = "requirements";
-        else if (heading.length <= 60 && WORK_HEADING.test(heading)) current = "work";
-        else if (current) out[current].push(line);
+        const kind = headingKind(line);
+        if (kind) out.push({ kind, lines: [] });
+        else out[out.length - 1].lines.push(line);
       });
-    return { requirements: out.requirements.join("\n"), work: out.work.join("\n") };
+    return out;
+  }
+
+  function sections(text) {
+    const segs = segments(text);
+    const join = (kind) => segs.filter((s) => s.kind === kind).map((s) => s.lines.join("\n")).join("\n");
+    return { requirements: join("requirements"), work: join("work") };
+  }
+
+  // The posting without its company boilerplate. The whole text when it has
+  // no recognisable headings, or when what's left is implausibly little (a
+  // misread heading must never hide the job itself).
+  function jobText(text) {
+    const body = String(text || "");
+    const segs = segments(body);
+    if (!segs.some((s) => s.kind === "boilerplate")) return body;
+    const kept = segs
+      .filter((s) => s.kind !== "boilerplate")
+      .map((s) => s.lines.join("\n"))
+      .join("\n")
+      .trim();
+    return kept.length < 200 && body.length >= 1000 ? body : kept;
   }
 
   // Domain flags the work section describes and the requirements never name.
@@ -327,6 +376,31 @@ var JOB_FIT_SCREEN = (function () {
     );
   }
 
+  // --- good signs ---------------------------------------------------------------
+  //
+  // What speaks for a job, not only against it: relocation offered, visa
+  // sponsorship offered, a TN visa mentioned. A match right after a negation
+  // ("we are not able to offer relocation assistance") doesn't count.
+  const NEGATION_BEFORE = /\b(no|not|n't|unable|cannot|won't|without|never|ineligible|sin|no se|pas|ne|n[ãa]o|sem)\b[^.\n]{0,30}$/i;
+
+  function positiveLabels(patterns, text) {
+    const seen = new Set();
+    const labels = [];
+    patterns.forEach((item) => {
+      const re = new RegExp(item.re.source, item.re.flags.includes("g") ? item.re.flags : `${item.re.flags}g`);
+      for (const m of text.matchAll(re)) {
+        if (NEGATION_BEFORE.test(text.slice(Math.max(0, m.index - 40), m.index))) continue;
+        const label = cleanMatch(m[0]);
+        if (label && !seen.has(label.toLowerCase())) {
+          seen.add(label.toLowerCase());
+          labels.push(label);
+        }
+        break;
+      }
+    });
+    return labels;
+  }
+
   // --- the screen -----------------------------------------------------------
 
   // Everything Layer 1 decides about a posting, from a profile's keyword
@@ -334,8 +408,21 @@ var JOB_FIT_SCREEN = (function () {
   // location. A hard reject short-circuits: its flags and warnings are empty,
   // as the page has always stored them. `place` is where the posting was
   // read to be: { country, countries, region, arrangement }.
+  // A config with extra phrases added — the terms from the profile's own
+  // Learning and NOT lines, joined to the lists in Settings.
+  function withPhrases(config, extra) {
+    if (!extra || !extra.length) return config;
+    const base = config || JOB_FIT_KEYWORDS.emptyConfig();
+    return { ...base, phrases: [...(base.phrases || []), ...extra] };
+  }
+
   function screen(text, keywords, context = {}) {
-    const k = keywords || {};
+    const fromProfile = JOB_FIT_KEYWORDS.termsFromProfile(context.profileText);
+    const k = {
+      ...(keywords || {}),
+      domainFlags: withPhrases((keywords || {}).domainFlags, fromProfile.not),
+      learningFlags: withPhrases((keywords || {}).learningFlags, fromProfile.learning),
+    };
     const body = String(text || "");
     const jobSearch = context.jobSearch || null;
     const place = JOB_FIT_GEO.postingPlace({ location: context.location, text: body });
@@ -347,30 +434,41 @@ var JOB_FIT_SCREEN = (function () {
       place,
       jobSearch || {}
     );
-    if (hardReject) return { hardReject, domainFlags: [], learningFlags: [], coreWorkOnly: [], softWarnings: [], place: where };
+    if (hardReject) return { hardReject, domainFlags: [], learningFlags: [], coreWorkOnly: [], softWarnings: [], positiveSignals: [], place: where };
 
+    // Hard rejects above, and the legal warnings (the gated ones: sponsorship,
+    // work authorization, export control), read the whole posting — that
+    // language lives in the boilerplate. Everything else reads the job itself.
+    const job = jobText(body);
     const warningPatterns = compileConfig(k.softWarnings, "softWarnings").filter(
       (entry) => gateOutcome(entry.gate, place, jobSearch || {}) !== "skip"
     );
     const softWarnings = [
       ...downgraded,
-      ...matchedLabels(warningPatterns, body),
-      ...computedWarnings(JOB_FIT_KEYWORDS.computedIds(k.softWarnings, "softWarnings"), body, place, jobSearch),
+      ...matchedLabels(warningPatterns.filter((entry) => entry.gate), body),
+      ...matchedLabels(warningPatterns.filter((entry) => !entry.gate), job),
+      ...computedWarnings(JOB_FIT_KEYWORDS.computedIds(k.softWarnings, "softWarnings"), job, place, jobSearch),
     ];
     // A term on the learning list is informational only, even if it's still
     // on the domain-flag list too: learning it is the more recent statement.
-    const learningFlags = matchedLabels(compileConfig(k.learningFlags, "learningFlags"), body);
+    const learningFlags = matchedLabels(compileConfig(k.learningFlags, "learningFlags"), job);
     const learning = new Set(learningFlags.map((l) => l.toLowerCase()));
     const flagPatterns = compileConfig(k.domainFlags, "domainFlags");
+    const signalPatterns = compileConfig(k.positiveSignals, "positiveSignals").filter(
+      (entry) => gateOutcome(entry.gate, place, jobSearch || {}) !== "skip"
+    );
     return {
       hardReject: null,
-      domainFlags: matchedLabels(flagPatterns, body).filter((l) => !learning.has(l.toLowerCase())),
+      domainFlags: matchedLabels(flagPatterns, job).filter((l) => !learning.has(l.toLowerCase())),
       learningFlags,
       coreWorkOnly: coreWorkOnly(flagPatterns, body).filter((l) => !learning.has(l.toLowerCase())),
       softWarnings,
+      // Relocation and sponsorship offers are often stated in the benefits
+      // or legal text, so the whole posting is read for them.
+      positiveSignals: positiveLabels(signalPatterns, body),
       place: where,
     };
   }
 
-  return { compileConfig, matchedLabels, cleanMatch, findHardReject, screen, sections, requiredLanguages, timeZoneRequirement, gateOutcome };
+  return { compileConfig, matchedLabels, cleanMatch, findHardReject, screen, sections, jobText, requiredLanguages, timeZoneRequirement, gateOutcome };
 })();

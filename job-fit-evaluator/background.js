@@ -61,6 +61,8 @@ CRITICAL — matches and gaps must be derived from what THIS POSTING actually st
 - If the posting requires something the profile never mentions — even if the profile doesn't explicitly call it out as a gap — it belongs in "gaps" (and "required_gaps" if the posting marks it required). Silence in the profile on a stated requirement IS a gap.
 - Do not restate the candidate profile's own "Gaps:" list unless those exact items also appear as requirements in this posting.
 - Don't list something as a match if you've also listed a closely related required skill as a gap (e.g. don't claim "deep learning architecture experience" as a match while listing PyTorch/TensorFlow as gaps — those are the tools that experience would require).
+- List a match only when the candidate profile itself states that skill or experience. Never credit an expertise the profile doesn't mention (e.g. "graphics expertise" for a profile that never mentions graphics), even if it seems adjacent.
+- Terms on the profile's "Learning:" line are skills in progress: a requirement for one is at most a minor gap, never a cap. Terms on its "NOT:" or "Gaps:" line are real mismatches.
 - Never list the candidate's own stated specialization or strengths as a reason against fit (e.g. "specialized imaging focus" is not a weakness) unless the posting explicitly says that specialization is a mismatch. Only genuinely unmet posting requirements belong in gaps/one_line's reasoning.
 
 CRITICAL — classify every gap before placing it: for each item in "gaps", explicitly check whether the posting lists it under a Required/Must-have section or a Preferred/Nice-to-have section (headings vary: "Requirements" vs "Nice to have", "must have" vs "bonus points", etc.). Only items the posting itself marks as required belong in "required_gaps". An item under Preferred/Nice-to-have must NEVER appear in required_gaps, even if it seems important to you. The one exception is a DETECTED DOMAIN-FLAG TERM whose work the responsibilities require — see scoring guidance.
@@ -781,6 +783,12 @@ function toAmount(value) {
   return m ? Math.round(Number(m[1]) * (m[2] ? 1000 : 1)) : null;
 }
 
+// Words that say how often an amount is paid.
+const MONTHLY_WORDS_RE =
+  /\b(per|a|\/)\s*(month|mo)\b|\bmonthly\b|\bmensual(es)?\b|\bal mes\b|\bpor mes\b|\/\s*mes\b|\bmensuel(le)?s?\b|\bpar mois\b|\bmensa(l|is)\b|\bpor m[êe]s\b/i;
+const YEARLY_WORDS_RE =
+  /\b(per|a|\/)\s*(year|yr|annum)\b|\bannual(ly)?\b|\banual(es)?\b|\bal a[ñn]o\b|\bpor a[ñn]o\b|\/\s*a[ñn]o\b|\bpar an(n[ée]e)?\b|\bannuel(le)?s?\b|\bpor ano\b/i;
+
 // The amounts in a stated range ("84,000 to 156,000", "$120K–$140K"),
 // annualized when the text says per month or per hour. Used only when the
 // model put the range in posting_stated but left the numeric fields empty.
@@ -791,13 +799,42 @@ function amountsIn(text) {
     const n = Number(m[1].replace(/[,.\s](?=\d{3}\b)/g, "")) * (m[2] ? 1000 : 1);
     if (n >= 10) amounts.push(n);
   }
-  if (!amounts.length) return [];
-  const factor = /\b(per|a|\/)\s*(month|mo)\b|\bmonthly\b|mensual|mensuel|mensal/i.test(source)
+  if (!amounts.length) return { amounts: [], annualized: false };
+  const factor = MONTHLY_WORDS_RE.test(source)
     ? 12
     : /\b(per|an|\/)\s*(hour|hr)\b|\bhourly\b|por hora|de l'heure/i.test(source)
       ? 2080
       : 1;
-  return amounts.map((n) => Math.round(n * factor));
+  return { amounts: amounts.map((n) => Math.round(n * factor)), annualized: factor !== 1 };
+}
+
+// The posting's text around where it shows an amount, with thousands
+// separators taken out so 45,000 is found as 45000. Null when the amount
+// isn't in the posting as written — the model already converted it.
+function textAround(postingText, amount) {
+  if (amount == null) return null;
+  const text = String(postingText || "").replace(/(\d)[,.\s](?=\d{3}\b)/g, "$1");
+  const index = text.indexOf(String(amount));
+  return index === -1 ? null : text.slice(Math.max(0, index - 120), index + 120);
+}
+
+// Monthly pay reported in the annual fields. Mexican postings quote pay per
+// month ("$45,000 – $60,000 mensuales"), and a model that copies those
+// numbers as they are makes every one look far below the floor. Two ways to
+// tell: the posting says monthly next to numbers it shows exactly as the
+// model reported them (so they weren't converted), or the country quotes pay
+// per month, no period is given, and the figure is far too low to be a year's.
+function looksMonthly({ min, max, currency, salary, place, postingText, expectedSalary }) {
+  const top = max ?? min;
+  if (top == null) return false;
+  const stated = String(salary.posting_stated || "");
+  const around = textAround(postingText, top) ?? textAround(postingText, min);
+  if (YEARLY_WORDS_RE.test(stated) || (around && YEARLY_WORDS_RE.test(around))) return false;
+  if (around && (MONTHLY_WORDS_RE.test(stated) || MONTHLY_WORDS_RE.test(around))) return true;
+  const country = place && place.country;
+  if (!country || JOB_FIT_GEO.periodOf(country) !== "month" || JOB_FIT_GEO.currencyOf(country) !== currency) return false;
+  const expected = annualExpectation(expectedSalary, currency);
+  return Boolean(expected && expected.min != null && top * 4 < expected.min);
 }
 
 // A currency the posting shows next to its numbers, or none.
@@ -833,11 +870,13 @@ function compareSalary(salary, expectedSalary, { place = null, postingText = "" 
 
   let min = toAmount(salary.posting_stated_min);
   let max = toAmount(salary.posting_stated_max);
+  let annualized = false;
   if (min == null && max == null && salary.posting_stated && !/not stated/i.test(salary.posting_stated)) {
     const found = amountsIn(salary.posting_stated);
-    if (found.length) {
-      min = Math.min(...found);
-      max = Math.max(...found);
+    if (found.amounts.length) {
+      min = Math.min(...found.amounts);
+      max = Math.max(...found.amounts);
+      annualized = found.annualized;
     }
   }
 
@@ -850,6 +889,12 @@ function compareSalary(salary, expectedSalary, { place = null, postingText = "" 
       currency = JOB_FIT_GEO.currencyOf(place.country);
       out.currency_inferred = true;
       notes.push(t("bg.currencyInferred", { currency, country: JOB_FIT_I18N.countryName(place.country) }));
+    }
+    if (!annualized && looksMonthly({ min, max, currency, salary, place, postingText, expectedSalary })) {
+      min = min != null ? min * 12 : null;
+      max = max != null ? max * 12 : null;
+      out.monthly_annualized = true;
+      notes.push(t("bg.monthlyAnnualized"));
     }
     out.posting_stated_min = min;
     out.posting_stated_max = max;
@@ -888,38 +933,29 @@ function compareSalary(salary, expectedSalary, { place = null, postingText = "" 
   return { ...out, note, vs_candidate_expectation: verdict };
 }
 
-const SENIORITY_REGEX = /\b(senior|sr\.?|staff|lead|principal|architect|l[íi]der|arquitect[oa]|s[êe]nior|principal|chef d'[ée]quipe|architecte|especialista)\b/i;
+// --- level: pay and experience ----------------------------------------------------
+//
+// Two signals that a role is below the candidate's level, each computed in
+// code rather than left to the model: the posting's pay tops out below the
+// candidate's floor, and it asks for far less experience. Either one alone is
+// only a note — a well-paid role can ask for few years, and a modest band can
+// sit on a senior title — and only both together take points off (below).
 
-// Computed in code for the same reason as compareSalary: this is a
-// keyword-presence check plus arithmetic, not something to leave to the
-// model's judgment. A posting with no seniority language and a salary
-// ceiling well below the candidate's floor is a stronger "skip" signal
-// than any individual skill gap, and testing showed the model didn't
-// reliably surface it on its own.
-function checkSeniorityMismatch(postingText, salary, expectedSalary) {
-  if (SENIORITY_REGEX.test(postingText)) return null;
+// The pay signal, only ever off a salary the POSTING stated (or its realistic
+// top, when it says most offers sit between the minimum and the midpoint).
+// This once fell back to the model's own market estimate, which made the check
+// circular: its hunch about the role set the estimate that then flagged it.
+function paySignal(salary, expectedSalary) {
   if (!salary) return null;
-
-  // Only ever off a salary the POSTING actually stated. This used to fall back
-  // to the model's own estimated_market_max, which made the check circular: the
-  // model's hunch about the role's seniority produced the estimate, the estimate
-  // tripped the flag, and the flag capped the score at 40. A posting that states
-  // no salary gives us nothing to check, so it gets no flag.
   const max = toAmount(salary.posting_realistic_max) ?? toAmount(salary.posting_stated_max);
   const currency = salary.posting_stated_currency;
   if (max == null || !currency) return null;
-
   const expectedRange = annualExpectation(expectedSalary, currency);
-  if (!expectedRange || expectedRange.min == null) return null;
-
-  const threshold = expectedRange.min * 0.8;
-  if (max < threshold) {
-    return t("bg.seniorityFlag", {
-      max: `${JOB_FIT_I18N.formatNumber(max)} ${currency}`,
-      floor: `${JOB_FIT_I18N.formatNumber(expectedRange.min)} ${currency}`,
-    });
-  }
-  return null;
+  if (!expectedRange || expectedRange.min == null || max >= expectedRange.min) return null;
+  return t("bg.payBelowFloor", {
+    max: `${JOB_FIT_I18N.formatNumber(max)} ${currency}`,
+    floor: `${JOB_FIT_I18N.formatNumber(expectedRange.min)} ${currency}`,
+  });
 }
 
 // --- experience level -----------------------------------------------------------
@@ -949,7 +985,7 @@ function postingYears(postingText) {
   return years.length ? Math.max(...years) : null;
 }
 
-function checkLevel(postingText, profileText) {
+function experienceSignal(postingText, profileText) {
   const yours = candidateYears(profileText);
   if (yours == null || yours < 4) return null;
   const asked = postingYears(postingText);
@@ -974,6 +1010,53 @@ function dropLocationGaps(data, location) {
   return { ...data, gaps: keep(data.gaps), required_gaps: keep(data.required_gaps) };
 }
 
+// --- claimed matches the profile doesn't back up ----------------------------------
+//
+// A model once credited a C++/imaging engineer with "graphics expertise". A
+// match is kept when at least one of its specific words (not "experience",
+// "strong", "software"…) appears in the profile, by stem, so "image
+// processing" is backed by "imaging". One that has none is moved aside and
+// shown as unverified; the score is left alone, since this is a word check,
+// not proof.
+
+const GENERIC_MATCH_WORDS = new Set(
+  (
+    "a an and or the of in on for to with using via based including plus etc related relevant such as like " +
+    "experience experienced expertise expert strong solid deep proven extensive hands-on hands on background " +
+    "knowledge skills skill skilled ability abilities familiarity understanding proficiency proficient " +
+    "software development developer developing develop engineering engineer engineers years year senior level " +
+    "team teams design designing designed work working production professional modern complex large scale " +
+    "high quality performance systems system tools technologies technology environment environments industry " +
+    "building build built delivering deliver shipping ship code coding programming applications application " +
+    "solutions solution projects project practices practice concepts principles"
+  ).split(/\s+/)
+);
+
+function specificTerms(phrase) {
+  return String(phrase || "")
+    .split(/[\s,/()·:;]+/)
+    .map((w) => w.replace(/^[^\p{L}\p{N}.+#]+|[^\p{L}\p{N}+#]+$/gu, ""))
+    .filter((w) => w.length >= 2 && !GENERIC_MATCH_WORDS.has(w.toLowerCase()));
+}
+
+function stemRegex(term) {
+  const escaped = (term.length > 4 ? term.replace(/(ing|ed|es|s)$/i, "") : term).replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+  return new RegExp(`(?<![\\p{L}\\p{N}])${escaped}`, JOB_FIT_KEYWORDS.isShortToken(term) ? "u" : "iu");
+}
+
+function verifyMatches(matches, profileText) {
+  const profile = String(profileText || "");
+  const verified = [];
+  const unverified = [];
+  (Array.isArray(matches) ? matches : []).forEach((match) => {
+    const terms = specificTerms(match);
+    // Nothing specific to check ("strong software engineering"): keep it.
+    if (!terms.length || terms.some((term) => stemRegex(term).test(profile))) verified.push(match);
+    else unverified.push(match);
+  });
+  return { verified, unverified };
+}
+
 // --- score caps -----------------------------------------------------------------
 //
 // Backstop for the caps the prompt describes: prompt-only guidance for this
@@ -995,6 +1078,12 @@ const ALTERNATIVES_RE = /\bor\b|\band\/or\b|\bsuch as\b|\be\.g\.|\bfor example\b
 // rather than being some other "or" in a long sentence.
 const ALTERNATIVES_REACH = 60;
 const SOFT_GAP_COST = 10;
+// A skill the candidate is learning costs less than a real mismatch.
+const LEARNING_GAP_COST = 5;
+// Low-bar and learning costs together never exceed this.
+const MAX_SOFT_COST = 15;
+// Both level signals at once.
+const BELOW_LEVEL_COST = 20;
 
 function termRegex(term) {
   const source = JOB_FIT_KEYWORDS.phraseToPattern(term);
@@ -1054,35 +1143,59 @@ function verdictFor(score) {
   return "skip";
 }
 
-function applyScoreCaps(data, { domainFlags, seniorityFlag, levelFlag, postingText = "" }) {
+// Learning terms that show up in a required gap, by whole word.
+function learningGapHits(learningFlags, requiredGaps) {
+  return (learningFlags || []).filter((term) => {
+    const re = termRegex(term);
+    return re && (requiredGaps || []).some((g) => re.test(String(g)));
+  });
+}
+
+function applyScoreCaps(data, { domainFlags, learningFlags, experienceFlag, payFlag, postingText = "" }) {
   let score = data.score;
   const capReasons = [];
+  const requiredGaps = Array.isArray(data.required_gaps) ? data.required_gaps.map(String) : [];
 
-  if (typeof score === "number" && domainFlags && domainFlags.length && Array.isArray(data.required_gaps)) {
-    const { hard, soft } = classifyFlagGaps(domainFlags, data.required_gaps, postingText);
+  if (typeof score === "number") {
+    const { hard, soft } = classifyFlagGaps(domainFlags, requiredGaps, postingText);
+    const learning = learningGapHits(learningFlags, requiredGaps);
     if (hard.length && score > 50) {
       score = 50;
       capReasons.push(t("bg.capDomain"));
-    } else if (!hard.length && soft.length) {
-      score = Math.max(0, score - SOFT_GAP_COST);
-      capReasons.push(t("bg.capSoftDomain", { terms: soft.join(", "), points: SOFT_GAP_COST }));
+    } else if (!hard.length && (soft.length || learning.length)) {
+      let cost = 0;
+      if (soft.length) {
+        cost += SOFT_GAP_COST;
+        capReasons.push(t("bg.capSoftDomain", { terms: soft.join(", "), points: SOFT_GAP_COST }));
+      }
+      if (learning.length) {
+        cost += LEARNING_GAP_COST;
+        capReasons.push(t("bg.capLearning", { terms: learning.join(", "), points: LEARNING_GAP_COST }));
+      }
+      cost = Math.min(cost, MAX_SOFT_COST);
+      // Meeting everything except a "familiarity" item or a skill being
+      // learned is still an apply: an 84 with one such gap used to drop to
+      // 74, borderline. That holds only when every required gap is of that
+      // soft kind; one real gap and the deduction stands.
+      const learningRes = learning.map(termRegex);
+      const softFlagRes = soft.map(termRegex);
+      const allSoft = requiredGaps.every(
+        (g) => isSoftGap(g) || learningRes.some((re) => re.test(g)) || softFlagRes.some((re) => re.test(g))
+      );
+      const floor = allSoft && score >= JOB_FIT_UI.GREEN_FROM ? JOB_FIT_UI.GREEN_FROM : 0;
+      score = Math.max(floor, score - cost);
     }
   }
 
-  if (typeof score === "number" && levelFlag && score > 70) {
-    score = 70;
-    capReasons.push(t("bg.capBelowLevel"));
-  }
-
-  if (typeof score === "number" && seniorityFlag && score > 40) {
-    score = 40;
-    capReasons.push(t("bg.capSeniority"));
+  // Below level only when both signals agree; either alone is just a note.
+  if (typeof score === "number" && experienceFlag && payFlag) {
+    score = Math.max(0, score - BELOW_LEVEL_COST);
+    capReasons.push(t("bg.capBelowLevel", { points: BELOW_LEVEL_COST }));
   }
 
   // raw_score preserves what the model actually said. The caps are heuristics,
   // so seeing only the capped number leaves no way to judge whether the cap was
-  // fair — "40, seniority/comp mismatch" reads very differently once you know
-  // the model scored it 78.
+  // fair.
   //
   // The verdict follows the final score. The model's own verdict drifted from
   // it (a 90 came back "borderline" because sponsorship wasn't mentioned), and
@@ -1093,7 +1206,7 @@ function applyScoreCaps(data, { domainFlags, seniorityFlag, levelFlag, postingTe
     score,
     verdict,
     model_verdict: data.verdict && data.verdict !== verdict ? data.verdict : undefined,
-    raw_score: capReasons.length ? data.score : undefined,
+    raw_score: capReasons.length && score !== data.score ? data.score : undefined,
     score_cap_reasons: capReasons.length ? capReasons : undefined,
   };
 }
@@ -1133,12 +1246,15 @@ async function evaluateWithLmStudio(
     if (result.data.salary) {
       result.data.salary = compareSalary(result.data.salary, expectedSalary, { place, postingText });
     }
-    const seniorityFlag = checkSeniorityMismatch(postingText, result.data.salary, expectedSalary);
-    const levelFlag = checkLevel(postingText, profile);
-    result.data.seniority_flag = seniorityFlag;
-    result.data.level_flag = levelFlag;
+    const payFlag = paySignal(result.data.salary, expectedSalary);
+    const experienceFlag = experienceSignal(postingText, profile);
+    result.data.seniority_flag = payFlag;
+    result.data.level_flag = experienceFlag;
     result.data = dropLocationGaps(result.data, location);
-    result.data = applyScoreCaps(result.data, { domainFlags, seniorityFlag, levelFlag, postingText });
+    const { verified, unverified } = verifyMatches(result.data.matches, profile);
+    result.data.matches = verified;
+    result.data.unverified_matches = unverified.length ? unverified : undefined;
+    result.data = applyScoreCaps(result.data, { domainFlags, learningFlags, experienceFlag, payFlag, postingText });
     result.data.sponsorship_warning = sponsorshipWarning(result.data, jobSearch, place);
     result.data.core_work_only = coreWorkOnly && coreWorkOnly.length ? coreWorkOnly : undefined;
   }
@@ -1296,6 +1412,8 @@ async function testEvaluate(message, signal) {
       profile: message.profile,
       postingText: message.postingText,
       domainFlags: message.domainFlags,
+      learningFlags: message.learningFlags,
+      coreWorkOnly: message.coreWorkOnly,
       expectedSalary: message.expectedSalary,
       jobSearch: message.jobSearch,
       place: message.place,
@@ -1487,11 +1605,13 @@ async function screenQueuedItem(item) {
       domainFlags: item.domainFlags || [],
       learningFlags: item.learningFlags || [],
       coreWorkOnly: [],
+      positiveSignals: [],
       softWarnings: item.softWarnings || [],
       place: { country: place.country, region: place.region, arrangement: place.arrangement },
     };
   }
   return JOB_FIT_SCREEN.screen(item.postingText || "", profile.keywords, {
+    profileText: profile.profile,
     location: item.location,
     jobSearch: profile.jobSearch,
   });
@@ -1513,6 +1633,9 @@ async function runQueuedEvaluation(item) {
     extractor: item.extractor,
     profileFingerprint: snapshot.fingerprint,
     place: screened.place || null,
+    // Requisition id and dates, read on the page when it was queued; a
+    // re-evaluation from Tracked jobs has none and keeps what's saved.
+    meta: item.meta || null,
   };
 
   // A hard reject is filed the way the page files one — score 0, no model
@@ -1533,6 +1656,7 @@ async function runQueuedEvaluation(item) {
         domainFlags: [],
         learningFlags: [],
         coreWorkOnly: [],
+        positiveSignals: [],
         softWarnings: [],
       });
     } catch (err) {
@@ -1576,6 +1700,7 @@ async function runQueuedEvaluation(item) {
       domainFlags: screened.domainFlags,
       learningFlags: screened.learningFlags || [],
       coreWorkOnly: screened.coreWorkOnly || [],
+      positiveSignals: screened.positiveSignals || [],
       // "Sponsorship not stated" sits with the other amber warnings, where
       // it's something to ask about, not a lower verdict.
       softWarnings: [...(screened.softWarnings || []), ...(result.data.sponsorship_warning ? [result.data.sponsorship_warning] : [])],
@@ -1604,6 +1729,7 @@ async function runQueuedSummarize(item) {
     company: item.company,
     location: item.location,
     text: item.postingText,
+    meta: item.meta || null,
     summary,
   });
 
@@ -1677,10 +1803,10 @@ chrome.runtime.onInstalled.addListener((details) => {
 
 // Evaluating without the popup has nowhere to show an error, so it goes on
 // the icon: a red "!" for this tab, with the reason as the tooltip.
-async function evaluateTab(tab, { ignoreCache = false } = {}) {
+async function evaluateTab(tab, { ignoreCache = false, skipDuplicateCheck = false } = {}) {
   if (!tab || tab.id == null) return;
   await i18nReady;
-  const started = await startEvaluation(tab.id, { ignoreCache });
+  const started = await startEvaluation(tab.id, { ignoreCache, skipDuplicateCheck });
   if (started.ok) return;
   try {
     await chrome.action.setBadgeBackgroundColor({ tabId: tab.id, color: "#b3261e" });
@@ -1896,9 +2022,12 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
     return true;
   }
   // The on-page card's click: exactly what the keyboard shortcut does. Its
-  // Re-evaluate asks for the saved result to be skipped.
+  // Re-evaluate asks for the saved result to be skipped, and its Evaluate
+  // anyway for the same posting scored elsewhere to be.
   if (message?.type === "JOB_FIT_EVALUATE_TAB") {
-    if (sender.tab) evaluateTab(sender.tab, { ignoreCache: Boolean(message.ignoreCache) });
+    if (sender.tab) {
+      evaluateTab(sender.tab, { ignoreCache: Boolean(message.ignoreCache), skipDuplicateCheck: Boolean(message.skipDuplicateCheck) });
+    }
     sendResponse({ ok: Boolean(sender.tab) });
     return false;
   }

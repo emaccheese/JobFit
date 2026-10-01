@@ -8,8 +8,9 @@ const $ = (id) => document.getElementById(id);
 let store = { profiles: [], activeProfileId: null };
 let tab = null; // the active tab
 let pageProbe = null; // what probePage() saw
-let tabJob = null; // { jobKey, title, company } for the posting in this tab
+let tabJob = null; // { jobKey, title, company, location, text, meta } for the posting in this tab
 let tabRecord = null; // its saved result for the active profile, if any
+let shownRecord = null; // the result the This job block shows: tabRecord, or the same posting tracked from another site
 let pageKnown = false; // a posting on a site JobFit has an extractor for
 
 function activeProfile() {
@@ -152,9 +153,13 @@ function extractOnPage() {
     if (extracted) break;
   }
   if (!extracted) return null;
+  // As content.js does, so the posting is looked up under the same company.
+  if (!extracted.company && jf.jsonLdCompany) extracted.company = jf.jsonLdCompany();
   // Computed in the page, where location and the DOM are available, so the
-  // popup can look this posting up in history.
-  return { ...extracted, jobKey: JOB_FIT_JOBKEY.keyFor(extracted) };
+  // popup can look this posting up in history — under its own key, or by its
+  // requisition id and text as a copy of one tracked from another site.
+  const meta = typeof JOB_FIT_META !== "undefined" ? JOB_FIT_META.fromPage(extracted) : null;
+  return { ...extracted, jobKey: JOB_FIT_JOBKEY.keyFor(extracted), meta };
 }
 
 // Which job the tab shows, read with the extractors alone (no content.js, so
@@ -173,7 +178,9 @@ async function readTabJob() {
         found = framed?.find((r) => r.result)?.result || found;
       }
     }
-    return found ? { jobKey: found.jobKey, title: found.title, company: found.company } : null;
+    return found
+      ? { jobKey: found.jobKey, title: found.title, company: found.company, location: found.location, text: found.text, meta: found.meta }
+      : null;
   } catch (err) {
     return null;
   }
@@ -201,12 +208,36 @@ function scoredWhen(record) {
   return days <= 0 ? t("popup.scoredToday") : t("popup.scoredAgo", { count: days });
 }
 
+// This profile's tracked jobs, for what they say about the tab's job: a copy
+// scored from another site, and your history at the company.
+async function trackedRecords() {
+  if (!tabJob) return [];
+  try {
+    return await JOB_FIT_EVALSTORE.list(activeProfile().id);
+  } catch (err) {
+    return [];
+  }
+}
+
 // The saved result for this tab's job under the active profile: the number
-// the on-page card shows, here too, with what to do about it.
+// the on-page card shows, here too, with what to do about it. With none, the
+// same posting scored from another site stands in, said to be that — the one
+// Evaluate on the page would point to.
 async function renderThisJob() {
   tabRecord = tabJob ? await JOB_FIT_EVALSTORE.get(activeProfile().id, tabJob.jobKey) : null;
   const hasScore = Boolean(tabRecord && (tabRecord.score != null || tabRecord.hardReject));
-  $("record").hidden = !hasScore;
+  const tracked = await trackedRecords();
+  const candidate = tabJob ? { ...tabJob, profileId: activeProfile().id } : null;
+  const duplicate = hasScore || !candidate ? null : JOB_FIT_EVALSTORE.scoredDuplicateOf(candidate, tracked);
+  shownRecord = hasScore ? tabRecord : duplicate;
+  $("record").hidden = !shownRecord;
+
+  // Before you've scored it, too: how the other applications there went. The
+  // saved record when there is one, whose copies elsewhere are already known.
+  const subject = tabRecord || candidate;
+  const companyNote = subject ? JOB_FIT_EVALSTORE.companyHistoryNote(tracked, subject) : null;
+  $("companyNote").textContent = companyNote || "";
+  $("companyNote").hidden = !companyNote;
 
   const evaluate = $("evaluate");
   if (!hasScore) {
@@ -214,12 +245,22 @@ async function renderThisJob() {
     // Evaluate still tries, and says so.
     evaluate.textContent = tabJob && pageKnown ? t("popup.evaluateJob") : t("popup.evaluate");
     $("reevaluate").hidden = true;
+    if (duplicate) renderRecord(duplicate, { duplicate: true });
     renderProfileNotices();
     return;
   }
   $("reevaluate").hidden = false;
+  const stale = renderRecord(tabRecord);
 
-  const r = tabRecord;
+  // Out of date: re-scoring is the thing to do. Otherwise showing the saved
+  // result on the page is — it costs nothing.
+  evaluate.textContent = t("popup.showOnPage");
+  $("reevaluate").classList.toggle("primary", Boolean(stale) && !activeProfile().setupIncomplete);
+  renderProfileNotices();
+}
+
+// Fills the record block; returns why the score is out of date, if it is.
+function renderRecord(r, { duplicate = false } = {}) {
   const score = $("recScore");
   score.className = `score ${r.hardReject ? "red" : JOB_FIT_UI.scoreClass(r.score)}`;
   score.textContent = r.hardReject ? "✕" : String(r.score);
@@ -244,21 +285,29 @@ async function renderThisJob() {
   recVerdict.appendChild(word);
   $("recName").textContent = [r.title, r.company].filter(Boolean).join(" — ");
   const meta = $("recMeta");
-  meta.textContent = r.hardReject ? `${r.hardReject.label} · ${scoredWhen(r)}` : scoredWhen(r);
-  const stale = staleReason(r);
-  if (stale) {
-    meta.appendChild(document.createTextNode(" · "));
-    const warn = document.createElement("span");
-    warn.className = "stale";
-    warn.textContent = t("popup.outOfDate", { reason: stale });
-    meta.appendChild(warn);
+  if (duplicate) {
+    meta.textContent = t("popup.dupFrom", { site: JOB_FIT_EVALSTORE.siteLabel(r), when: scoredWhen(r) });
+    // Applied through that copy: the reason not to apply through this one.
+    if (r.status && r.status !== "not_applied") appendMetaWarning(meta, JOB_FIT_EVALSTORE.statusLabel(r.status));
+  } else {
+    meta.textContent = r.hardReject ? `${r.hardReject.label} · ${scoredWhen(r)}` : scoredWhen(r);
   }
+  const stale = duplicate ? null : staleReason(r);
+  if (stale) appendMetaWarning(meta, t("popup.outOfDate", { reason: stale }));
+  // Closing soon, or closed, and not applied to: the one date worth seeing
+  // before you click anything.
+  const applied = Boolean(r.status && r.status !== "not_applied");
+  const { deadlineNote } = JOB_FIT_META.describe(r.meta || (tabJob && tabJob.meta), { applied });
+  if (deadlineNote && !r.hardReject) appendMetaWarning(meta, deadlineNote);
+  return stale;
+}
 
-  // Out of date: re-scoring is the thing to do. Otherwise showing the saved
-  // result on the page is — it costs nothing.
-  evaluate.textContent = t("popup.showOnPage");
-  $("reevaluate").classList.toggle("primary", Boolean(stale) && !activeProfile().setupIncomplete);
-  renderProfileNotices();
+function appendMetaWarning(meta, text) {
+  meta.appendChild(document.createTextNode(" · "));
+  const warn = document.createElement("span");
+  warn.className = "stale";
+  warn.textContent = text;
+  meta.appendChild(warn);
 }
 
 async function evaluateCurrentTab({ ignoreCache = false } = {}) {
@@ -347,6 +396,7 @@ async function summarizeCurrentTab() {
         company: extracted.company,
         location: extracted.location,
         url: tab.url,
+        meta: extracted.meta,
       },
     });
   } catch (err) {
@@ -571,7 +621,7 @@ function wire() {
   $("evaluate").addEventListener("click", () => evaluateCurrentTab());
   $("reevaluate").addEventListener("click", () => evaluateCurrentTab({ ignoreCache: true }));
   $("openRecord").addEventListener("click", () => {
-    const params = new URLSearchParams({ profile: activeProfile().id, job: tabRecord ? tabRecord.jobKey : "" });
+    const params = new URLSearchParams({ profile: activeProfile().id, job: shownRecord ? shownRecord.jobKey : "" });
     chrome.tabs.create({ url: `${chrome.runtime.getURL("history.html")}?${params.toString()}` });
     window.close();
   });

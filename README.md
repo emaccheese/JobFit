@@ -74,25 +74,42 @@ computed in code, because local models are unreliable at it and fail confidently
   "within your range" while also stating a ceiling below the floor. When the posting
   gives numbers without a currency, the currency comes from the job's country (and
   says so), and "most offers fall between the minimum and the midpoint" makes the
-  midpoint the realistic top.
+  midpoint the realistic top. Monthly pay (as Mexican postings quote it) is multiplied
+  by 12 before comparing.
 - **Seniority check.** Keyword presence plus a threshold, and only ever against a
   salary the posting actually stated — never against the model's own estimate,
   which made the check circular.
-- **Experience level.** A posting asking for far fewer years than you have ("2+
-  years, academic experience acceptable" against your 8) is flagged *likely below
-  your level* and capped at 70.
+- **Experience level.** Two signals: the posting asks for far fewer years than you
+  have ("2+ years, academic experience acceptable" against your 8), and its pay tops
+  out below your floor. Either one alone is a note; both together take 20 points off.
 - **Score caps.** The prompt asks the model to cap its own score for uncovered
   required skills; the cap is then enforced in code regardless — but only for a
   skill the job really requires. A requirement worded as a low bar ("familiarity
   with", "exposure to") or offered as one of several options ("OpenCV, NumPy, … or
-  PIL") costs 10 points instead.
+  PIL") costs 10 points instead, and a skill you're learning costs 5. When those are
+  your only gaps and the model said apply, the result stays apply.
+- **Matches.** A claimed match that nothing in your profile backs up (a model once
+  credited "graphics expertise" to a profile without graphics) is moved to *Claimed
+  but not in your profile*.
+- **Models that disagree.** When two models scored the same job 30 or more points
+  apart, the result says so: the requirements and the core work may diverge.
 - **The verdict.** Apply at 75 and up, borderline 55–74, skip below 55, from the
   final score. A posting that doesn't mention sponsorship gets an amber warning (when
   you'd need it there), not a lower verdict.
 
 **Learning.** Skills you're picking up (OpenCV, GoogleTest, ONNX Runtime…) go in
-**Settings → Screening rules → Learning**. They're flagged for your information and
-never cap the score, unlike domain flags, which mark real mismatches.
+**Settings → Screening rules → Learning**, or on a `Learning:` line in your candidate
+profile. They cost at most 5 points and never cap the score, unlike domain flags,
+which mark real mismatches. A `NOT:` (or `Gaps:`) line in the profile adds to the
+domain flags the same way.
+
+**Good signs.** Relocation assistance offered, visa sponsorship offered (where you'd
+need it) and a TN visa mentioned (for Mexican or Canadian citizens, on US jobs) show in
+green next to the result. They never change the score, and each can be switched off in
+**Settings → Screening rules**. Warnings and domain flags read the job itself, not the
+company's About-us, benefits and equal-opportunity text, so "a leading cloud company"
+no longer flags "cloud". Hard rejects and the legal warnings still read everything,
+because that's where the sponsorship language lives.
 
 ## Setup
 
@@ -139,7 +156,8 @@ JobFit icon, then **Evaluate this job**. You can change the shortcut at
 **The popup** is for the job in front of you. If you've scored it before, it shows
 the saved score and verdict, when it was scored and whether it's out of date (another
 model, or a profile you've edited since), with **Show on page**, **Re-evaluate** and
-**Open in Tracked jobs**. Below that it says whether the model is reachable, with a
+**Open in Tracked jobs**. If you scored the same posting from another site, it shows
+that copy instead, and says so. It also warns when applications close within a week. Below that it says whether the model is reachable, with a
 **Fix in Settings** link when it isn't, and how the queue is doing. Everything you set
 once lives in **Settings**, a full page with a section for each: profile and CV,
 salary, screening rules, model, the on-page button, language, and backups.
@@ -168,6 +186,31 @@ required gaps, matches, gaps, warnings and salary, with **Re-evaluate** and
 **Tracked jobs**. The card doesn't cover the site's navigation. Drag it up either
 edge, or use **⇄** to move it to the other side; the spot is remembered per site.
 Press Esc to close the panel.
+
+**Evaluated before.** The same posting is often on LinkedIn, Indeed and the company's
+own site. If you've already scored one copy, Evaluate on another doesn't run the model
+again. Instead the card says **Evaluated before**: where and when you scored it, the
+score and verdict, and whether you've applied through that copy. **Show that result**
+opens it; **Evaluate anyway** scores this copy too. Copies are recognised within the
+same company: by requisition ID when both postings show one, otherwise by title
+("Sr." and "Senior", "- Remote" and "(Hybrid)" count as the same) and by the posting
+text. The popup shows the same thing for a job you haven't scored under this link.
+
+**Your history at a company.** When you've applied to other jobs at the same company,
+the result panel, the popup and the job's details in Tracked jobs say how those went,
+for example "At Garmin: 2 rejections · 1 awaiting a reply — 5 other jobs tracked
+there." You see it before you apply a fourth time, and the popup shows it before you
+evaluate. Copies of one posting count as one application. Tracked jobs adds **Show all
+Garmin jobs**, which searches for the company.
+
+**Deadlines and posting age.** When a posting states them, JobFit keeps its
+requisition ID, when applications close and when it was posted. These come from the
+page's structured data, the board's own fields ("Reposted 1 week ago", "12 days left to
+apply") or the text ("Apply by October 15"). A job you haven't applied to that closes
+within 7 days moves to **Needs attention** ("closes in 3 days"), and one past its
+deadline is marked closed. A posting that's been up more than 3 weeks gets a note that
+many people may have applied already. All three appear in the result panel, the job's
+details and the CSV, and none of them change the score.
 
 **Queue.** Clicking Evaluate on a second posting while the first is still running
 queues it — up to 50. Click through a search page, queue everything that looks

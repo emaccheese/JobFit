@@ -53,14 +53,32 @@
     if (text.split(/\s+/).filter(Boolean).length < MIN_WORDS) return null;
 
     const titleEl = part(root, "jobPostingHeader");
-    const details = part(root, "job-posting-details") || root;
+    const ownDetails = part(root, "job-posting-details");
+    const details = ownDetails || root;
 
     return {
       title: titleEl ? titleEl.innerText.trim() : null,
       company: companyName(),
       location: locationOf(details),
       text,
+      // The details panel says what the description doesn't: "Posted 30+
+      // Days Ago", "12 days left to apply", the requisition id
+      // (postingmeta.js).
+      postingFields: {
+        reqId: requisitionId(details),
+        postedText: detailText(details, "postedOn"),
+        detailsText: ownDetails ? ownDetails.innerText : null,
+      },
     };
+  }
+
+  function detailText(details, id) {
+    const dd = details.querySelector(`[data-automation-id="${id}"] dd`);
+    return dd ? dd.innerText.trim() || null : null;
+  }
+
+  function requisitionId(details) {
+    return detailText(details, "requisitionId");
   }
 
   // The requisition id, scoped to the tenant: the same job is reachable as
@@ -70,9 +88,8 @@
     const root = postingRoot();
     if (!root) return null;
     const details = part(root, "job-posting-details") || root;
-    const reqEl = details.querySelector('[data-automation-id="requisitionId"] dd');
     const fromUrl = location.pathname.match(/_([A-Za-z0-9-]+)\/?$/);
-    const req = (reqEl && reqEl.innerText.trim()) || (fromUrl && fromUrl[1]);
+    const req = requisitionId(details) || (fromUrl && fromUrl[1]);
     if (!req) return null;
     const tenant = location.hostname.split(".")[0];
     return `${tenant}:${req}`;

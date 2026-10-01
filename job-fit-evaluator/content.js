@@ -30,29 +30,9 @@
     return Array.isArray(value) ? value : [value];
   }
 
-  function isJobPosting(node) {
-    return node && typeof node === "object" && asArray(node["@type"]).some((t) => String(t).includes("JobPosting"));
-  }
-
-  // A page may carry several blocks, each of which may be a bare object, an
-  // array, or a @graph wrapper.
+  // The page's schema.org JobPosting blocks (postingmeta.js reads them too).
   function findJobPostingNodes() {
-    const nodes = [];
-    document.querySelectorAll('script[type="application/ld+json"]').forEach((script) => {
-      let parsed;
-      try {
-        parsed = JSON.parse(script.textContent);
-      } catch (err) {
-        return;
-      }
-      asArray(parsed).forEach((entry) => {
-        if (!entry || typeof entry !== "object") return;
-        asArray(entry["@graph"]).concat([entry]).forEach((node) => {
-          if (isJobPosting(node)) nodes.push(node);
-        });
-      });
-    });
-    return nodes;
+    return JOB_FIT_META.jsonLdNodes();
   }
 
   function jsonLdFields(node) {
@@ -183,18 +163,18 @@
   // fresh result, one read back out of history, and every notice. One
   // renderer, so a new score and a saved one can't drift apart.
   //
-  // The duplicate check runs after the result is up rather than before, so a
-  // slow storage read never delays it; the panel is updated with the note if
-  // there is one, and only while the page still shows this job.
+  // The notes that come from the rest of Tracked jobs (the same posting
+  // elsewhere, your history at the company) are added after the result is up
+  // rather than before, so a slow storage read never delays it; the panel is
+  // updated if there are any, and only while the page still shows this job.
   function renderResult(record, { cached = false, profileName, saveError = null, staleNote = null } = {}) {
-    const build = (duplicateNote) =>
-      JOB_FIT_CARD.resultFromRecord(record, { cached, profileName, staleNote, duplicateNote, saveError });
-    JOB_FIT_CARD.showResult(build(null));
-    JOB_FIT_CARD.duplicateNoteFor(record).then((note) => {
-      if (!note) return;
+    const build = (context = {}) => JOB_FIT_CARD.resultFromRecord(record, { cached, profileName, staleNote, saveError, ...context });
+    JOB_FIT_CARD.showResult(build());
+    JOB_FIT_CARD.contextNotesFor(record).then((context) => {
+      if (!context.duplicateNote && !context.companyNote) return;
       const now = dispatchExtraction();
       if (!now.result || JOB_FIT_JOBKEY.keyFor(now.result) !== record.jobKey) return;
-      JOB_FIT_CARD.showResult(build(note), { open: false });
+      JOB_FIT_CARD.showResult(build(context), { open: false });
     });
   }
 
@@ -214,7 +194,17 @@
     renderResult(record, { cached: false, profileName, saveError });
   }
 
-  async function run({ ignoreCache } = {}) {
+  // This profile's tracked jobs, for what they can say before a model run.
+  // Empty rather than failing: they only ever add a note.
+  async function trackedRecords(profileId) {
+    try {
+      return await JOB_FIT_EVALSTORE.list(profileId);
+    } catch (err) {
+      return [];
+    }
+  }
+
+  async function run({ ignoreCache, skipDuplicateCheck } = {}) {
     // Logged on every run so it's immediately visible whether the injection
     // reached the iframe: a page with an embedded board should produce two of
     // these, the second with framed=true on a greenhouse.io host.
@@ -250,6 +240,10 @@
 
     probeJsonLd(result, extractorName);
     if (!result.location) result.location = jsonLdLocation();
+    // The company too: the generic reader never finds one, and without it the
+    // same posting on LinkedIn can't be recognised (duplicates are matched
+    // within a company).
+    if (!result.company) result.company = window.__jobFit.jsonLdCompany();
 
     const jobKey = JOB_FIT_JOBKEY.keyFor(result);
     console.log(
@@ -269,7 +263,8 @@
 
     const currentModel = JOB_FIT_PROVIDER.currentModel(await chrome.storage.local.get(JOB_FIT_PROVIDER.KEYS));
 
-    const cached = ignoreCache ? null : await JOB_FIT_EVALSTORE.get(activeProfile.id, jobKey);
+    const own = await JOB_FIT_EVALSTORE.get(activeProfile.id, jobKey);
+    const cached = ignoreCache ? null : own;
     if (cached) {
       // A saved result is shown even when a different model or an older
       // profile produced it — re-scoring is the user's call, made with the
@@ -310,10 +305,14 @@
     // authorization, so the rules that depend on the country apply to this
     // posting's country (screening.js).
     const layer1 = JOB_FIT_SCREEN.screen(result.text, activeProfile.keywords, {
+      profileText: activeProfile.profile,
       location: result.location,
       jobSearch: activeProfile.jobSearch,
     });
     baseRecord.place = layer1.place;
+    // Requisition id, deadline and posting date. After screening, which knows
+    // the country — and so which way round 05/10/2026 is.
+    baseRecord.meta = JOB_FIT_META.fromPage(result, { country: layer1.place && layer1.place.country });
 
     if (layer1.hardReject) {
       // Stored like any other result, and deliberately so: without it you'd
@@ -332,6 +331,26 @@
         activeProfile.name
       );
       return;
+    }
+
+    // Read once, for both things it can say before the model runs.
+    const tracked = await trackedRecords(activeProfile.id);
+    // How your other applications at this company went, said while this one
+    // waits — and on the notice below.
+    const companyNote = JOB_FIT_EVALSTORE.companyHistoryNote(tracked, baseRecord);
+
+    // A job with no score of its own (so never a Re-evaluate; a summary alone
+    // doesn't count) whose posting was already scored from another site: say
+    // so and wait, rather than spend minutes of model time on an answer you
+    // already have. The card offers both ways on. Only a real model score
+    // counts, since a keyword reject is re-checked here for free anyway.
+    const ownScored = Boolean(own && (own.evaluation || own.hardReject));
+    if (!ownScored && !skipDuplicateCheck) {
+      const duplicate = JOB_FIT_EVALSTORE.scoredDuplicateOf(baseRecord, tracked);
+      if (duplicate) {
+        JOB_FIT_CARD.showNotice(JOB_FIT_CARD.duplicateNotice(job, duplicate, { profileName: activeProfile.name, companyNote }));
+        return;
+      }
     }
 
     const domainFlagMatches = layer1.domainFlags;
@@ -363,6 +382,7 @@
           location: result.location,
           url: location.href,
           extractor: extractorName,
+          meta: baseRecord.meta,
           domainFlags: domainFlagMatches,
           learningFlags: learningMatches,
           softWarnings: softWarningMatches,
@@ -404,9 +424,11 @@
         title: response.position <= 1 ? t("float.scoring") : t("float.queued", { position: response.position }),
         summary: response.duplicate ? t("banner.alreadyQueued", { position: response.position }) : `${t("banner.passedLayer1")} — ${queueNote}.`,
         meta: t("float.asProfile", { name: activeProfile.name }),
+        notes: companyNote ? [companyNote] : [],
         sections: [
           { title: t("banner.domainFlagsTitle"), tone: "neutral", items: domainFlagMatches, open: true },
           { title: t("result.learningFlags"), tone: "neutral", items: learningMatches, open: true },
+          { title: t("result.goodSigns"), tone: "green", items: layer1.positiveSignals || [], open: true },
           { title: t("banner.warningsTitle"), tone: "amber", items: softWarningMatches, open: true },
         ].filter((section) => section.items.length),
       },
@@ -466,9 +488,10 @@
     });
   }
 
-  // The popup's Re-evaluate sets this just before injecting, so this run
-  // scores the posting again instead of showing the saved result.
-  const ignoreCache = Boolean(window.__jobFitIgnoreCacheOnce);
-  window.__jobFitIgnoreCacheOnce = false;
-  start({ ignoreCache });
+  // Set just before injecting, for this run only (inject.js): Re-evaluate
+  // scores the posting again instead of showing the saved result, and the
+  // card's Evaluate anyway skips the check for the same posting elsewhere.
+  const once = window.__jobFitRunOnce || {};
+  window.__jobFitRunOnce = null;
+  start({ ignoreCache: Boolean(once.ignoreCache), skipDuplicateCheck: Boolean(once.skipDuplicateCheck) });
 })();
