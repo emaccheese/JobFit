@@ -99,6 +99,8 @@
         t("result.modelsDisagree", { spread: disagreement.spread, runs: disagreement.runs.map((r) => `${r.model} ${r.score}`).join(", ") })
       );
     }
+    const posting = JOB_FIT_META.describe(record.meta, { applied: Boolean(record.status && record.status !== "not_applied") });
+    notes.push(...posting.notes);
 
     const when = record.lastEvaluatedAt ? t("float.evaluatedWhen", { when: timeAgo(record.lastEvaluatedAt) }) : null;
     const meta = [cached ? when : null, profileName ? t("float.asProfile", { name: profileName }) : null].filter(Boolean).join(" · ");
@@ -156,6 +158,7 @@
       { title: t("banner.domainFlagsTitle"), tone: "neutral", items: record.domainFlags },
       { title: t("result.learningFlags"), tone: "neutral", items: record.learningFlags },
       { title: t("result.salary"), tone: "neutral", items: salary },
+      { title: t("posting.title"), tone: "neutral", items: posting.details },
     ].filter((s) => s.items && s.items.length);
 
     return {
@@ -170,7 +173,36 @@
     };
   }
 
-  const api = { resultFromRecord, staleNoteFor, duplicateNoteFor };
+  // Before a model run: this posting was already scored from another link.
+  // The notice says when, where and what it got; "Show that result" swaps in
+  // that result (built now, so it can travel from a frame as a message), and
+  // "Evaluate anyway" runs the model on this copy.
+  function duplicateNotice(job, dup, { profileName = "" } = {}) {
+    const site = JOB_FIT_EVALSTORE.siteLabel(dup);
+    const date = JOB_FIT_I18N.formatDate(dup.lastEvaluatedAt || JOB_FIT_EVALSTORE.activityTs(dup), { month: "short", day: "numeric" });
+    const verdict = verdictLabel((dup.evaluation && dup.evaluation.verdict) || dup.verdict);
+    const applied = dup.status && dup.status !== "not_applied";
+    const result = resultFromRecord(dup, { cached: true, profileName });
+    return {
+      ...job,
+      tone: JOB_FIT_UI.scoreClass(dup.score) || "neutral",
+      loud: true,
+      badge: String(dup.score),
+      title: t("dup.title"),
+      cardSub: t("dup.cardSub", { score: dup.score, site }),
+      summary: t("dup.summary", { site, date, score: dup.score, verdict }),
+      meta: applied ? t("dup.status", { status: JOB_FIT_EVALSTORE.statusLabel(dup.status) }) : t("dup.hint"),
+      actions: ["showDuplicate", "evaluateAnyway"],
+      primaryAction: "showDuplicate",
+      duplicate: {
+        ...result,
+        notes: [t("dup.fromOther", { site, date }), ...result.notes],
+        actions: ["evaluateAnyway", "tracked"],
+      },
+    };
+  }
+
+  const api = { resultFromRecord, staleNoteFor, duplicateNoteFor, duplicateNotice };
   const RELAYED = ["attach", "detach", "setJob", "setLoading", "starting", "showResult", "showNotice"];
 
   if (FRAMED) {
@@ -565,10 +597,10 @@
     if (noticeApplies && ["evaluate", "none", "starting"].includes(state.kind)) {
       return {
         kind: `notice:${notice.title}`,
-        badge: "!",
-        badgeClass: notice.tone === "red" ? "red" : "amber",
+        badge: notice.badge || "!",
+        badgeClass: ["green", "red"].includes(notice.tone) ? notice.tone : "amber",
         primary: notice.title,
-        secondary: t("float.detailsSub"),
+        secondary: notice.cardSub || t("float.detailsSub"),
         title: notice.title,
         arrow: true,
         expands: true,
@@ -764,6 +796,8 @@
       reevaluate: t("banner.reevaluate"),
       tracked: t("banner.trackedJobs"),
       evaluate: t("float.tryAgain"),
+      showDuplicate: t("dup.show"),
+      evaluateAnyway: t("dup.evaluateAnyway"),
     };
     const button = el("button", isPrimary ? "primary" : "", labels[action]);
     button.type = "button";
@@ -828,7 +862,7 @@
     if (actions.length) {
       const foot = el("div", "p-foot");
       // Re-evaluate leads only when the saved score is out of date.
-      const primary = c.notes && c.notes.length && actions.includes("reevaluate") ? "reevaluate" : null;
+      const primary = c.primaryAction || (c.notes && c.notes.length && actions.includes("reevaluate") ? "reevaluate" : null);
       actions.forEach((a) => foot.appendChild(actionButton(a, a === primary || (a === "evaluate" && actions.length === 1))));
       panel.appendChild(foot);
     }
@@ -884,11 +918,23 @@
   }
 
   function runAction(action) {
-    if (action === "reevaluate" || action === "evaluate") {
+    if (action === "reevaluate" || action === "evaluate" || action === "evaluateAnyway") {
       closePanel({ restoreFocus: true });
       notice = null;
       markStarting();
-      send({ type: "JOB_FIT_EVALUATE_TAB", ignoreCache: action === "reevaluate" });
+      send({
+        type: "JOB_FIT_EVALUATE_TAB",
+        ignoreCache: action === "reevaluate",
+        skipDuplicateCheck: action === "evaluateAnyway",
+      });
+      return;
+    }
+    // The other copy's result, in place of the notice. Its Tracked jobs
+    // button opens that copy.
+    if (action === "showDuplicate" && panelContent && panelContent.duplicate) {
+      panelContent = panelContent.duplicate;
+      openPanel({ focus: true });
+      if (panelContent.announce) announce(panelContent.announce);
       return;
     }
     if (action === "tracked" && panelContent) {
@@ -1064,14 +1110,17 @@
   // the queue is full, an error — or, quietly, where the job is in the queue.
   // Amber and red notices take over the card; a neutral one only fills the
   // panel for whoever opens it.
+  //
+  // `loud` defaults to amber and red; a notice can ask for it in another tone
+  // (the green "Evaluated before", with the earlier score on the badge).
   async function showNotice(n, { open } = {}) {
     await attach(mode || "page");
     if (n.jobKey) setJob({ jobKey: n.jobKey, profileId: n.profileId });
     startingUntil = 0;
-    const loud = n.tone === "amber" || n.tone === "red";
+    const loud = n.loud ?? (n.tone === "amber" || n.tone === "red");
     const content = { kind: "notice", badge: loud ? "!" : "…", tone: loud ? n.tone : "neutral", ...n };
     panelContent = content;
-    if (loud) notice = { jobKey: n.jobKey || null, title: n.title, tone: n.tone };
+    if (loud) notice = { jobKey: n.jobKey || null, title: n.title, tone: n.tone, badge: n.badge || null, cardSub: n.cardSub || null };
     const shouldOpen = open === undefined ? loud : open;
     if (shouldOpen && !collapsed) openPanel();
     else if (panelOpen) renderPanel();

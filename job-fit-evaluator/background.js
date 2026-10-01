@@ -1633,6 +1633,9 @@ async function runQueuedEvaluation(item) {
     extractor: item.extractor,
     profileFingerprint: snapshot.fingerprint,
     place: screened.place || null,
+    // Requisition id and dates, read on the page when it was queued; a
+    // re-evaluation from Tracked jobs has none and keeps what's saved.
+    meta: item.meta || null,
   };
 
   // A hard reject is filed the way the page files one — score 0, no model
@@ -1726,6 +1729,7 @@ async function runQueuedSummarize(item) {
     company: item.company,
     location: item.location,
     text: item.postingText,
+    meta: item.meta || null,
     summary,
   });
 
@@ -1799,10 +1803,10 @@ chrome.runtime.onInstalled.addListener((details) => {
 
 // Evaluating without the popup has nowhere to show an error, so it goes on
 // the icon: a red "!" for this tab, with the reason as the tooltip.
-async function evaluateTab(tab, { ignoreCache = false } = {}) {
+async function evaluateTab(tab, { ignoreCache = false, skipDuplicateCheck = false } = {}) {
   if (!tab || tab.id == null) return;
   await i18nReady;
-  const started = await startEvaluation(tab.id, { ignoreCache });
+  const started = await startEvaluation(tab.id, { ignoreCache, skipDuplicateCheck });
   if (started.ok) return;
   try {
     await chrome.action.setBadgeBackgroundColor({ tabId: tab.id, color: "#b3261e" });
@@ -2018,9 +2022,12 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
     return true;
   }
   // The on-page card's click: exactly what the keyboard shortcut does. Its
-  // Re-evaluate asks for the saved result to be skipped.
+  // Re-evaluate asks for the saved result to be skipped, and its Evaluate
+  // anyway for the same posting scored elsewhere to be.
   if (message?.type === "JOB_FIT_EVALUATE_TAB") {
-    if (sender.tab) evaluateTab(sender.tab, { ignoreCache: Boolean(message.ignoreCache) });
+    if (sender.tab) {
+      evaluateTab(sender.tab, { ignoreCache: Boolean(message.ignoreCache), skipDuplicateCheck: Boolean(message.skipDuplicateCheck) });
+    }
     sendResponse({ ok: Boolean(sender.tab) });
     return false;
   }

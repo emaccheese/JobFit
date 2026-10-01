@@ -79,7 +79,8 @@ job-fit-evaluator/
 ├── keywords.js          # screening categories + phrase→regex compiler
 ├── screening.js         # Layer 1, shared by the page and the queue; per-country gates
 ├── queue.js             # serial work queue (service worker)
-├── evalstore.js         # evaluated-job history records
+├── evalstore.js         # evaluated-job history records, cross-site duplicates
+├── postingmeta.js       # JOB_FIT_META — requisition id, deadline, posting date, and their wording
 ├── jobkey.js            # canonical job identity per page
 ├── history.html         # evaluated-jobs page
 ├── history.js
@@ -1313,18 +1314,37 @@ filed once as `linkedin:4426196077` and once as `greenhouse:nuro:7998328`,
 with two scores, two statuses and two sets of notes. No shared ID exists, so
 no key rule can catch it. Only the content can.
 
-`JOB_FIT_EVALSTORE.duplicateGroups()` treats two records under one profile as
-possible duplicates when:
-- their title and company match after normalizing (lowercase, punctuation
-  except `+ # .` dropped so C++ ≠ C, company legal suffixes like
-  inc/llc/ltd stripped), **and**
-- their posting text is near-identical: at least 0.6 containment of word
-  3-shingles over the first 4,000 characters.
+`JOB_FIT_EVALSTORE.duplicateGroups()` compares records under one profile
+**within a company**. Company names are normalized: lowercase, punctuation except
+`+ # .` dropped, legal suffixes like inc/llc/ltd stripped. Two records are possible
+duplicates when, in order:
+1. **Both have a requisition ID: the IDs decide.** IDs are compared uppercase and
+   alphanumeric only, so `R-100` matches the Workday key's `R100`. The same role
+   posted for three cities is three IDs and three jobs, however alike the text.
+2. **Otherwise the text decides.** Text similarity is word 3-shingle containment over
+   the first 4,000 characters:
+   - at least 0.6 when the titles agree;
+   - at least 0.9 when they don't. Two roles at one company share the About-us and the
+     benefits, which can outweigh a short description.
+3. **With no text**, the titles must agree and so must the city.
 
-Containment is used rather than Jaccard because LinkedIn wraps the same
-description in extra page text. Location is ignored ("Mountain View, CA" vs
-"Mountain View, California (HQ)"). Only when a record has no text does the
-city decide instead.
+Titles agree after `titleKey()`:
+- punctuation is dropped;
+- sr/snr/jr/mgr/eng/engr/dev are expanded;
+- remote/hybrid/on-site are dropped;
+- anything after " - " or " | " and anything in parentheses goes;
+- the words are sorted.
+
+So "Sr. Software Engineer - Remote" matches "Senior Software Engineer (Hybrid)", and
+"Engineering Manager" matches "Manager, Engineering". Level numerals stay, so II ≠ III.
+
+Containment is used rather than Jaccard because LinkedIn wraps the same description
+in extra page text. Location is ignored except as the no-text fallback ("Mountain
+View, CA" vs "Mountain View, California (HQ)").
+
+*Until 2026-10-01* records were bucketed by title and company. A retitled copy
+("Sr." on one site, "Senior" on another) was never compared, and two openings with
+separate requisition IDs but one shared description were flagged.
 
 It **flags and never merges**. Two real openings can share a title at one
 company, and a wrong merge would silently fuse their statuses and notes,
@@ -1337,6 +1357,92 @@ while a wrong flag costs one click. Tracked jobs shows:
 **Not a duplicate** writes `notDuplicateOf` onto both records, so the pair
 stays silenced even after re-scoring. The job-page banner also warns when a
 posting matches one already tracked from another site.
+
+**Before a model run (2026-10-01).** The flag used to arrive after the score, so the
+model had already spent minutes repeating an answer you had. Now `content.js` checks
+first. The check runs:
+- after Layer 1, so a hard reject is still filed for free;
+- before enqueueing;
+- only for a job with no score of its own (a summary alone doesn't count), so never on
+  Re-evaluate.
+
+If `scoredDuplicateOf()` finds a copy with a model score, the card shows **Evaluated
+before** instead of queueing:
+- which copy: a copy with an application status comes first ("you applied there" is
+  the thing not to miss), then the newest;
+- a green, amber or red badge carrying that copy's score;
+- where and when it was scored, and its status if you applied.
+
+The card offers two actions:
+- **Show that result** swaps in that copy's panel, built when the notice is, so it can
+  travel from an embedded frame as a message. Its **Tracked jobs** opens that copy.
+- **Evaluate anyway** re-injects with `skipDuplicateCheck`.
+
+`startEvaluation()` passes both run options (`ignoreCache`, `skipDuplicateCheck`)
+through `window.__jobFitRunOnce`, read and cleared by `content.js`. The popup's This
+job block runs the same lookup and shows that copy, labelled "Same posting on
+{site}", when the tab's job has no score of its own. A missing company is now filled
+from JSON-LD `hiringOrganization` (like the location already was), because the
+generic extractor never finds one, and duplicates are only matched within a company.
+
+### Requisition ID, deadline and posting age (2026-10-01)
+
+`postingmeta.js` (`JOB_FIT_META`) reads `{ reqId, deadline, postedOn, postedApprox }`
+in the page, after screening, since the country decides how to read 05/10/2026. Each
+value comes from the first source that has it.
+
+| Field | Read from, in order |
+|---|---|
+| `reqId` | the extractor's field (Workday's `requisitionId`) → JSON-LD `identifier` → a labelled id in the details panel, then the text |
+| `deadline` | a labelled date in the details, then the text → Workday's "N days left to apply" → JSON-LD `validThrough` |
+| `postedOn` | JSON-LD `datePosted` → the board's age line → "posted 3 days ago" in the text → a labelled date |
+
+What each source looks like:
+- **Requisition IDs in the text** follow labels such as "Req ID", "Job ID", "Job
+  Requisition ID", "Job Identification" (Oracle), "Reference #", "ID de la vacante",
+  "Référence :" and "ID da vaga". The value must contain a digit and be 3–30
+  characters, and a bare year or a date doesn't count.
+- **Deadlines in the text** follow labels such as apply by, application deadline,
+  applications close, closing date, open until, expires, time left to apply, fecha
+  límite, date limite and inscrições até. The date must sit within 45 characters of
+  the label. A bare "end date" doesn't count, since it's as often a contract's end.
+- **The board's age line** is LinkedIn's header ("Reposted 1 week ago"), Indeed's card
+  date (not "Active …", the employer's last visit) or Workday's `postedOn`. Read in
+  all four languages ("hace 3 semanas", "il y a 2 mois", "há 5 dias").
+- **Ages in the text** need "posted" or "publicado" next to them, so "we shipped it two
+  weeks ago" is not a date.
+- **Dates** come in ISO, month-name, day-month (with "de"/"er") or numeric form, in all
+  four languages:
+  - Ambiguous numerics (05/10) are read month-first for the US, day-first elsewhere,
+    and not at all when the country is unknown. A wrong deadline is worse than none.
+  - A date without a year is the nearest one in the direction asked for. A deadline
+    allows two months back; a posting date is never in the future.
+  - Plausibility windows drop placeholders: deadlines from 60 days ago to 400 days
+    ahead, posting dates within three years.
+
+Dates are stored as calendar days ("2026-10-15"), not timestamps: a deadline is a day,
+and a timestamp would move it across midnight. The meta travels on the queue item, and
+`saveEvaluation()` merges it with `mergeMeta()`. A re-read replaces what it found and
+keeps what it couldn't see, such as a re-evaluation queued from Tracked jobs, which has
+no page.
+
+`describe(meta, { applied })` words it once for the card, Tracked jobs and the popup:
+- **Details:** "Requisition ID …", "Applications close Oct 15 (in 14 days)", "Posted
+  Sep 3 (4 weeks ago)" or "… or earlier".
+- **A deadline note:** closes within 7 days, today, or has closed.
+- **An age note:** posted more than 3 weeks ago, skipped once applications have closed.
+
+The notes are about applying, so a job you've applied to gets none. Where it shows:
+- **Card:** the notes in the heads-up, the details as a **Posting details** section.
+- **Tracked jobs:**
+  - a "closes in N days — not applied" Needs attention rule, ahead of strong match and
+    not for a skip;
+  - an "applications closed" badge, and a closed job drops out of the strong-match
+    rule;
+  - the details line under the links, and the age note with the warnings;
+  - Requisition ID, Applications close and Posted CSV columns;
+  - the requisition ID is searchable.
+- **Popup:** the deadline note next to the saved score.
 
 ### Records
 

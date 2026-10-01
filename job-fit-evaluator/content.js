@@ -30,29 +30,9 @@
     return Array.isArray(value) ? value : [value];
   }
 
-  function isJobPosting(node) {
-    return node && typeof node === "object" && asArray(node["@type"]).some((t) => String(t).includes("JobPosting"));
-  }
-
-  // A page may carry several blocks, each of which may be a bare object, an
-  // array, or a @graph wrapper.
+  // The page's schema.org JobPosting blocks (postingmeta.js reads them too).
   function findJobPostingNodes() {
-    const nodes = [];
-    document.querySelectorAll('script[type="application/ld+json"]').forEach((script) => {
-      let parsed;
-      try {
-        parsed = JSON.parse(script.textContent);
-      } catch (err) {
-        return;
-      }
-      asArray(parsed).forEach((entry) => {
-        if (!entry || typeof entry !== "object") return;
-        asArray(entry["@graph"]).concat([entry]).forEach((node) => {
-          if (isJobPosting(node)) nodes.push(node);
-        });
-      });
-    });
-    return nodes;
+    return JOB_FIT_META.jsonLdNodes();
   }
 
   function jsonLdFields(node) {
@@ -214,7 +194,19 @@
     renderResult(record, { cached: false, profileName, saveError });
   }
 
-  async function run({ ignoreCache } = {}) {
+  // The same posting already scored under this profile from another link —
+  // LinkedIn and the company's own site, say. Asked before the model is, so
+  // the answer costs nothing; only a real model score counts, since a keyword
+  // reject is re-checked here for free anyway.
+  async function scoredDuplicateOf(candidate) {
+    try {
+      return JOB_FIT_EVALSTORE.scoredDuplicateOf(candidate, await JOB_FIT_EVALSTORE.list(candidate.profileId));
+    } catch (err) {
+      return null;
+    }
+  }
+
+  async function run({ ignoreCache, skipDuplicateCheck } = {}) {
     // Logged on every run so it's immediately visible whether the injection
     // reached the iframe: a page with an embedded board should produce two of
     // these, the second with framed=true on a greenhouse.io host.
@@ -250,6 +242,10 @@
 
     probeJsonLd(result, extractorName);
     if (!result.location) result.location = jsonLdLocation();
+    // The company too: the generic reader never finds one, and without it the
+    // same posting on LinkedIn can't be recognised (duplicates are matched
+    // within a company).
+    if (!result.company) result.company = window.__jobFit.jsonLdCompany();
 
     const jobKey = JOB_FIT_JOBKEY.keyFor(result);
     console.log(
@@ -269,7 +265,8 @@
 
     const currentModel = JOB_FIT_PROVIDER.currentModel(await chrome.storage.local.get(JOB_FIT_PROVIDER.KEYS));
 
-    const cached = ignoreCache ? null : await JOB_FIT_EVALSTORE.get(activeProfile.id, jobKey);
+    const own = await JOB_FIT_EVALSTORE.get(activeProfile.id, jobKey);
+    const cached = ignoreCache ? null : own;
     if (cached) {
       // A saved result is shown even when a different model or an older
       // profile produced it — re-scoring is the user's call, made with the
@@ -315,6 +312,9 @@
       jobSearch: activeProfile.jobSearch,
     });
     baseRecord.place = layer1.place;
+    // Requisition id, deadline and posting date. After screening, which knows
+    // the country — and so which way round 05/10/2026 is.
+    baseRecord.meta = JOB_FIT_META.fromPage(result, { country: layer1.place && layer1.place.country });
 
     if (layer1.hardReject) {
       // Stored like any other result, and deliberately so: without it you'd
@@ -333,6 +333,19 @@
         activeProfile.name
       );
       return;
+    }
+
+    // A job with no score of its own (so never a Re-evaluate; a summary alone
+    // doesn't count) whose posting was already scored from another site: say
+    // so and wait, rather than spend minutes of model time on an answer you
+    // already have. The card offers both ways on.
+    const ownScored = Boolean(own && (own.evaluation || own.hardReject));
+    if (!ownScored && !skipDuplicateCheck) {
+      const duplicate = await scoredDuplicateOf(baseRecord);
+      if (duplicate) {
+        JOB_FIT_CARD.showNotice(JOB_FIT_CARD.duplicateNotice(job, duplicate, { profileName: activeProfile.name }));
+        return;
+      }
     }
 
     const domainFlagMatches = layer1.domainFlags;
@@ -364,6 +377,7 @@
           location: result.location,
           url: location.href,
           extractor: extractorName,
+          meta: baseRecord.meta,
           domainFlags: domainFlagMatches,
           learningFlags: learningMatches,
           softWarnings: softWarningMatches,
@@ -468,9 +482,10 @@
     });
   }
 
-  // The popup's Re-evaluate sets this just before injecting, so this run
-  // scores the posting again instead of showing the saved result.
-  const ignoreCache = Boolean(window.__jobFitIgnoreCacheOnce);
-  window.__jobFitIgnoreCacheOnce = false;
-  start({ ignoreCache });
+  // Set just before injecting, for this run only (inject.js): Re-evaluate
+  // scores the posting again instead of showing the saved result, and the
+  // card's Evaluate anyway skips the check for the same posting elsewhere.
+  const once = window.__jobFitRunOnce || {};
+  window.__jobFitRunOnce = null;
+  start({ ignoreCache: Boolean(once.ignoreCache), skipDuplicateCheck: Boolean(once.skipDuplicateCheck) });
 })();

@@ -133,13 +133,16 @@ function sortRecords(list, mode) {
   return [...list].sort(by[mode] || by["score-desc"]);
 }
 
-// Possible cross-site duplicates for the records on screen, by jobKey.
-// Recomputed at the start of every render, so a delete, a "not a duplicate"
-// or a newly tracked job is reflected straight away.
+// Possible cross-site duplicates for the records on screen, by jobKey, and
+// which connected set each belongs to — copies can carry different titles, so
+// the set, not the title, is what groups them. Recomputed at the start of
+// every render, so a delete, a "not a duplicate" or a newly tracked job is
+// reflected straight away.
 let dupGroups = new Map();
+let dupSets = new Map();
 
 function dupGroupKey(r) {
-  return `${JOB_FIT_EVALSTORE.normalizeTitle(r.title)}|${JOB_FIT_EVALSTORE.normalizeCompany(r.company)}`;
+  return dupSets.get(r.jobKey) || r.jobKey;
 }
 
 function visibleRecords() {
@@ -166,7 +169,7 @@ function filteredRecords() {
       if (!query) return true;
       // Notes are searched too — a recruiter's name or "asked about OpenCL" is
       // exactly what you come back looking for weeks later.
-      return `${r.title || ""} ${r.company || ""} ${r.location || ""} ${r.notes || ""} ${r.summary || ""} ${r.text || ""}`
+      return `${r.title || ""} ${r.company || ""} ${r.location || ""} ${(r.meta && r.meta.reqId) || ""} ${r.notes || ""} ${r.summary || ""} ${r.text || ""}`
         .toLowerCase()
         .includes(query);
     }),
@@ -571,21 +574,7 @@ function renderDupChip() {
   // Counts extra copies, not flagged rows: one job tracked twice is "1
   // possible duplicate", not 2. Connected sets, so three copies of one job
   // count as 2 and two unrelated pairs as 2.
-  const seen = new Set();
-  let affected = 0;
-  dupGroups.forEach((_, key) => {
-    if (seen.has(key)) return;
-    const stack = [key];
-    let size = 0;
-    while (stack.length) {
-      const k = stack.pop();
-      if (seen.has(k)) continue;
-      seen.add(k);
-      size++;
-      (dupGroups.get(k) || []).forEach((d) => stack.push(d.jobKey));
-    }
-    affected += size - 1;
-  });
+  const affected = dupSets.size - new Set(dupSets.values()).size;
   host.hidden = !affected;
   if (!affected) return;
   const chip = el("div", "stale-chip dup-chip");
@@ -663,6 +652,10 @@ function badgesFor(record) {
     const badge = el("span", "badge badge-dup", t("history.possibleDuplicateBadge"));
     badge.title = dups.map((d) => t("history.alsoTracked", { what: duplicateSummary(d) })).join("\n");
     list.push(badge);
+  }
+  // Past its deadline and never applied to: still listed, no longer a to-do.
+  if ((!record.status || record.status === "not_applied") && JOB_FIT_META.hasClosed(record.meta)) {
+    list.push(el("span", "badge badge-muted", t("history.closedBadge")));
   }
   const outOfDate = staleReason(record);
   if (outOfDate) list.push(el("span", "badge badge-muted", outOfDate));
@@ -816,6 +809,10 @@ function renderJobDetails(record, { inline = false } = {}) {
   if (!inline) links.appendChild(buildStatusSelect(record, setStatusFor(record)));
   box.appendChild(links);
 
+  // Requisition id, deadline, posting date — whatever the posting said.
+  const posting = JOB_FIT_META.describe(record.meta, { applied: Boolean(record.status && record.status !== "not_applied") });
+  if (posting.details.length) box.appendChild(el("div", "meta-line posting-line", posting.details.join(" · ")));
+
   const badges = badgesFor(record);
   if (badges.length) {
     const row = el("div", "d-badges");
@@ -856,6 +853,7 @@ function renderJobDetails(record, { inline = false } = {}) {
       box,
       t("history.warnings"),
       [
+        ...(posting.ageNote ? [posting.ageNote] : []),
         ...(record.softWarnings || []),
         ...(coreWork.length ? [t("result.coreWorkDiverges", { terms: coreWork.join(", ") })] : []),
         ...(disagreement
@@ -1205,9 +1203,26 @@ const ATTENTION_RULES = [
     label: () => t("attention.interview"),
   },
   {
+    // Ahead of the strong match: one that closes on Friday is the more urgent
+    // fact about it. Not for a skip — a deadline doesn't make it worth it.
+    test: (r) =>
+      (!r.status || r.status === "not_applied") &&
+      JOB_FIT_META.closingSoon(r.meta) != null &&
+      !(r.score != null && r.score < JOB_FIT_UI.AMBER_FROM),
+    label: (r) => {
+      const days = JOB_FIT_META.closingSoon(r.meta);
+      return days === 0 ? t("attention.closesToday") : t("attention.closesIn", { count: days });
+    },
+  },
+  {
     // Deliberately reuses the card's green threshold: if the tool calls it a
-    // strong match, and you haven't acted, that is the thing to act on.
-    test: (r) => (!r.status || r.status === "not_applied") && r.score != null && r.score >= JOB_FIT_UI.GREEN_FROM,
+    // strong match, and you haven't acted, that is the thing to act on —
+    // unless applications have closed, and there's nothing left to act on.
+    test: (r) =>
+      (!r.status || r.status === "not_applied") &&
+      r.score != null &&
+      r.score >= JOB_FIT_UI.GREEN_FROM &&
+      !JOB_FIT_META.hasClosed(r.meta),
     label: (r) => t("attention.strongMatch", { score: r.score }),
   },
   {
@@ -1466,6 +1481,7 @@ function render({ focusKey } = {}) {
   const token = ++renderToken;
   const focus = focusKey ? { key: focusKey, kind: "title-btn" } : captureListFocus();
   dupGroups = JOB_FIT_EVALSTORE.duplicateGroups(records);
+  dupSets = JOB_FIT_EVALSTORE.duplicateSets(dupGroups);
   if (groupFilter === "duplicates" && !dupGroups.size) groupFilter = null;
   renderDupChip();
   renderFunnel();
@@ -1621,6 +1637,9 @@ function exportCsv() {
       t("csv.status"),
       t("csv.evaluated"),
       t("csv.applied"),
+      t("csv.reqId"),
+      t("csv.closes"),
+      t("csv.posted"),
       "URL",
       t("csv.notes"),
     ],
@@ -1634,6 +1653,9 @@ function exportCsv() {
       JOB_FIT_EVALSTORE.statusLabel(r.status || "not_applied"),
       r.lastEvaluatedAt ? new Date(r.lastEvaluatedAt).toISOString().slice(0, 10) : "",
       r.appliedAt ? new Date(r.appliedAt).toISOString().slice(0, 10) : "",
+      (r.meta && r.meta.reqId) || "",
+      (r.meta && r.meta.deadline) || "",
+      (r.meta && r.meta.postedOn) || "",
       r.url,
       r.notes,
     ]),

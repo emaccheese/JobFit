@@ -156,7 +156,8 @@ JobFit icon, then **Evaluate this job**. You can change the shortcut at
 **The popup** is for the job in front of you. If you've scored it before, it shows
 the saved score and verdict, when it was scored and whether it's out of date (another
 model, or a profile you've edited since), with **Show on page**, **Re-evaluate** and
-**Open in Tracked jobs**. Below that it says whether the model is reachable, with a
+**Open in Tracked jobs**. If you scored the same posting from another site, it shows
+that copy instead, and says so. It also warns when applications close within a week. Below that it says whether the model is reachable, with a
 **Fix in Settings** link when it isn't, and how the queue is doing. Everything you set
 once lives in **Settings**, a full page with a section for each: profile and CV,
 salary, screening rules, model, the on-page button, language, and backups.
@@ -185,6 +186,24 @@ required gaps, matches, gaps, warnings and salary, with **Re-evaluate** and
 **Tracked jobs**. The card doesn't cover the site's navigation. Drag it up either
 edge, or use **⇄** to move it to the other side; the spot is remembered per site.
 Press Esc to close the panel.
+
+**Evaluated before.** The same posting is often on LinkedIn, Indeed and the company's
+own site. If you've already scored one copy, Evaluate on another doesn't run the model
+again. Instead the card says **Evaluated before**: where and when you scored it, the
+score and verdict, and whether you've applied through that copy. **Show that result**
+opens it; **Evaluate anyway** scores this copy too. Copies are recognised within the
+same company: by requisition ID when both postings show one, otherwise by title
+("Sr." and "Senior", "- Remote" and "(Hybrid)" count as the same) and by the posting
+text. The popup shows the same thing for a job you haven't scored under this link.
+
+**Deadlines and posting age.** When a posting states them, JobFit keeps its
+requisition ID, when applications close and when it was posted. These come from the
+page's structured data, the board's own fields ("Reposted 1 week ago", "12 days left to
+apply") or the text ("Apply by October 15"). A job you haven't applied to that closes
+within 7 days moves to **Needs attention** ("closes in 3 days"), and one past its
+deadline is marked closed. A posting that's been up more than 3 weeks gets a note that
+many people may have applied already. All three appear in the result panel, the job's
+details and the CSV, and none of them change the score.
 
 **Queue.** Clicking Evaluate on a second posting while the first is still running
 queues it — up to 50. Click through a search page, queue everything that looks

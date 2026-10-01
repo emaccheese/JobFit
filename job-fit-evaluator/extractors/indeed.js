@@ -54,11 +54,17 @@
       text(document.querySelector('[data-testid="job-location"]')) ||
       text(card && card.querySelector('[data-testid="text-location"]'));
 
+    // "Posted 3 days ago" on the search card. Not "Active 3 days ago", which
+    // is the employer's last visit, not the posting's age.
+    const dateEl = card && card.querySelector('[data-testid="myJobsStateDate"]');
+    const posted = text(dateEl);
+
     return {
       title: title ? title.replace(/\s*-\s*job post$/i, "") : null,
       company,
       location: where,
       text: body,
+      postingFields: posted && !/activ|actif|ativ/i.test(posted) ? { postedText: posted } : null,
     };
   }
 

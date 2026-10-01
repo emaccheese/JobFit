@@ -141,16 +141,18 @@
 
     let company = null;
     let jobLocation = null;
+    let metaLine = null;
 
     if (header) {
       const companyEl = header.querySelector('a[href*="/company/"]');
       company = companyEl ? companyEl.innerText.trim() || null : null;
 
       // e.g. "Bellevue, WA · Reposted 1 week ago · 96 people clicked apply"
-      const metaLine = window.__jobFit
-        .textFrom(header)
-        .split("\n")
-        .find((line) => line.includes("·"));
+      metaLine =
+        window.__jobFit
+          .textFrom(header)
+          .split("\n")
+          .find((line) => line.includes("·")) || null;
       if (metaLine) jobLocation = metaLine.split("·")[0].trim() || null;
     }
 
@@ -163,6 +165,9 @@
       company,
       location: jobLocation,
       text,
+      // The "Reposted 1 week ago" in the same line, for when it was posted
+      // (postingmeta.js).
+      postingFields: metaLine ? { postedText: metaLine } : null,
     };
   }
 
