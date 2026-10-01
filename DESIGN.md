@@ -1342,6 +1342,25 @@ Containment is used rather than Jaccard because LinkedIn wraps the same descript
 in extra page text. Location is ignored except as the no-text fallback ("Mountain
 View, CA" vs "Mountain View, California (HQ)").
 
+**Cost.** Comparing every pair within a company is what lets a retitled copy be
+found, but it made the check expensive as the history grew. At 1,000 tracked jobs:
+- every popup open and every card took ~360 ms;
+- Tracked jobs took ~180 ms on every render, including each keystroke in its search
+  box.
+
+Two changes bring it down without changing a single answer:
+- `findDuplicatesOf()` compares only the job's own company, since copies are never
+  matched across companies.
+- Each posting's 3-word runs are stored as sorted 32-bit FNV-1a hashes, about 3.5 KB
+  a posting instead of a Set of strings, so they can be kept per record object in a
+  `WeakMap` between calls. Building them is ~90% of the cost. Tracked jobs replaces
+  only the record that changed, and the memo re-checks the text in case a record is
+  updated in place.
+
+At 1,000 jobs that's 1–2 ms for the popup and the card, ~95 ms for the first render
+and ~10 ms for each render after. A hash collision can only overcount a shared run,
+by about one in millions, far inside the thresholds' slack.
+
 *Until 2026-10-01* records were bucketed by title and company. A retitled copy
 ("Sr." on one site, "Senior" on another) was never compared, and two openings with
 separate requisition IDs but one shared description were flagged.

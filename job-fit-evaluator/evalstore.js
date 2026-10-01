@@ -404,21 +404,59 @@ var JOB_FIT_EVALSTORE = (function () {
   // three words. Containment rather than Jaccard: LinkedIn wraps the same
   // description in extra page text, which a symmetric measure would count
   // against it.
-  function shingles(text) {
-    const words = normalizeTitle(String(text || "").slice(0, 4000)).split(" ").filter(Boolean);
-    const set = new Set();
-    for (let i = 0; i + 2 < words.length; i++) set.add(`${words[i]} ${words[i + 1]} ${words[i + 2]}`);
-    return set;
+  //
+  // Each run is kept as a 32-bit hash, sorted, rather than as a string in a
+  // Set: about 3.5 KB a posting instead of tens, which is what makes keeping
+  // them between calls affordable (below). Two different runs sharing a hash
+  // is a one-in-millions overcount, well inside the thresholds' slack.
+  function hashRun(text) {
+    let h = 0x811c9dc5;
+    for (let i = 0; i < text.length; i++) {
+      h ^= text.charCodeAt(i);
+      h = Math.imul(h, 0x01000193);
+    }
+    return h >>> 0;
   }
 
+  function shingles(text) {
+    const words = normalizeTitle(String(text || "").slice(0, 4000)).split(" ").filter(Boolean);
+    const runs = new Uint32Array(Math.max(0, words.length - 2));
+    for (let i = 0; i < runs.length; i++) runs[i] = hashRun(`${words[i]} ${words[i + 1]} ${words[i + 2]}`);
+    runs.sort();
+    let unique = 0;
+    for (let i = 0; i < runs.length; i++) if (i === 0 || runs[i] !== runs[i - 1]) runs[unique++] = runs[i];
+    return runs.subarray(0, unique);
+  }
+
+  // Both sorted: one walk through each.
   function containment(a, b) {
-    if (!a.size || !b.size) return 0;
-    const [small, large] = a.size <= b.size ? [a, b] : [b, a];
+    if (!a.length || !b.length) return 0;
+    const [small, large] = a.length <= b.length ? [a, b] : [b, a];
     let shared = 0;
-    small.forEach((s) => {
-      if (large.has(s)) shared++;
-    });
-    return shared / small.size;
+    for (let i = 0, j = 0; i < small.length && j < large.length; ) {
+      if (small[i] === large[j]) {
+        shared++;
+        i++;
+        j++;
+      } else if (small[i] < large[j]) i++;
+      else j++;
+    }
+    return shared / small.length;
+  }
+
+  // Kept per record object between calls. Building them is nearly all the
+  // cost, and Tracked jobs looks for duplicates on every render — each
+  // keystroke in its search box — over records that haven't changed. A record
+  // that's replaced (re-evaluated, re-read) is a new object; the text check
+  // covers one updated in place.
+  const shingleMemo = new WeakMap();
+
+  function shinglesOf(record) {
+    const kept = shingleMemo.get(record);
+    if (kept && kept.text === record.text) return kept.runs;
+    const runs = shingles(record.text);
+    shingleMemo.set(record, { text: record.text, runs });
+    return runs;
   }
 
   // Same title: most of the text in common is enough. Different titles need
@@ -466,7 +504,7 @@ var JOB_FIT_EVALSTORE = (function () {
   // three jobs, however alike the text. Otherwise the text does, with the
   // bar depending on whether the titles agree; with no text, the title and
   // the city.
-  function samePosting(a, b, shinglesOf) {
+  function samePosting(a, b) {
     const idA = reqIdOf(a);
     const idB = reqIdOf(b);
     if (idA && idB) return idA === idB;
@@ -492,11 +530,6 @@ var JOB_FIT_EVALSTORE = (function () {
     });
 
     const result = new Map();
-    const shingleCache = new Map();
-    const shinglesOf = (r) => {
-      if (!shingleCache.has(r.jobKey)) shingleCache.set(r.jobKey, shingles(r.text));
-      return shingleCache.get(r.jobKey);
-    };
     const add = (a, b) => {
       if (!result.has(a.jobKey)) result.set(a.jobKey, []);
       result.get(a.jobKey).push(b);
@@ -508,7 +541,7 @@ var JOB_FIT_EVALSTORE = (function () {
           const a = group[i];
           const b = group[j];
           if (a.jobKey === b.jobKey || isDismissedPair(a, b)) continue;
-          if (!samePosting(a, b, shinglesOf)) continue;
+          if (!samePosting(a, b)) continue;
           add(a, b);
           add(b, a);
         }
@@ -534,8 +567,13 @@ var JOB_FIT_EVALSTORE = (function () {
     return setOf;
   }
 
+  // Copies are only ever matched within a company, so only its jobs are
+  // compared: the rest of the history can't change the answer, and with a
+  // thousand jobs tracked it took the popup and the card ~400 ms to find that
+  // out.
   function findDuplicatesOf(record, records) {
-    const others = (records || []).filter((r) => r.jobKey !== record.jobKey);
+    const company = normalizeCompany(record.company);
+    const others = (records || []).filter((r) => r && r.jobKey !== record.jobKey && normalizeCompany(r.company) === company);
     return duplicateGroups([record, ...others]).get(record.jobKey) || [];
   }
 
