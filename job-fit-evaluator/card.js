@@ -67,27 +67,41 @@
 
   // Same posting, tracked from another site under this profile? Flag only —
   // the two records are left alone; Tracked jobs is where you pick one.
-  async function duplicateNoteFor(record) {
-    if (!record.jobKey || !record.profileId) return null;
+  function duplicateNoteFrom(record, records) {
+    const dups = JOB_FIT_EVALSTORE.findDuplicatesOf(record, records);
+    if (!dups.length) return null;
+    const d = dups[0];
+    const score = d.hardReject ? t("result.hardReject") : d.score != null ? d.score : t("result.noScore");
+    const when = JOB_FIT_I18N.formatDate(JOB_FIT_EVALSTORE.activityTs(d), { month: "short", day: "numeric" });
+    const status = d.status && d.status !== "not_applied" ? `, ${JOB_FIT_EVALSTORE.statusLabel(d.status).toLowerCase()}` : "";
+    return t("banner.duplicate", { site: JOB_FIT_EVALSTORE.siteLabel(d), detail: `${score}, ${when}${status}` });
+  }
+
+  // What the rest of Tracked jobs says about this one, from one read of the
+  // profile's records: the same posting tracked elsewhere, and how your other
+  // applications at the company went. { duplicateNote, companyNote }.
+  async function contextNotesFor(record) {
+    if (!record.jobKey || !record.profileId) return {};
     try {
-      const others = await JOB_FIT_EVALSTORE.list(record.profileId);
-      const dups = JOB_FIT_EVALSTORE.findDuplicatesOf(record, others);
-      if (!dups.length) return null;
-      const d = dups[0];
-      const score = d.hardReject ? t("result.hardReject") : d.score != null ? d.score : t("result.noScore");
-      const when = JOB_FIT_I18N.formatDate(JOB_FIT_EVALSTORE.activityTs(d), { month: "short", day: "numeric" });
-      const status = d.status && d.status !== "not_applied" ? `, ${JOB_FIT_EVALSTORE.statusLabel(d.status).toLowerCase()}` : "";
-      return t("banner.duplicate", { site: JOB_FIT_EVALSTORE.siteLabel(d), detail: `${score}, ${when}${status}` });
+      const records = await JOB_FIT_EVALSTORE.list(record.profileId);
+      return {
+        duplicateNote: duplicateNoteFrom(record, records),
+        companyNote: JOB_FIT_EVALSTORE.companyHistoryNote(records, record),
+      };
     } catch (err) {
-      return null;
+      return {};
     }
   }
 
   // A record, as the panel shows it. Serializable on purpose: from an iframe
   // it travels to the top frame as a message.
-  function resultFromRecord(record, { cached = false, profileName = "", staleNote = null, duplicateNote = null, saveError = null } = {}) {
+  function resultFromRecord(
+    record,
+    { cached = false, profileName = "", staleNote = null, duplicateNote = null, companyNote = null, saveError = null } = {}
+  ) {
     const notes = [];
     if (duplicateNote) notes.push(duplicateNote);
+    if (companyNote) notes.push(companyNote);
     if (staleNote) notes.push(staleNote);
     if (saveError) notes.push(t("banner.notSaved", { error: saveError }));
     if (record.evaluation && record.evaluation.input_truncated) notes.push(t("banner.truncated"));
@@ -112,6 +126,10 @@
       meta,
       notes,
       actions: [cached ? "reevaluate" : null, record.jobKey ? "tracked" : null].filter(Boolean),
+      // Re-evaluate leads only when the saved score is out of date — not for
+      // every heads-up, most of which (a deadline, the company) re-scoring
+      // wouldn't change.
+      primaryAction: cached && staleNote ? "reevaluate" : null,
     };
 
     if (record.hardReject) {
@@ -177,12 +195,12 @@
   // The notice says when, where and what it got; "Show that result" swaps in
   // that result (built now, so it can travel from a frame as a message), and
   // "Evaluate anyway" runs the model on this copy.
-  function duplicateNotice(job, dup, { profileName = "" } = {}) {
+  function duplicateNotice(job, dup, { profileName = "", companyNote = null } = {}) {
     const site = JOB_FIT_EVALSTORE.siteLabel(dup);
     const date = JOB_FIT_I18N.formatDate(dup.lastEvaluatedAt || JOB_FIT_EVALSTORE.activityTs(dup), { month: "short", day: "numeric" });
     const verdict = verdictLabel((dup.evaluation && dup.evaluation.verdict) || dup.verdict);
     const applied = dup.status && dup.status !== "not_applied";
-    const result = resultFromRecord(dup, { cached: true, profileName });
+    const result = resultFromRecord(dup, { cached: true, profileName, companyNote });
     return {
       ...job,
       tone: JOB_FIT_UI.scoreClass(dup.score) || "neutral",
@@ -192,6 +210,7 @@
       cardSub: t("dup.cardSub", { score: dup.score, site }),
       summary: t("dup.summary", { site, date, score: dup.score, verdict }),
       meta: applied ? t("dup.status", { status: JOB_FIT_EVALSTORE.statusLabel(dup.status) }) : t("dup.hint"),
+      notes: companyNote ? [companyNote] : [],
       actions: ["showDuplicate", "evaluateAnyway"],
       primaryAction: "showDuplicate",
       duplicate: {
@@ -202,7 +221,7 @@
     };
   }
 
-  const api = { resultFromRecord, staleNoteFor, duplicateNoteFor, duplicateNotice };
+  const api = { resultFromRecord, staleNoteFor, contextNotesFor, duplicateNotice };
   const RELAYED = ["attach", "detach", "setJob", "setLoading", "starting", "showResult", "showNotice"];
 
   if (FRAMED) {
@@ -785,7 +804,7 @@
       cached: true,
       profileName: profile.name,
       staleNote: staleNoteFor(record, profile, currentModel),
-      duplicateNote: await duplicateNoteFor(record),
+      ...(await contextNotesFor(record)),
     });
     content.fromStorage = true;
     return content;
@@ -861,8 +880,9 @@
     const actions = c.actions || [];
     if (actions.length) {
       const foot = el("div", "p-foot");
-      // Re-evaluate leads only when the saved score is out of date.
-      const primary = c.primaryAction || (c.notes && c.notes.length && actions.includes("reevaluate") ? "reevaluate" : null);
+      // Whatever the content asks to lead (Re-evaluate when out of date, Show
+      // that result); a lone Try again leads too.
+      const primary = c.primaryAction;
       actions.forEach((a) => foot.appendChild(actionButton(a, a === primary || (a === "evaluate" && actions.length === 1))));
       panel.appendChild(foot);
     }

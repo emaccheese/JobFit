@@ -196,6 +196,13 @@ same company: by requisition ID when both postings show one, otherwise by title
 ("Sr." and "Senior", "- Remote" and "(Hybrid)" count as the same) and by the posting
 text. The popup shows the same thing for a job you haven't scored under this link.
 
+**Your history at a company.** When you've applied to other jobs at the same company,
+the result panel, the popup and the job's details in Tracked jobs say how those went,
+for example "At Garmin: 2 rejections · 1 awaiting a reply — 5 other jobs tracked
+there." You see it before you apply a fourth time, and the popup shows it before you
+evaluate. Copies of one posting count as one application. Tracked jobs adds **Show all
+Garmin jobs**, which searches for the company.
+
 **Deadlines and posting age.** When a posting states them, JobFit keeps its
 requisition ID, when applications close and when it was posted. These come from the
 page's structured data, the board's own fields ("Reposted 1 week ago", "12 days left to

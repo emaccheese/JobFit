@@ -163,18 +163,18 @@
   // fresh result, one read back out of history, and every notice. One
   // renderer, so a new score and a saved one can't drift apart.
   //
-  // The duplicate check runs after the result is up rather than before, so a
-  // slow storage read never delays it; the panel is updated with the note if
-  // there is one, and only while the page still shows this job.
+  // The notes that come from the rest of Tracked jobs (the same posting
+  // elsewhere, your history at the company) are added after the result is up
+  // rather than before, so a slow storage read never delays it; the panel is
+  // updated if there are any, and only while the page still shows this job.
   function renderResult(record, { cached = false, profileName, saveError = null, staleNote = null } = {}) {
-    const build = (duplicateNote) =>
-      JOB_FIT_CARD.resultFromRecord(record, { cached, profileName, staleNote, duplicateNote, saveError });
-    JOB_FIT_CARD.showResult(build(null));
-    JOB_FIT_CARD.duplicateNoteFor(record).then((note) => {
-      if (!note) return;
+    const build = (context = {}) => JOB_FIT_CARD.resultFromRecord(record, { cached, profileName, staleNote, saveError, ...context });
+    JOB_FIT_CARD.showResult(build());
+    JOB_FIT_CARD.contextNotesFor(record).then((context) => {
+      if (!context.duplicateNote && !context.companyNote) return;
       const now = dispatchExtraction();
       if (!now.result || JOB_FIT_JOBKEY.keyFor(now.result) !== record.jobKey) return;
-      JOB_FIT_CARD.showResult(build(note), { open: false });
+      JOB_FIT_CARD.showResult(build(context), { open: false });
     });
   }
 
@@ -194,15 +194,13 @@
     renderResult(record, { cached: false, profileName, saveError });
   }
 
-  // The same posting already scored under this profile from another link —
-  // LinkedIn and the company's own site, say. Asked before the model is, so
-  // the answer costs nothing; only a real model score counts, since a keyword
-  // reject is re-checked here for free anyway.
-  async function scoredDuplicateOf(candidate) {
+  // This profile's tracked jobs, for what they can say before a model run.
+  // Empty rather than failing: they only ever add a note.
+  async function trackedRecords(profileId) {
     try {
-      return JOB_FIT_EVALSTORE.scoredDuplicateOf(candidate, await JOB_FIT_EVALSTORE.list(candidate.profileId));
+      return await JOB_FIT_EVALSTORE.list(profileId);
     } catch (err) {
-      return null;
+      return [];
     }
   }
 
@@ -335,15 +333,22 @@
       return;
     }
 
+    // Read once, for both things it can say before the model runs.
+    const tracked = await trackedRecords(activeProfile.id);
+    // How your other applications at this company went, said while this one
+    // waits — and on the notice below.
+    const companyNote = JOB_FIT_EVALSTORE.companyHistoryNote(tracked, baseRecord);
+
     // A job with no score of its own (so never a Re-evaluate; a summary alone
     // doesn't count) whose posting was already scored from another site: say
     // so and wait, rather than spend minutes of model time on an answer you
-    // already have. The card offers both ways on.
+    // already have. The card offers both ways on. Only a real model score
+    // counts, since a keyword reject is re-checked here for free anyway.
     const ownScored = Boolean(own && (own.evaluation || own.hardReject));
     if (!ownScored && !skipDuplicateCheck) {
-      const duplicate = await scoredDuplicateOf(baseRecord);
+      const duplicate = JOB_FIT_EVALSTORE.scoredDuplicateOf(baseRecord, tracked);
       if (duplicate) {
-        JOB_FIT_CARD.showNotice(JOB_FIT_CARD.duplicateNotice(job, duplicate, { profileName: activeProfile.name }));
+        JOB_FIT_CARD.showNotice(JOB_FIT_CARD.duplicateNotice(job, duplicate, { profileName: activeProfile.name, companyNote }));
         return;
       }
     }
@@ -419,6 +424,7 @@
         title: response.position <= 1 ? t("float.scoring") : t("float.queued", { position: response.position }),
         summary: response.duplicate ? t("banner.alreadyQueued", { position: response.position }) : `${t("banner.passedLayer1")} — ${queueNote}.`,
         meta: t("float.asProfile", { name: activeProfile.name }),
+        notes: companyNote ? [companyNote] : [],
         sections: [
           { title: t("banner.domainFlagsTitle"), tone: "neutral", items: domainFlagMatches, open: true },
           { title: t("result.learningFlags"), tone: "neutral", items: learningMatches, open: true },

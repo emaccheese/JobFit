@@ -908,4 +908,13 @@ JOB_FIT_MESSAGES.pt = {
   "csv.closes": "Fim das inscrições",
   "csv.posted": "Publicada",
   "popup.dupFrom": "Mesma vaga em {site} · {when}",
+  "company.offer": { one: "{count} proposta", other: "{count} propostas" },
+  "company.interviewing": { one: "{count} entrevista", other: "{count} entrevistas" },
+  "company.applied": { one: "{count} aguardando resposta", other: "{count} aguardando resposta" },
+  "company.rejected": { one: "{count} recusa", other: "{count} recusas" },
+  "company.ghosted": { one: "{count} sem resposta", other: "{count} sem resposta" },
+  "company.withdrawn": { one: "{count} desistência", other: "{count} desistências" },
+  "company.note": { one: "Na {company}: {counts} — {count} outra vaga acompanhada.", other: "Na {company}: {counts} — {count} outras vagas acompanhadas." },
+  "company.showAll": "Ver todas as vagas da {company}",
+  "company.showingAll": { one: "Mostrando {count} vaga de {company}", other: "Mostrando {count} vagas de {company}" },
 };

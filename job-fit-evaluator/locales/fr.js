@@ -908,4 +908,13 @@ JOB_FIT_MESSAGES.fr = {
   "csv.closes": "Fin des candidatures",
   "csv.posted": "Publiée",
   "popup.dupFrom": "Même offre sur {site} · {when}",
+  "company.offer": { one: "{count} offre reçue", other: "{count} offres reçues" },
+  "company.interviewing": { one: "{count} entrevue", other: "{count} entrevues" },
+  "company.applied": { one: "{count} en attente de réponse", other: "{count} en attente de réponse" },
+  "company.rejected": { one: "{count} refus", other: "{count} refus" },
+  "company.ghosted": { one: "{count} sans nouvelles", other: "{count} sans nouvelles" },
+  "company.withdrawn": { one: "{count} retirée", other: "{count} retirées" },
+  "company.note": { one: "Chez {company} : {counts} — {count} autre offre suivie.", other: "Chez {company} : {counts} — {count} autres offres suivies." },
+  "company.showAll": "Voir toutes les offres de {company}",
+  "company.showingAll": { one: "{count} offre correspond à {company}", other: "{count} offres correspondent à {company}" },
 };

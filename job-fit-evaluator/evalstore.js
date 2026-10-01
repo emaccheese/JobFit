@@ -549,6 +549,58 @@ var JOB_FIT_EVALSTORE = (function () {
     return scored.sort((a, b) => applied(b) - applied(a) || (b.lastEvaluatedAt || 0) - (a.lastEvaluatedAt || 0))[0] || null;
   }
 
+  // --- company history -----------------------------------------------------
+  //
+  // What happened the other times you went for a job at this company: two
+  // rejections and one still pending is worth knowing before applying a
+  // fourth time. Statuses only — a score says nothing about how they replied.
+
+  // Most decisive first, which is the order they're listed in.
+  const HISTORY_STATUSES = ["offer", "interviewing", "applied", "rejected", "ghosted", "withdrawn"];
+
+  // { tracked, applied, counts } over one profile's records at `company`.
+  // `exclude` drops jobKeys (the job being looked at). Copies of one posting
+  // count once: an application tracked from LinkedIn and from Workday is one
+  // application, with the status that changed last.
+  function companyHistory(records, company, { exclude = [] } = {}) {
+    const key = normalizeCompany(company);
+    if (!key) return null;
+    const skip = new Set(exclude);
+    const atCompany = (records || []).filter((r) => r && r.jobKey && !skip.has(r.jobKey) && normalizeCompany(r.company) === key);
+    const sets = duplicateSets(duplicateGroups(atCompany));
+    const movedAt = (r) => (r.status && r.status !== "not_applied" ? r.statusChangedAt || r.appliedAt || 1 : 0);
+    const jobs = new Map();
+    atCompany.forEach((r) => {
+      const set = sets.get(r.jobKey) || r.jobKey;
+      const kept = jobs.get(set);
+      if (!kept || movedAt(r) > movedAt(kept)) jobs.set(set, r);
+    });
+    const counts = {};
+    jobs.forEach((r) => {
+      if (HISTORY_STATUSES.includes(r.status)) counts[r.status] = (counts[r.status] || 0) + 1;
+    });
+    const applied = Object.values(counts).reduce((sum, n) => sum + n, 0);
+    return { tracked: jobs.size, applied, counts };
+  }
+
+  // "At Garmin: 2 rejections · 1 applied — 5 other jobs tracked there.", or
+  // null when nothing there has gone past Not applied. The record's own copies
+  // on other sites are left out — the duplicate note already covers them.
+  function companyHistoryNote(records, record) {
+    if (!record || !record.company) return null;
+    const exclude = [record.jobKey, ...findDuplicatesOf(record, records).map((d) => d.jobKey)];
+    const history = companyHistory(records, record.company, { exclude });
+    if (!history || !history.applied) return null;
+    const parts = HISTORY_STATUSES.filter((s) => history.counts[s]).map((s) =>
+      tr(`company.${s}`, { count: history.counts[s] }, `${history.counts[s]} ${s}`)
+    );
+    return tr(
+      "company.note",
+      { company: record.company, counts: parts.join(" · "), count: history.tracked },
+      `At ${record.company}: ${parts.join(" · ")} — ${history.tracked} other jobs tracked there.`
+    );
+  }
+
   // When different models scored the same job 30 or more points apart, the
   // posting is usually saying two things — short generic requirements over
   // specialist work — and the gap is worth reading about rather than just two
@@ -621,6 +673,8 @@ var JOB_FIT_EVALSTORE = (function () {
     duplicateSets,
     findDuplicatesOf,
     scoredDuplicateOf,
+    companyHistory,
+    companyHistoryNote,
     mergeMeta,
     titleKey,
     siteLabel,

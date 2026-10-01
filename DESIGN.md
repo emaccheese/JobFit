@@ -1206,7 +1206,7 @@ CSS reached them. It's gone: every evaluation, whatever started it, now shows in
   whether the site is on and which job is on screen (`attach`, `setJob`,
   `setLoading`). `content.js` only says what happened: `starting(job)` as soon as it
   knows the job, then `showResult(resultFromRecord(record, …))` or `showNotice({…})`.
-  `resultFromRecord`, `staleNoteFor` and `duplicateNoteFor` are shared, so a fresh
+  `resultFromRecord`, `staleNoteFor` and `contextNotesFor` are shared, so a fresh
   result, a saved one opened later and one opened from the popup read identically.
 - **The panel.** Score badge, verdict, job, the one-liner as wrapping text, when and
   for which profile it was scored, then an amber **heads-up** box (out of date,
@@ -1384,6 +1384,40 @@ job block runs the same lookup and shows that copy, labelled "Same posting on
 {site}", when the tab's job has no score of its own. A missing company is now filled
 from JSON-LD `hiringOrganization` (like the location already was), because the
 generic extractor never finds one, and duplicates are only matched within a company.
+
+### Company history (2026-10-01)
+
+Applied to Garmin three times and been rejected twice? That's worth knowing before the
+fourth application, and nothing used to say it. `companyHistory(records, company,
+{ exclude })` counts, over one profile's records at a company, how many jobs reached
+each status past Not applied.
+- **Same company** means `normalizeCompany()` agrees, so "Stripe, Inc." is Stripe.
+- **Copies of one posting count once.** Copies are the connected sets from
+  `duplicateSets()`, each counted under the status that changed last. An application
+  tracked from LinkedIn and from Workday is one application.
+
+`companyHistoryNote(records, record)` words it: "At Garmin: 1 offer · 1 awaiting a
+reply · 2 rejections — 5 other jobs tracked there."
+- It leaves out the job itself and its copies elsewhere, which the duplicate note
+  already covers.
+- It's null when nothing at the company has gone past Not applied. Jobs you only
+  evaluated say nothing about how the company responds.
+- Statuses are listed offer, interviewing, applied, rejected, ghosted, withdrawn.
+
+Where it shows:
+- **Card result panel**, in the heads-up. `contextNotesFor()` replaced
+  `duplicateNoteFor()`: one `list()` read gives both the duplicate note and the company
+  note, added after the result is up, as before.
+- **The queued notice and the "Evaluated before" notice.** `content.js` reads the
+  records once, after Layer 1, for both the duplicate check and this.
+- **The popup's This job block**, before you've evaluated anything. It's worked out from
+  the saved record when there is one, whose copies are already known.
+- **Tracked jobs' details**, with **Show all {company} jobs**. That puts the company in
+  the search box, which you can see and clear, instead of adding a hidden filter.
+
+Re-evaluate used to lead the panel whenever there was any heads-up note at all. That
+was harmless when the notes all meant "out of date", but not once the company and the
+deadline joined them. It now leads only when `staleNote` is set (`primaryAction`).
 
 ### Requisition ID, deadline and posting age (2026-10-01)
 

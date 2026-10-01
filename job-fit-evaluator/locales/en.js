@@ -923,4 +923,13 @@ JOB_FIT_MESSAGES.en = {
   "csv.closes": "Applications close",
   "csv.posted": "Posted",
   "popup.dupFrom": "Same posting on {site} · {when}",
+  "company.offer": { one: "{count} offer", other: "{count} offers" },
+  "company.interviewing": { one: "{count} interview", other: "{count} interviews" },
+  "company.applied": { one: "{count} awaiting a reply", other: "{count} awaiting a reply" },
+  "company.rejected": { one: "{count} rejection", other: "{count} rejections" },
+  "company.ghosted": { one: "{count} never answered", other: "{count} never answered" },
+  "company.withdrawn": { one: "{count} withdrawn", other: "{count} withdrawn" },
+  "company.note": { one: "At {company}: {counts} — {count} other job tracked there.", other: "At {company}: {counts} — {count} other jobs tracked there." },
+  "company.showAll": "Show all {company} jobs",
+  "company.showingAll": { one: "Showing {count} job matching {company}", other: "Showing {count} jobs matching {company}" },
 };

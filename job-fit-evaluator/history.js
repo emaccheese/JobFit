@@ -568,6 +568,25 @@ function buildDuplicateSection(record, dups) {
   return box;
 }
 
+// How your other applications at this company went, and the way to see them
+// all: a search for the company, which you can read and clear like any other.
+function buildCompanyLine(record, note) {
+  const line = el("div", "company-line");
+  line.appendChild(el("span", null, note));
+  const all = el("button", "link", t("company.showAll", { company: record.company }));
+  all.type = "button";
+  all.addEventListener("click", () => {
+    groupFilter = null;
+    els.statusFilter.value = "all";
+    els.search.value = record.company;
+    resetPage();
+    render();
+    JOB_FIT_UI.announce(t("company.showingAll", { company: record.company, count: visibleRecords().length }));
+  });
+  line.appendChild(all);
+  return line;
+}
+
 function renderDupChip() {
   const host = document.getElementById("dupChip");
   host.innerHTML = "";
@@ -822,6 +841,9 @@ function renderJobDetails(record, { inline = false } = {}) {
 
   const dups = dupGroups.get(record.jobKey);
   if (dups) box.appendChild(buildDuplicateSection(record, dups));
+
+  const companyNote = JOB_FIT_EVALSTORE.companyHistoryNote(records, record);
+  if (companyNote) box.appendChild(buildCompanyLine(record, companyNote));
 
   if (record.hardReject) {
     tagList(box, t("banner.rejectReason"), [`${record.hardReject.label}: "${record.hardReject.matchedText}"`], "tag-red");

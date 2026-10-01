@@ -51,6 +51,11 @@
   .record-meta { font-size: var(--fs-xs); color: var(--muted); margin: 4px 0 0; }
   .record-meta .stale { color: var(--amber-fg); font-weight: 600; }
   .record-link { font-size: var(--fs-xs); margin-top: 4px; }
+  /* Your history at the company: a heads-up, quieter than an error. */
+  .company-note {
+    margin: 10px 0 0; padding: 6px 9px; border-radius: var(--radius-sm); font-size: var(--fs-xs);
+    background: var(--amber-soft); color: var(--amber-fg); border: 1px solid var(--amber-line);
+  }
 
   .buttons { display: flex; flex-direction: column; gap: 6px; margin-top: 12px; }
   .buttons .pair { display: flex; gap: 6px; }
@@ -111,6 +116,7 @@
       <p class="record-meta" id="recMeta"></p>
       <button type="button" class="link record-link" id="openRecord" data-i18n="popup.openInTracked">Open in Tracked jobs</button>
     </div>
+    <p class="company-note" id="companyNote" hidden></p>
 
     <div class="buttons">
       <button id="evaluate" class="primary" type="button" data-i18n="popup.evaluate">Evaluate this tab</button>

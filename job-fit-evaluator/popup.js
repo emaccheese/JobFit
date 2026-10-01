@@ -208,27 +208,36 @@ function scoredWhen(record) {
   return days <= 0 ? t("popup.scoredToday") : t("popup.scoredAgo", { count: days });
 }
 
-// Not tracked under this link, but maybe from another site: the latest
-// scored copy, the same one Evaluate on the page would point to.
-async function scoredDuplicateOfTab() {
-  if (!tabJob || !(tabJob.title || tabJob.text)) return null;
+// This profile's tracked jobs, for what they say about the tab's job: a copy
+// scored from another site, and your history at the company.
+async function trackedRecords() {
+  if (!tabJob) return [];
   try {
-    const profileId = activeProfile().id;
-    return JOB_FIT_EVALSTORE.scoredDuplicateOf({ ...tabJob, profileId }, await JOB_FIT_EVALSTORE.list(profileId));
+    return await JOB_FIT_EVALSTORE.list(activeProfile().id);
   } catch (err) {
-    return null;
+    return [];
   }
 }
 
 // The saved result for this tab's job under the active profile: the number
 // the on-page card shows, here too, with what to do about it. With none, the
-// same posting scored from another site stands in, said to be that.
+// same posting scored from another site stands in, said to be that — the one
+// Evaluate on the page would point to.
 async function renderThisJob() {
   tabRecord = tabJob ? await JOB_FIT_EVALSTORE.get(activeProfile().id, tabJob.jobKey) : null;
   const hasScore = Boolean(tabRecord && (tabRecord.score != null || tabRecord.hardReject));
-  const duplicate = hasScore ? null : await scoredDuplicateOfTab();
+  const tracked = await trackedRecords();
+  const candidate = tabJob ? { ...tabJob, profileId: activeProfile().id } : null;
+  const duplicate = hasScore || !candidate ? null : JOB_FIT_EVALSTORE.scoredDuplicateOf(candidate, tracked);
   shownRecord = hasScore ? tabRecord : duplicate;
   $("record").hidden = !shownRecord;
+
+  // Before you've scored it, too: how the other applications there went. The
+  // saved record when there is one, whose copies elsewhere are already known.
+  const subject = tabRecord || candidate;
+  const companyNote = subject ? JOB_FIT_EVALSTORE.companyHistoryNote(tracked, subject) : null;
+  $("companyNote").textContent = companyNote || "";
+  $("companyNote").hidden = !companyNote;
 
   const evaluate = $("evaluate");
   if (!hasScore) {

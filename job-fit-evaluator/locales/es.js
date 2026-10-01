@@ -908,4 +908,13 @@ JOB_FIT_MESSAGES.es = {
   "csv.closes": "Cierre de postulaciones",
   "csv.posted": "Publicada",
   "popup.dupFrom": "Misma vacante en {site} · {when}",
+  "company.offer": { one: "{count} oferta", other: "{count} ofertas" },
+  "company.interviewing": { one: "{count} entrevista", other: "{count} entrevistas" },
+  "company.applied": { one: "{count} esperando respuesta", other: "{count} esperando respuesta" },
+  "company.rejected": { one: "{count} rechazo", other: "{count} rechazos" },
+  "company.ghosted": { one: "{count} sin respuesta", other: "{count} sin respuesta" },
+  "company.withdrawn": { one: "{count} retirada", other: "{count} retiradas" },
+  "company.note": { one: "En {company}: {counts} — {count} empleo más guardado ahí.", other: "En {company}: {counts} — {count} empleos más guardados ahí." },
+  "company.showAll": "Ver todos los empleos de {company}",
+  "company.showingAll": { one: "Mostrando {count} empleo que coincide con {company}", other: "Mostrando {count} empleos que coinciden con {company}" },
 };
