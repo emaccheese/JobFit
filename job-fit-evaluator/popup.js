@@ -78,7 +78,10 @@ function probePage() {
   });
   return {
     host: location.hostname,
-    linkedin: Boolean(document.querySelector('[data-testid="expandable-text-box"]')),
+    // Signed in, or the signed-out page's description (see extractors/linkedin.js).
+    linkedin:
+      Boolean(document.querySelector('[data-testid="expandable-text-box"]')) ||
+      (location.hostname.includes("linkedin.com") && Boolean(document.querySelector(".show-more-less-html__markup"))),
     greenhouse: Boolean(document.querySelector(".job__description, .application-description")),
     embedded: hasEmbeddedBoard,
     jibe: Boolean(document.querySelector("descriptions-app #description-body")),

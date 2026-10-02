@@ -1,9 +1,20 @@
 (() => {
+  // The job id in a /jobs/view/ path. Signed in, it's the whole segment
+  // (/jobs/view/4435682676/); signed out, and on links from search engines,
+  // it trails a slug of the title (/jobs/view/senior-c-engineer-at-acme-4435682676).
+  // Matching only the first form left those pages with no id, so history was
+  // keyed on a URL that changes with every search.
+  const JOB_VIEW_ID = /\/jobs\/view\/(?:[^/?#]*-)?(\d+)(?=[/?#]|$)/;
+
+  function jobIdFromPath(path) {
+    const match = String(path || "").match(JOB_VIEW_ID);
+    return match ? match[1] : null;
+  }
+
   function currentJobId() {
     const fromQuery = new URLSearchParams(location.search).get("currentJobId");
     if (fromQuery) return fromQuery;
-    const fromPath = location.pathname.match(/\/jobs\/view\/(\d+)/);
-    return fromPath ? fromPath[1] : null;
+    return jobIdFromPath(location.pathname);
   }
 
   // The search-results layout renders a card per job in the left rail, each
@@ -35,7 +46,7 @@
   // to the job, so it's trusted ahead of any guess. Only on the job's own page:
   // on search results the tab title describes the search, not this job.
   function fromDocumentTitle() {
-    const pathId = (location.pathname.match(/\/jobs\/view\/(\d+)/) || [])[1];
+    const pathId = jobIdFromPath(location.pathname);
     if (!pathId || pathId !== currentJobId()) return null;
     const parts = document.title
       .replace(/^\(\d+\+?\)\s*/, "")
@@ -59,7 +70,15 @@
   function jobAnchors() {
     const jobId = currentJobId();
     if (!jobId) return [];
-    return Array.from(document.querySelectorAll(`a[href*="/jobs/view/${jobId}"]`));
+    // Compared on the parsed id, not a substring of the href, so slugged
+    // links count and /jobs/view/123 doesn't also claim /jobs/view/1234.
+    return Array.from(document.querySelectorAll('a[href*="/jobs/view/"]')).filter((anchor) => {
+      try {
+        return jobIdFromPath(new URL(anchor.href, location.href).pathname) === jobId;
+      } catch (err) {
+        return false;
+      }
+    });
   }
 
   function titleCandidates() {
@@ -113,9 +132,42 @@
     return null;
   }
 
+  function textOf(selector) {
+    const el = document.querySelector(selector);
+    const text = el ? (el.innerText || el.textContent || "").replace(/\s+/g, " ").trim() : "";
+    return text || null;
+  }
+
+  // The signed-out ("guest") page is a different, server-rendered layout with
+  // stable class names and no expandable-text-box, so it fell through to the
+  // generic extractor: the whole page — sign-in prompts, similar jobs, legal
+  // text — went to the model, about 3.5x the posting, with the tab title as
+  // the job title and no company or location. As on the signed-in page, the
+  // "Show more" clamp is CSS only; the full text is already in the markup.
+  function extractSignedOut() {
+    const descEl = document.querySelector(".description__text .show-more-less-html__markup, .show-more-less-html__markup");
+    if (!descEl) return null;
+    const text = window.__jobFit.textFrom(descEl);
+    if (text.split(/\s+/).length < 100) return null;
+
+    const jobLocation = textOf(".top-card-layout .topcard__flavor--bullet:not(.num-applicants__caption)");
+    const posted = textOf(".top-card-layout .posted-time-ago__text");
+    // Built like the signed-in header's "location · posted · applicants"
+    // line, which is what postingmeta.js reads the posted date from.
+    const metaLine = [jobLocation, posted, textOf(".top-card-layout .num-applicants__caption")].filter(Boolean).join(" · ");
+
+    return {
+      title: textOf(".top-card-layout__title") || textOf(".topcard__title"),
+      company: textOf(".topcard__org-name-link") || textOf(".top-card-layout .topcard__flavor"),
+      location: jobLocation,
+      text,
+      postingFields: posted ? { postedText: metaLine } : null,
+    };
+  }
+
   function extractLinkedIn() {
     const descEl = document.querySelector('[data-testid="expandable-text-box"]');
-    if (!descEl) return null;
+    if (!descEl) return extractSignedOut();
 
     // The full description is already in the DOM while the box is visually
     // collapsed — the "…more" button only toggles CSS clamping — so there's
