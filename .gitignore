@@ -1,3 +1,12 @@
 .DS_Store
 node_modules/
 *.log
+
+# Secrets and local settings
+.env
+.env.*
+.claude/settings.local.json
+
+# Exports hold CVs, salary expectations and every tracked job
+jobfit-backup-*.json
+job-fit-history-*.csv

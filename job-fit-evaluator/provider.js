@@ -3,7 +3,11 @@
 // The settings live in three storage keys:
 //   modelProvider  "lmstudio" (default) | "openai"
 //   lmStudio       { url, model, timeoutSeconds, reasoningEffort, enableThinking, seed }
-//   openai         { apiKey, model, reasoningEffort }
+//   openai         { model, reasoningEffort, keySavedAt, … }
+// The OpenAI key itself is not in storage: it's in the vault (vault.js), where
+// the scripts on job pages can't read it. load() adds it; resolve() alone,
+// which those scripts use for the model name, never has it (except for an
+// install not migrated yet, or the wizard's own in-memory state).
 // `lmStudio` keeps its original shape so existing installs need no migration,
 // and it still owns the response timeout, which applies to either provider.
 //
@@ -57,12 +61,50 @@ var JOB_FIT_PROVIDER = (function () {
     };
   }
 
+  // For the service worker and the extension's pages: the settings with the
+  // key from the vault. Never called from a page script.
   async function load() {
-    return resolve(await chrome.storage.local.get(KEYS));
+    const settings = resolve(await chrome.storage.local.get(KEYS));
+    if (settings.provider === "openai" && typeof JOB_FIT_VAULT !== "undefined") {
+      await JOB_FIT_VAULT.migrate();
+      settings.apiKey = (await JOB_FIT_VAULT.openAiKey()) || settings.apiKey;
+    }
+    return settings;
   }
 
   function currentModel(stored) {
     return resolve(stored).model;
+  }
+
+  // Where an LM Studio-style endpoint may be. Every request to it carries the
+  // CV, the salary expectations and the posting, so:
+  //   this machine (localhost, 127.x, ::1)      always
+  //   the local network (10.x, 172.16-31.x,
+  //   192.168.x, *.local)                       once you allow it, http or https
+  //   anywhere else                             https only, once you allow it
+  // Anything that isn't an http(s) URL is refused. The allowed list is in the
+  // vault, so a script on a job page can't add its own host to it.
+  // { kind: "loopback" | "approval" | "insecure" | "invalid", origin }
+  function endpointPolicy(url) {
+    let u;
+    try {
+      u = new URL(String(url || ""));
+    } catch (err) {
+      return { kind: "invalid", origin: null };
+    }
+    if (u.protocol !== "http:" && u.protocol !== "https:") return { kind: "invalid", origin: null };
+    const host = u.hostname.toLowerCase().replace(/^\[|\]$/g, "");
+    const origin = u.origin;
+    if (host === "localhost" || host.endsWith(".localhost") || host === "::1" || /^127\.\d{1,3}\.\d{1,3}\.\d{1,3}$/.test(host)) {
+      return { kind: "loopback", origin };
+    }
+    const lan =
+      /^10\.\d{1,3}\.\d{1,3}\.\d{1,3}$/.test(host) ||
+      /^192\.168\.\d{1,3}\.\d{1,3}$/.test(host) ||
+      /^172\.(1[6-9]|2\d|3[01])\.\d{1,3}\.\d{1,3}$/.test(host) ||
+      host.endsWith(".local");
+    if (lan || u.protocol === "https:") return { kind: "approval", origin };
+    return { kind: "insecure", origin };
   }
 
   // OpenAI's reasoning models (o-series, gpt-5 and later) reject temperature
@@ -171,6 +213,7 @@ var JOB_FIT_PROVIDER = (function () {
     resolve,
     load,
     currentModel,
+    endpointPolicy,
     isOpenAiReasoningModel,
     isOpenAiChatModel,
     reasoningEffortsFor,

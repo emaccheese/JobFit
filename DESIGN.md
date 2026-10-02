@@ -24,7 +24,7 @@ A Chrome/Edge extension that reads a job posting on the current tab, applies det
     `readOpenAiResponse` takes the text from the `output_text` parts of the message items in `output`. It reports a refusal as `refusal`, and a reply cut off with `incomplete_details.reason: max_output_tokens` as `length`, with advice.
   - **A missing key or model fails as `config`** before any request is sent, which pauses the queue with a message naming the fix. HTTP errors show OpenAI's own `error.message`.
   - **The model list comes from the key's own `/v1/models`**, filtered to chat models. The wizard defaults to a `-mini` model rather than whatever sorts first, since this provider bills per request.
-  - **The key never leaves extension storage:** backups export only the OpenAI model choice, and a restore never touches the key or the provider switch.
+  - **The key never leaves the extension's key store** (`vault.js`, see Security hardening): backups export only the OpenAI model choice, and a restore never touches the key or the provider switch.
   - **Cost controls:**
     - **Prompt order.** Parts that are the same on every call come first (system prompt, profile, salary) and per-posting parts last (posting, then the domain-flag line). A repeated prefix is discounted by OpenAI's automatic caching and reused by LM Studio's KV cache.
     - **Reasoning effort per model.** `reasoningEffortsFor()` returns the levels a model accepts: GPT-5 adds `minimal`, o-series starts at `low`, other models take none. The menu shows only those levels, and `effectiveReasoningEffort()` maps a saved preference onto them, so a switch of model never sends a value the model rejects.
@@ -81,6 +81,7 @@ job-fit-evaluator/
 ├── queue.js             # serial work queue (service worker)
 ├── evalstore.js         # evaluated-job history records, cross-site duplicates
 ├── postingmeta.js       # JOB_FIT_META — requisition id, deadline, posting date, and their wording
+├── vault.js             # JOB_FIT_VAULT — API key and allowed model addresses, out of reach of page scripts
 ├── jobkey.js            # canonical job identity per page
 ├── history.html         # evaluated-jobs page
 ├── history.js
@@ -104,6 +105,11 @@ job-fit-evaluator/
 │   ├── eightfold.js     # Eightfold career sites (careers.qualcomm.com, …)
 │   └── generic.js       # fallback: largest text block
 └── README.md
+
+tools/
+├── check-locales.js     # every used key exists in all four catalogs
+├── test.js              # runs everything: syntax, tools/test/*.test.js, locales
+└── test/                # support.js (VM + chrome.*/IndexedDB stand-ins) and the suites
 ```
 
 ---
@@ -1835,6 +1841,90 @@ posting body. Everything scraped from a posting is written with `textContent`, n
 `innerHTML` — the description is arbitrary markup from a third-party page.
 
 ---
+
+## Security hardening (2026-10-01)
+
+An audit before going public found no serious holes:
+- nothing from a posting or the model is ever written as HTML;
+- there's no `externally_connectable`, so web pages can't message the extension;
+- there's no eval and no remote code;
+- there are no secrets in the repository.
+
+What it did find, and what changed, has one theme. **The scripts JobFit injects
+into job sites are only as trustworthy as that site's renderer**, and they used to be
+trusted like the extension's own pages.
+
+- **The API key moved out of `chrome.storage.local`** into `vault.js`, an IndexedDB
+  store in the extension's own origin.
+  - Content scripts share `storage.local`, so they could read the key and rewrite
+    settings. IndexedDB belongs to an origin, and no page script runs in the
+    extension's.
+  - `JOB_FIT_PROVIDER.load()`, used by the worker and the extension's pages, merges
+    the key in. `resolve()`, which is all page scripts use (for the model's name),
+    never has it.
+  - A one-time `migrate()` moves an existing key. A `keySavedAt` stamp in storage is
+    what the worker watches, since IndexedDB writes raise no storage event.
+  - The vault is closed anywhere but the extension's origin. It compares
+    `chrome.runtime.getURL("")` with `self.location.origin` as text, because by the
+    URL standard an extension URL's origin is `"null"`.
+  - `setAccessLevel("TRUSTED_CONTEXTS")` would have been simpler, but it shuts page
+    scripts out of storage entirely. They read profiles, saved jobs and the queue from
+    storage all the time.
+- **The service worker checks who's asking** (`fromExtensionPage`: the extension's id
+  and a URL under `chrome.runtime.getURL("")`). Page scripts get only
+  `PAGE_SCRIPT_MESSAGES`, the nine the card and an evaluation need.
+  - They never get the wizard's model calls, which take arbitrary text and would turn
+    the user's API key into a free LLM for whoever controls the page.
+  - They never get the queue controls.
+  - The on-page button's × may switch it off, only for the sender's own site or board;
+    the origin named in the message is ignored.
+  - A page's `ENQUEUE` is rebuilt by `enqueueFromPage`:
+    - only an evaluation;
+    - only for a profile that exists;
+    - scored against that profile as stored, not the message's copy;
+    - using the frame's own URL;
+    - with the posting capped at 200,000 characters.
+  - Messages from another extension are ignored.
+- **Model endpoints** (`JOB_FIT_PROVIDER.endpointPolicy`):
+
+  | Address | Rule |
+  |---|---|
+  | This machine (localhost, 127.x, ::1) | Always allowed |
+  | Local network (10.x, 172.16–31.x, 192.168.x, `*.local`) | Allowed once the user says so |
+  | Anywhere else | https only, and once the user says so |
+  | Anything that isn't http(s) | Refused |
+
+  - Allowed origins are kept in the vault, so a page script can't add its own server.
+  - `callLmStudio` refuses before sending, with a `config` failure that pauses the
+    queue and names the fix. `probeModels` reports `not-approved` or `insecure`
+    without fetching.
+  - Settings and the wizard show **Allow sending to {origin}**, and Settings shows
+    **Stop allowing**. Allowing writes `endpointApprovalStamp`, which resumes a paused
+    queue.
+- **Prompt injection.**
+  - The posting goes in between `<<<POSTING` and `POSTING>>>`. Both system prompts
+    say that text is untrusted, and that instructions inside it are never followed or,
+    for the brief, never copied (the brief is pasted into another assistant).
+  - A marker inside the posting is removed, so it can't close the block early.
+  - `textFrom` leaves out `display:none`, `visibility:hidden` and `[hidden]` text,
+    unless that would drop more than a quarter of the posting. That much hidden text is
+    a collapsed "Show more", not a whispered instruction.
+  - `applyScoreCaps` holds the score to 0–100 before anything else.
+- **Backups.**
+  - A restore never applies a model URL off this machine; it names it instead.
+  - Restored records keep only http(s) links, and Tracked jobs links only those.
+  - Raw keyword patterns are skipped at compile time when they're over 300 characters
+    or have a quantified group containing a quantifier (`(a+)+`), the
+    catastrophic-backtracking shape. They stay saved so they can be fixed.
+- **Repository.** `.gitignore` covers `.env*`, `.claude/settings.local.json`, and the
+  backup and CSV exports, which hold CVs.
+
+**Tests** now live in the repository: `node tools/test.js` runs a syntax check of every
+script, every suite in `tools/test/` and the locale check. `tools/test/support.js` runs
+the shipped scripts in a Node VM against stand-ins for `chrome.*` and IndexedDB, with
+`senders.page()` and `senders.content()` for each kind of caller. The suites are
+scoring, worker, posting details, duplicates, company history and `security` (62
+checks covering everything above).
 
 ## Logging
 

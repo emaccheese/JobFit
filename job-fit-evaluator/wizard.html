@@ -349,7 +349,7 @@
                 <input id="oaKey" class="grow" type="password" autocomplete="off" spellcheck="false" placeholder="sk-…">
                 <button type="button" id="testOpenAi" data-i18n="wiz.model.connect">Connect</button>
               </div>
-              <div class="hint" data-i18n="wiz.model.keyHint">Create one at platform.openai.com under API keys. It's stored only in this browser's extension storage and never included in backups.</div>
+              <div class="hint" data-i18n="wiz.model.keyHint">Create one at platform.openai.com under API keys. It's kept in JobFit's own key store in this browser, out of reach of the job sites you visit, and never included in backups.</div>
             </label>
 
             <label class="field" id="lmUrlField">
@@ -589,6 +589,7 @@
   <script src="i18n.js"></script>
   <script src="geo.js"></script>
   <script src="defaults.js"></script>
+  <script src="vault.js"></script>
   <script src="provider.js"></script>
   <script src="keywords.js"></script>
   <script src="screening.js"></script>

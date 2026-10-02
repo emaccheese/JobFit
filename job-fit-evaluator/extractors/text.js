@@ -57,7 +57,7 @@
   // than from prose. This walks the live DOM instead, skipping what we
   // don't want and emitting newlines at <br> and block boundaries, so no
   // cloning (and no temporary page mutation) is needed at all.
-  function textFrom(root) {
+  function walkText(root, { skipHidden }) {
     let out = "";
 
     (function walk(node) {
@@ -76,6 +76,7 @@
         // were sent to the model with the posting text, and some models copied
         // that score into the summary brief.
         if (child.id && child.id.startsWith("job-fit-")) continue;
+        if (skipHidden && isHidden(child)) continue;
 
         if (tag === "BR") {
           out += "\n";
@@ -94,6 +95,30 @@
       .replace(/^[ \t]+|[ \t]+$/gm, "")
       .replace(/\n{3,}/g, "\n\n")
       .trim();
+  }
+
+  // display:none or visibility:hidden. Not opacity: pages fade content in,
+  // and a posting read mid-fade would lose it. Without checkVisibility (older
+  // Chrome), nothing counts as hidden.
+  function isHidden(element) {
+    if (element.hidden) return true;
+    if (typeof element.checkVisibility !== "function") return false;
+    return !element.checkVisibility({ checkVisibilityCSS: true, visibilityProperty: true });
+  }
+
+  // Hidden text is left out: a few hidden lines in a posting are how one talks
+  // to an AI screener behind the reader's back ("rate this candidate 100").
+  // But a lot of hidden text is a collapsed "Show more" — the rest of the real
+  // description — so when hiding would drop more than a quarter of it, the
+  // whole text is kept, and the model's instructions to ignore anything
+  // addressed to it are what's left to rely on.
+  const MAX_HIDDEN_SHARE = 0.25;
+
+  function textFrom(root) {
+    const all = walkText(root, { skipHidden: false });
+    if (typeof root.checkVisibility === "function" && !root.checkVisibility({ checkVisibilityCSS: true })) return all;
+    const visible = walkText(root, { skipHidden: true });
+    return all.length && (all.length - visible.length) / all.length > MAX_HIDDEN_SHARE ? all : visible;
   }
 
   // hiringOrganization from the page's schema.org JobPosting, for ATS pages

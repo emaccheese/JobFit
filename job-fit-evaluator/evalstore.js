@@ -237,8 +237,15 @@ var JOB_FIT_EVALSTORE = (function () {
     const existing = await get(profileId, jobKey);
     if (existing) return "skipped";
 
-    await chrome.storage.local.set({ [recordKey(profileId, jobKey)]: { ...record, profileId, jobKey } });
+    // A posting's link is a web address or nothing: a backup can't plant a
+    // javascript: or data: link for Tracked jobs to open.
+    const url = isWebUrl(record.url) ? record.url : "";
+    await chrome.storage.local.set({ [recordKey(profileId, jobKey)]: { ...record, url, profileId, jobKey } });
     return "added";
+  }
+
+  function isWebUrl(value) {
+    return typeof value === "string" && /^https?:\/\//i.test(value.trim());
   }
 
   async function countForProfile(profileId) {
@@ -703,6 +710,7 @@ var JOB_FIT_EVALSTORE = (function () {
     removeAllForProfile,
     exportRecords,
     importRecord,
+    isWebUrl,
     statusLabel,
     salaryVerdictLabel,
     formatEvaluation,
