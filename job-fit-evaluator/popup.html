@@ -2,15 +2,21 @@
 <html>
 <head>
 <meta charset="utf-8">
-<title>JobFit</title>
+<title>Tino</title>
 <link rel="stylesheet" href="ui.css">
 <style>
   /* Status and actions only; every setting lives in Settings (options.html).
-     Three blocks in reading order: this job, whether JobFit is ready, and
+     Three blocks in reading order: this job, whether Tino is ready, and
      where to go next. One primary button at a time. */
   body { width: 360px; margin: 0; padding: 12px 14px 14px; font: 13px/1.45 var(--font); }
   .top { display: flex; align-items: center; gap: 8px; margin-bottom: 8px; }
-  .brand { font-size: var(--fs-lg); font-weight: 700; margin: 0; }
+  .brand { font-size: var(--fs-lg); font-weight: 700; margin: 0; line-height: 1; }
+  /* The logo: Tino's shell and the wordmark (brand/, built by tools/brand.js). */
+  .logo { display: inline-flex; align-items: flex-end; gap: 5px; }
+  .logo img { display: block; }
+  .logo .logo-mark { height: 17px; margin-bottom: 1px; }
+  .logo .logo-word { height: 22px; }
+
   .top .spacer { flex: 1; }
   .icon-btn {
     display: inline-grid; place-items: center; min-width: 32px; min-height: 32px; padding: 0 8px;
@@ -79,7 +85,7 @@
 </head>
 <body>
   <header class="top">
-    <h1 class="brand">JobFit</h1>
+    <h1 class="brand"><span class="logo"><img class="logo-mark" src="images/tino-mark.svg" alt=""><img class="logo-word" src="images/wordmark.svg" alt="Tino"></span></h1>
     <span class="spacer"></span>
     <button type="button" class="icon-btn" id="openSettings" title="Settings" aria-label="Settings" data-i18n-title="settings.title" data-i18n-aria-label="settings.title">
       <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 1 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 1 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 1 1-2.83-2.83l.06-.06A1.65 1.65 0 0 0 4.68 15a1.65 1.65 0 0 0-1.51-1H3a2 2 0 1 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 1 1 2.83-2.83l.06.06A1.65 1.65 0 0 0 9 4.68a1.65 1.65 0 0 0 1-1.51V3a2 2 0 1 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 1 1 2.83 2.83l-.06.06A1.65 1.65 0 0 0 19.4 9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 1 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z"/></svg>

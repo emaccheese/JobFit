@@ -1,0 +1,44 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="22 22 182 182">
+  <!-- The app icon (48 and 128 px): Tino curled up, safe in its shell. A
+       white sticker edge keeps it readable on dark toolbars. Colours are
+       fixed: a toolbar icon doesn't follow the page's light or dark mode. -->
+  <style>
+    .ink { stroke: #283246; } .ink-fill { fill: #283246; }
+    .shell { fill: #5b7db8; } .scale { fill: #6c8bc3; } .band { fill: #8faad9; }
+    .skin { fill: #ebcfaa; } .blush { fill: #f2a99f; } .blush-line { stroke: #f2a99f; }
+  </style>
+  <defs>
+    <clipPath id="tino-icon-clip"><circle cx="104" cy="104" r="72"/></clipPath>
+  </defs>
+  <g stroke-linejoin="round" stroke-linecap="round">
+    <g fill="#ffffff" stroke="#ffffff" stroke-width="14">
+      <circle cx="104" cy="104" r="72"/>
+      <g transform="translate(160 158) scale(1.32) translate(-160 -158)">
+        <path d="M150 150 C164 140 182 146 186 160 C188 170 176 178 160 176 C148 174 142 160 150 150 Z"/>
+        <path d="M156 150 C150 132 156 120 165 122 C171 126 168 140 163 150 Z"/>
+      </g>
+    </g>
+    <g stroke-width="4">
+      <circle class="ink shell" cx="104" cy="104" r="72"/>
+      <g clip-path="url(#tino-icon-clip)" stroke="none">
+        <g class="scale">
+          <rect x="54" y="62" width="12" height="12" rx="3.5"/><rect x="42" y="92" width="12" height="12" rx="3.5"/>
+          <rect x="60" y="120" width="12" height="12" rx="3.5"/><rect x="142" y="56" width="12" height="12" rx="3.5"/>
+          <rect x="154" y="86" width="12" height="12" rx="3.5"/>
+        </g>
+        <path class="band" d="M80 26 Q70 104 86 186 L96 186 Q79 104 90 26 Z"/>
+        <path class="band" d="M104 26 Q98 104 107 186 L117 186 Q107 104 114 26 Z"/>
+        <path class="band" d="M127 26 Q124 104 129 186 L139 186 Q133 104 137 26 Z"/>
+      </g>
+      <circle class="ink" cx="104" cy="104" r="72" fill="none"/>
+      <g transform="translate(160 158) scale(1.32) translate(-160 -158)">
+        <path class="ink skin" d="M150 150 C164 140 182 146 186 160 C188 170 176 178 160 176 C148 174 142 160 150 150 Z"/>
+        <path class="ink skin" d="M156 150 C150 132 156 120 165 122 C171 126 168 140 163 150 Z"/>
+        <path class="blush-line" d="M159 142 C156 134 158 128 162 128" fill="none" stroke-width="3"/>
+        <path class="ink" d="M167 160 Q172 155 177 160" fill="none" stroke-width="3"/>
+        <ellipse class="blush" cx="179" cy="168" rx="4" ry="2.4" stroke="none"/>
+        <circle class="ink-fill" cx="188" cy="165" r="3" stroke="none"/>
+      </g>
+    </g>
+  </g>
+</svg>

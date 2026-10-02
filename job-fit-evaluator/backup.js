@@ -41,7 +41,7 @@ var JOB_FIT_BACKUP = (function () {
       openai: stored.openai ? { model: stored.openai.model || "", reasoningEffort: stored.openai.reasoningEffort || "" } : null,
       records: await JOB_FIT_EVALSTORE.exportRecords(),
     };
-    download(JSON.stringify(payload, null, 2), "application/json", `jobfit-backup-${today()}.json`);
+    download(JSON.stringify(payload, null, 2), "application/json", `tino-backup-${today()}.json`);
     return t("backup.done", { profiles: payload.profiles.length, jobs: payload.records.length });
   }
 

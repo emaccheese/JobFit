@@ -1,9 +1,9 @@
 {
   "extName": {
-    "message": "JobFit"
+    "message": "Tino: compatibilidade com vagas"
   },
   "extDescription": {
-    "message": "Avalia a vaga da aba atual com base em um perfil de candidato salvo."
+    "message": "Antes de se candidatar: avalia o quanto uma vaga combina com seu CV, com pontos fortes, lacunas e salário. Com privacidade."
   },
   "cmdEvaluate": {
     "message": "Avaliar a vaga desta aba"

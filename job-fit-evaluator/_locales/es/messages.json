@@ -1,9 +1,9 @@
 {
   "extName": {
-    "message": "JobFit"
+    "message": "Tino: compatibilidad con empleos"
   },
   "extDescription": {
-    "message": "Evalúa la vacante de la pestaña actual según un perfil de candidato guardado."
+    "message": "Antes de postularte: evalúa qué tan bien encaja una vacante con tu CV, con coincidencias, brechas y sueldo. En privado."
   },
   "cmdEvaluate": {
     "message": "Evaluar la vacante de esta pestaña"

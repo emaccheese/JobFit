@@ -3,7 +3,7 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>Settings — JobFit</title>
+<title>Settings — Tino</title>
 <link rel="stylesheet" href="ui.css">
 <style>
   body { margin: 0; font: 14px/1.5 var(--font); }
@@ -13,7 +13,13 @@
   /* --- layout: the wizard's rail, as a table of contents ------------------- */
   .shell { display: flex; min-height: 100vh; max-width: 1080px; margin: 0 auto; }
   .rail { flex: 0 0 230px; padding: 28px 18px; position: sticky; top: 0; align-self: flex-start; max-height: 100vh; overflow-y: auto; }
-  .brand { font-weight: 700; font-size: var(--fs-lg); }
+  .brand { font-weight: 700; font-size: var(--fs-lg); margin-bottom: 4px; }
+  /* The logo: Tino's shell and the wordmark (brand/, built by tools/brand.js). */
+  .logo { display: inline-flex; align-items: flex-end; gap: 5px; }
+  .logo img { display: block; }
+  .logo .logo-mark { height: 17px; margin-bottom: 1px; }
+  .logo .logo-word { height: 22px; }
+
   .brand-sub { font-size: var(--fs-sm); color: var(--muted); margin-bottom: 18px; }
   .rail ol { list-style: none; margin: 0; padding: 0; }
   .rail a {
@@ -121,7 +127,7 @@
 <body>
   <div class="shell">
     <nav class="rail" aria-label="Settings sections" data-i18n-aria-label="settings.navLabel">
-      <div class="brand">JobFit</div>
+      <div class="brand"><span class="logo"><img class="logo-mark" src="images/tino-mark.svg" alt=""><img class="logo-word" src="images/wordmark.svg" alt="Tino"></span></div>
       <div class="brand-sub" data-i18n="settings.title">Settings</div>
       <ol>
         <li><a href="#profile" data-i18n="settings.nav.profile">Profile</a></li>
@@ -302,7 +308,7 @@
           <div class="field">
             <label class="field-label" for="openAiKey" data-i18n="popup.openAiKey">OpenAI API key</label>
             <input id="openAiKey" type="password" autocomplete="off" spellcheck="false" placeholder="sk-…" aria-describedby="openAiKeyHint">
-            <div class="hint" id="openAiKeyHint" data-i18n="popup.openAiKeyHint">Kept in JobFit's own key store in this browser, out of reach of the job sites you visit. Never included in backups.</div>
+            <div class="hint" id="openAiKeyHint" data-i18n="popup.openAiKeyHint">Kept in Tino's own key store in this browser, out of reach of the job sites you visit. Never included in backups.</div>
           </div>
           <div class="field">
             <label class="field-label" for="openAiTier" data-i18n="popup.model">Model</label>
@@ -372,7 +378,7 @@
         <div class="hint" id="boardStatus" role="status" aria-live="polite"></div>
 
         <h4 class="sub-h" id="h-otherSites" data-i18n="settings.otherSites">Other sites</h4>
-        <p class="hint" data-i18n="settings.otherSitesHint">Company career sites (Jibe, Eightfold, a Greenhouse board embedded on the company's own site) are turned on one at a time: open one, then tick “Show the JobFit button” in the JobFit popup.</p>
+        <p class="hint" data-i18n="settings.otherSitesHint">Company career sites (Jibe, Eightfold, a Greenhouse board embedded on the company's own site) are turned on one at a time: open one, then tick “Show the Tino button” in the Tino popup.</p>
         <div class="site-list" id="floatSites" role="list" aria-labelledby="h-otherSites"></div>
       </section>
 
@@ -382,7 +388,7 @@
         <div class="field">
           <label class="sr-only" for="uiLanguage" data-i18n="popup.languageTitle">Language</label>
           <select id="uiLanguage" class="inline" aria-describedby="languageHint"></select>
-          <div class="hint" id="languageHint" data-i18n="settings.languageHint">Every JobFit page, the on-page card, and the language the model writes its reasoning in.</div>
+          <div class="hint" id="languageHint" data-i18n="settings.languageHint">Every Tino page, the on-page card, and the language the model writes its reasoning in.</div>
         </div>
       </section>
 

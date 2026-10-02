@@ -1,9 +1,16 @@
 {
   "manifest_version": 3,
   "name": "__MSG_extName__",
-  "version": "0.9.0",
+  "version": "1.0.0",
   "description": "__MSG_extDescription__",
   "default_locale": "en",
+  "icons": {
+    "16": "icons/icon-16.png",
+    "32": "icons/icon-32.png",
+    "48": "icons/icon-48.png",
+    "128": "icons/icon-128.png"
+  },
+  "homepage_url": "https://emaccheese.github.io/JobFit/",
   "permissions": [
     "activeTab",
     "scripting",
@@ -30,7 +37,11 @@
     "open_in_tab": true
   },
   "action": {
-    "default_title": "JobFit",
+    "default_title": "Tino",
+    "default_icon": {
+      "16": "icons/icon-16.png",
+      "32": "icons/icon-32.png"
+    },
     "default_popup": "popup.html"
   },
   "commands": {

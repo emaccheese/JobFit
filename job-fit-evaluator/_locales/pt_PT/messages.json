@@ -1,9 +1,9 @@
 {
   "extName": {
-    "message": "JobFit"
+    "message": "Tino: compatibilidade com vagas"
   },
   "extDescription": {
-    "message": "Avalia a vaga do separador atual com base num perfil de candidato guardado."
+    "message": "Antes de se candidatar: avalia até que ponto uma vaga se adequa ao seu CV, com pontos fortes, lacunas e salário. Em privado."
   },
   "cmdEvaluate": {
     "message": "Avaliar a vaga deste separador"

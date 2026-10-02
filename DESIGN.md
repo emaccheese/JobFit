@@ -1,4 +1,4 @@
-# JobFit — design notes
+# Tino (formerly JobFit) — design notes
 
 A Chrome/Edge extension that reads a job posting on the current tab, applies deterministic dealbreaker filters, and — when the posting survives the filters — sends it to a local LM Studio model for a structured fit score and keyword comparison against a stored candidate profile. No cloud API, no per-call cost.
 
@@ -82,6 +82,8 @@ job-fit-evaluator/
 ├── evalstore.js         # evaluated-job history records, cross-site duplicates
 ├── postingmeta.js       # JOB_FIT_META — requisition id, deadline, posting date, and their wording
 ├── vault.js             # JOB_FIT_VAULT — API key and allowed model addresses, out of reach of page scripts
+├── images/              # Tino's drawings, copied from brand/ by tools/brand.js
+├── icons/               # icon-16/32/48/128.png, rendered from brand/ by tools/brand.js
 ├── jobkey.js            # canonical job identity per page
 ├── history.html         # evaluated-jobs page
 ├── history.js
@@ -106,7 +108,12 @@ job-fit-evaluator/
 │   └── generic.js       # fallback: largest text block
 └── README.md
 
+brand/                   # the one source for Tino's drawings, and brand.md (story, voice, palette, designer brief)
+docs/                    # GitHub Pages: landing page, privacy policy, uninstall page
+store/                   # Chrome Web Store listing, permission answers, screenshots, checklist
+
 tools/
+├── brand.js             # copies brand/ drawings into the extension and docs/, renders the icons
 ├── check-locales.js     # every used key exists in all four catalogs
 ├── test.js              # runs everything: syntax, tools/test/*.test.js, locales
 └── test/                # support.js (VM + chrome.*/IndexedDB stand-ins) and the suites
@@ -1925,6 +1932,49 @@ the shipped scripts in a Node VM against stand-ins for `chrome.*` and IndexedDB,
 `senders.page()` and `senders.content()` for each kind of caller. The suites are
 scoring, worker, posting details, duplicates, company history and `security` (62
 checks covering everything above).
+
+## Brand and launch readiness (2026-10-01)
+
+**The name is Tino, the mascot Tino the armadillo.**
+- **Why not JobFit:** several extensions are already called JobFit, including JobFit Checker on the Web Store.
+- **Why not Apta**, the first idea: it sits next to Apta-HR (AI CV screening) and Apt (AI career matching), and in Spanish and Portuguese it's an everyday adjective, too weak to protect.
+- **Tino** is *tener buen tino*, good judgment.
+- **The armadillo** lives from Texas to Argentina. It digs through postings, and its shell is the privacy promise. `brand/brand.md` has the story, voice and palette.
+
+**Only what a person reads changed:**
+- the four locale catalogs;
+- `_locales/*/messages.json`, whose name and description are localized and within Chrome's limits (75 and 132 characters);
+- page titles and headings, the toolbar title, the card's screen-reader prefix;
+- export file names: `tino-backup-*.json` and `tino-jobs-*.csv`. `.gitignore` covers both the old and new names.
+
+Internal names stay as they are, so nobody's data breaks: the `JOB_FIT_*` globals, storage keys, the `jobfit-vault` database, the `jobfit-backup` format id, the `job-fit-*` element ids the text reader skips, and the folder name. `brand.test.js` fails if "JobFit" reappears in any catalog, Chrome string or page.
+
+**Assets have one source, `brand/`.** `tools/brand.js` does two things:
+- copies the drawings to `job-fit-evaluator/images/` (the extension's pages load them as `<img>`, so their dark-mode media query follows the system) and to `docs/assets/`;
+- renders `icons/icon-{16,32,48,128}.png` with headless Chrome at exact size, with a transparent background. 16 and 32 px get a simplified drawing.
+
+`brand.test.js` checks that the copies match their source, and that every manifest icon exists at its declared size (read from the PNG header).
+
+**Colours.**
+- The interface accent moved to **Tino blue `#2350C4`**. White on it is 6.96:1, up from 5.08:1, and it's 6.04:1 as text on `--accent-soft`. It applies to `ui.css`, the card's copy of the tokens, and the toolbar badge.
+- The mascot has its own softer palette, "Denim & coral" (shell `#5B7DB8`, neckerchief `#E8907A`), chosen over navy and teal, which read as harsh.
+- Score colours are untouched.
+
+**Where Tino appears.** Always decorative, with `alt=""`, and never in errors:
+- the logo in the popup, Settings and the wizard;
+- the wizard's welcome, with a precomputed sample result (`SAMPLE_RESULT`);
+- the "reading" pose while the wizard's test evaluation runs;
+- curled up in Tracked jobs' empty state;
+- the shell on the on-page card's idle badge. It's a constant inline SVG, like the card's other icons, because the card's closed shadow root on a third-party page can't load extension images.
+
+**The rules steps have "Use the recommended rules".** New profiles start with the recommended rules, and the rules steps' enter hooks only render what's stored, so jumping straight to Review loses nothing.
+
+**Uninstall page.**
+- `setUninstallPage()` sets `chrome.runtime.setUninstallURL` to `docs/goodbye.html` at `JOB_FIT_DEFAULTS.siteUrl`, with only `lang` and `v`.
+- It's set again when the interface language changes.
+- The page posts one answer to a Google Form whose ids live in `docs/goodbye.html`; until they're filled in, it sends nothing.
+
+**Store.** `store/` holds the listing (four languages), the permission justifications and draft privacy answers, and the launch checklist. It also holds 1280×800 screenshots and the 440×280 tile. Those were captured from the development harness with a fictional seed (Northwind Robotics, Contoso Cloud…), because store screenshots must not show real companies or people.
 
 ## Logging
 

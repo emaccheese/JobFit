@@ -70,7 +70,7 @@ var JOB_FIT_VAULT = (function () {
 
   // An empty value deletes.
   async function set(name, value) {
-    if (!inExtensionOrigin()) throw new Error("JobFit's key store is only available to the extension itself.");
+    if (!inExtensionOrigin()) throw new Error("Tino's key store is only available to the extension itself.");
     await request("readwrite", (store) => (value == null || value === "" ? store.delete(name) : store.put(value, name)));
   }
 

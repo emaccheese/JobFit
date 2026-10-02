@@ -1,9 +1,9 @@
 {
   "extName": {
-    "message": "JobFit"
+    "message": "Tino : adéquation aux offres d'emploi"
   },
   "extDescription": {
-    "message": "Évalue l'offre d'emploi de l'onglet actif par rapport à un profil de candidat enregistré."
+    "message": "Avant de postuler : évalue l'adéquation d'une offre avec votre CV, avec atouts, lacunes et salaire. En toute confidentialité."
   },
   "cmdEvaluate": {
     "message": "Évaluer l'offre d'emploi de cet onglet"
