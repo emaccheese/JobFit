@@ -1,0 +1,25 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 120 80" role="img" aria-label="Tino">
+  <title>Tino</title>
+  <style>
+    .ink { stroke: #283246; } .ink-fill { fill: #283246; }
+    .shell { fill: #5b7db8; } .scale { fill: #6c8bc3; } .band { fill: #8faad9; } .rim { fill: #4e6ea8; }
+    .skin { fill: #ebcfaa; } .blush { fill: #f2a99f; } .blush-line { stroke: #f2a99f; }
+    .accent { fill: #e8907a; } .accent-dark { fill: #d27560; } .accent-line { stroke: #d27560; }
+    @media (prefers-color-scheme: dark) {
+      .ink { stroke: #e6e9ee; }
+      .shell { fill: #6e8fcb; } .scale { fill: #7f9dd3; } .rim { fill: #5f80bb; }
+    }
+  </style>
+  <defs>
+    <clipPath id="tino-mark-clip"><path d="M8 70 C8 34 32 10 60 10 C88 10 112 34 112 70 Z"/></clipPath>
+  </defs>
+  <g stroke-width="5" stroke-linejoin="round">
+    <path class="ink shell" d="M8 70 C8 34 32 10 60 10 C88 10 112 34 112 70 Z"/>
+    <g clip-path="url(#tino-mark-clip)" stroke="none" class="band">
+      <path d="M37 72 Q33 40 45 6 L53 6 Q44 40 46 72 Z"/>
+      <path d="M56 72 Q54 40 60 6 L68 6 Q63 40 65 72 Z"/>
+      <path d="M75 72 Q75 40 77 6 L85 6 Q83 40 84 72 Z"/>
+    </g>
+    <path class="ink" d="M8 70 C8 34 32 10 60 10 C88 10 112 34 112 70 Z" fill="none"/>
+  </g>
+</svg>

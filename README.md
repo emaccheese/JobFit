@@ -1,4 +1,11 @@
-# JobFit
+# Tino
+
+<img src="brand/tino.svg" width="220" alt="Tino, the armadillo" align="right">
+
+**Know before you apply.** Tino (formerly JobFit) is the armadillo with *buen tino*,
+good judgment: it reads job postings, tells you how well each one fits you, and keeps
+what you tell it safe in its shell. Website and privacy policy:
+https://emaccheese.github.io/JobFit/
 
 **Screens job postings against your CV — on your own machine, or through the OpenAI API if you'd rather not run a model.**
 
@@ -33,8 +40,8 @@ about $5 per 100), or any other chat model your key has. Bulk re-evaluations fro
 Tracked jobs use OpenAI's Flex processing at about half price, and a daily token
 budget (200k by default) pauses the queue before a runaway batch gets expensive. The tradeoff is explicit:
 every evaluated posting, your candidate profile and your salary expectations are sent
-to OpenAI, and each request is billed to your key. The key is kept in JobFit's own key
-store in this browser, which the scripts JobFit runs on job sites can't read, and is
+to OpenAI, and each request is billed to your key. The key is kept in Tino's own key
+store in this browser, which the scripts Tino runs on job sites can't read, and is
 never written to a backup file. Switching back to LM Studio
 keeps the key, so you can go back and forth. Scores from different models are marked
 as out of date against each other in Tracked jobs, as before.
@@ -144,7 +151,7 @@ because that's where the sponsorship language lives.
    **Continue setup**. To run it again later, use **Run setup wizard for this
    profile** in **Settings → Profile**; **New profile…** there opens it too.
    Every setting stays editable in **Settings** (the ⚙ in the popup, or
-   right-click the JobFit icon → **Options**).
+   right-click the Tino icon → **Options**).
 
 Then open a job posting and click **Evaluate this job**.
 
@@ -152,7 +159,7 @@ Then open a job posting and click **Evaluate this job**.
 
 **Evaluate.** Open the posting and press **⌘⇧E** on a Mac, or **Alt+Shift+E** on
 Windows and Linux. It works on any site, with no clicks. You can also click the
-JobFit icon, then **Evaluate this job**. You can change the shortcut at
+Tino icon, then **Evaluate this job**. You can change the shortcut at
 `chrome://extensions/shortcuts`, or from **Settings → On-page button and shortcut**.
 
 **The popup** is for the job in front of you. If you've scored it before, it shows
@@ -170,12 +177,12 @@ before. It never evaluates on its own, and it's off everywhere until you turn it
 
 - **For a whole job board** (LinkedIn, Indeed, Greenhouse, Workday): in
   **Settings → On-page button and shortcut**, tick the board or press **Turn on for all
-  job boards**. Or open a posting on that board and tick **Show the JobFit button on all
+  job boards**. Or open a posting on that board and tick **Show the Tino button on all
   {board} job pages** in the popup. A board is one Chrome permission covering all of it:
   every Indeed country, LinkedIn's country sites, every employer's Workday site.
-  Greenhouse needs no prompt, because JobFit already has access there.
+  Greenhouse needs no prompt, because Tino already has access there.
 - **For a company's own career site** (Jibe, Eightfold, a Greenhouse board embedded on
-  the company's domain): open it and tick **Show the JobFit button on {site}** in the
+  the company's domain): open it and tick **Show the Tino button on {site}** in the
   popup. On a site with an embedded Greenhouse board, the card shows the job in the
   embed.
 
@@ -205,7 +212,7 @@ there." You see it before you apply a fourth time, and the popup shows it before
 evaluate. Copies of one posting count as one application. Tracked jobs adds **Show all
 Garmin jobs**, which searches for the company.
 
-**Deadlines and posting age.** When a posting states them, JobFit keeps its
+**Deadlines and posting age.** When a posting states them, Tino keeps its
 requisition ID, when applications close and when it was posted. These come from the
 page's structured data, the board's own fields ("Reposted 1 week ago", "12 days left to
 apply") or the text ("Apply by October 15"). A job you haven't applied to that closes
@@ -255,7 +262,7 @@ posting evaluated for two people is two records.
   - With the OpenAI option, they go to OpenAI, as described above.
 
   There is no telemetry.
-- **The scripts JobFit runs on job sites are not trusted with more than they need.**
+- **The scripts Tino runs on job sites are not trusted with more than they need.**
   - They can't read your OpenAI key.
   - They can't make the model answer text of their choosing, or control the queue.
   - They can't switch the on-page button on anywhere.
@@ -325,6 +332,19 @@ practical fix is setting reasoning effort to `low` and disabling thinking.
 - **Auto-apply.** No form filling, no submissions.
 - **Send your data somewhere you didn't choose.** LM Studio on this computer keeps it
   there; anything else is an option you pick, and say yes to.
+
+## Brand, website and store
+
+- **Brand:** `brand/brand.md` has the story, voice, palette and rules for using Tino, and
+  the designer brief. `brand/` is the only source for the drawings; after editing one, run
+  `node tools/brand.js` to copy them into the extension and the website and render the
+  icons.
+- **Website:** `docs/` is served by GitHub Pages: a landing page, the privacy policy in
+  four languages, and the page Chrome opens after an uninstall.
+- **Store:** `store/` holds the Chrome Web Store listing in four languages, the permission
+  and privacy answers, screenshots and the promo tile, and the launch checklist.
+- **Tests:** `node tools/test.js` runs every check (syntax, the suites in `tools/test/`,
+  the brand assets, the locale catalogs).
 
 ## Design notes
 

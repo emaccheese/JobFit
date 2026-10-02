@@ -44,6 +44,17 @@ Preferred qualifications
 Compensation: $150,000 – $185,000 per year, plus equity.
 Visa sponsorship is available for this role.`;
 
+// What a result looks like, shown on the welcome step before any setup: the
+// sample posting above (the one Review scores for real), with an answer
+// written out in advance. Technology names stay as they are in every language.
+const SAMPLE_RESULT = {
+  score: 82,
+  verdict: "apply",
+  matches: ["Go", "Distributed systems, REST and gRPC APIs", "AWS"],
+  preferredGaps: ["Kubernetes", "Robotics or IoT"],
+  salary: "$150,000 – $185,000",
+};
+
 const AUTH_VALUES = ["citizen", "permit", "sponsor"];
 const ARRANGEMENTS = ["remote", "hybrid", "onsite"];
 
@@ -1514,6 +1525,26 @@ function listSection(host, title, items) {
   host.appendChild(ul);
 }
 
+// The welcome step's sample result, drawn like a real one (see runTest).
+function renderWelcomeSample() {
+  const host = $("welcomeSample");
+  if (!host) return;
+  host.innerHTML = "";
+  host.appendChild(el("div", "sample-label", t("wiz.welcome.sampleTitle")));
+  const box = el("div", "test-result");
+  const line = el("div", "score-line");
+  line.appendChild(el("span", "score", String(SAMPLE_RESULT.score)));
+  line.appendChild(el("span", `verdict ${SAMPLE_RESULT.verdict}`, verdictLabel(SAMPLE_RESULT.verdict)));
+  box.appendChild(line);
+  box.appendChild(el("div", "sample-job", "Senior Software Engineer, Platform — Northwind Robotics"));
+  box.appendChild(el("p", null, t("wiz.welcome.sampleOneLine")));
+  listSection(box, t("result.matches"), SAMPLE_RESULT.matches);
+  listSection(box, t("result.gaps"), SAMPLE_RESULT.preferredGaps.map((g) => `${g} ${t("wiz.welcome.preferredTag")}`));
+  listSection(box, t("result.salary"), [t("wiz.review.salaryVs", { stated: SAMPLE_RESULT.salary, vs: salaryVsLabel("within") })]);
+  host.appendChild(box);
+  host.appendChild(el("div", "hint", t("wiz.welcome.sampleNote")));
+}
+
 function verdictLabel(verdict) {
   return verdict && JOB_FIT_I18N.has(`verdict.${verdict}`) ? t(`verdict.${verdict}`) : verdict || "";
 }
@@ -1547,6 +1578,10 @@ async function runTest() {
     return;
   }
 
+  const working = el("img", "tino-working");
+  working.src = "images/tino-reading.svg";
+  working.alt = "";
+  out.appendChild(working);
   const response = await modelCall(
     {
       type: "JOB_FIT_TEST_EVALUATE",
@@ -1562,6 +1597,7 @@ async function runTest() {
     status,
     { button: $("runTest"), busyText: t("wiz.review.scoring") }
   );
+  working.remove();
   if (!response) return;
 
   const d = response.data || {};
@@ -1618,7 +1654,7 @@ function salaryVsLabel(value) {
 // --- step controller -------------------------------------------------------
 
 const STEP_HOOKS = {
-  welcome: { valid: () => true },
+  welcome: { enter: renderWelcomeSample, valid: () => true },
   where: { enter: enterWhere, collect: collectWhere, valid: () => true },
   about: {
     enter: enterAbout,
@@ -1697,6 +1733,9 @@ function updateNav() {
   // explains itself when it isn't there, whereas a blank name or CV would
   // make the profile useless.
   $("skip").hidden = !(key === "model" && !valid);
+  // The rules steps all start from recommended defaults; keeping them is a
+  // fine answer, so it's one click straight to Review.
+  $("skipRules").hidden = !["rejects", "warnings", "flags"].includes(key) || state.returnToReview;
 }
 
 function focusStep(section) {
@@ -1949,6 +1988,10 @@ $("addCountry").addEventListener("change", (e) => {
 $("next").addEventListener("click", next);
 $("back").addEventListener("click", () => goTo(state.returnToReview ? stepIndex("review") : state.index - 1));
 $("skip").addEventListener("click", () => goTo(state.index + 1));
+$("skipRules").addEventListener("click", () => {
+  collectCurrent();
+  goTo(stepIndex("review"));
+});
 $("testConnection").addEventListener("click", testConnection);
 $("testOpenAi").addEventListener("click", testConnection);
 $("modelChange").addEventListener("click", () => {

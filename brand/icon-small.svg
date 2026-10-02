@@ -1,0 +1,22 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 32 32">
+  <!-- The toolbar sizes (16 and 32 px): the banded shell and the snout,
+       nothing finer than a pixel can hold. -->
+  <style>
+    .ink { stroke: #283246; } .shell { fill: #5b7db8; } .band { fill: #8faad9; } .skin { fill: #ebcfaa; }
+  </style>
+  <defs>
+    <clipPath id="tino-small-clip"><circle cx="15" cy="15" r="11"/></clipPath>
+  </defs>
+  <g stroke-linejoin="round">
+    <circle cx="15" cy="15" r="13" fill="#ffffff"/>
+    <path d="M22 21 C26 19 30 22 30 25 C30 28 25 29 22 28 Z" fill="#ffffff" stroke="#ffffff" stroke-width="3"/>
+    <circle class="ink shell" cx="15" cy="15" r="11" stroke-width="1.6"/>
+    <g clip-path="url(#tino-small-clip)" class="band">
+      <rect x="9.4" y="2" width="2.6" height="28"/>
+      <rect x="14.7" y="2" width="2.6" height="28"/>
+      <rect x="20" y="2" width="2.6" height="28"/>
+    </g>
+    <circle class="ink" cx="15" cy="15" r="11" fill="none" stroke-width="1.6"/>
+    <path class="ink skin" d="M21.5 21 C25 19.5 28.5 21.5 28.5 24.5 C28.5 27 24.5 27.5 22 26.6 Z" stroke-width="1.4"/>
+  </g>
+</svg>

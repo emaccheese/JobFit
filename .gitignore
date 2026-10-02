@@ -10,3 +10,5 @@ node_modules/
 # Exports hold CVs, salary expectations and every tracked job
 jobfit-backup-*.json
 job-fit-history-*.csv
+tino-backup-*.json
+tino-jobs-*.csv

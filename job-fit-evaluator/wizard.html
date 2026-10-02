@@ -3,7 +3,7 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>Set up JobFit</title>
+<title>Set up Tino</title>
 <link rel="stylesheet" href="ui.css">
 <style>
   body { margin: 0; font: 14px/1.5 var(--font); }
@@ -17,7 +17,8 @@
   /* --- layout -------------------------------------------------------------- */
   .shell { display: flex; min-height: 100vh; max-width: 1080px; margin: 0 auto; }
   .rail { flex: 0 0 240px; padding: 32px 20px; }
-  .brand { font-weight: 700; font-size: 16px; margin-bottom: 4px; }
+  .brand { display: flex; align-items: center; gap: 8px; font-weight: 700; font-size: 16px; margin-bottom: 4px; }
+  .brand .brand-mark { height: 16px; display: block; }
   .brand-sub { font-size: 12.5px; color: var(--muted); margin-bottom: 22px; }
   .rail ol { list-style: none; margin: 0; padding: 0; }
   .rail li button {
@@ -160,6 +161,17 @@
   .review-card.missing { border-color: var(--amber-line); background: var(--amber-soft); }
   .test-box { margin-top: 22px; border-top: 1px solid var(--line); padding-top: 18px; }
   .test-result { margin-top: 14px; border: 1px solid var(--line); border-radius: 8px; padding: 14px; }
+  /* Tino on the welcome step, and a result shown before any setup. */
+  .welcome-hero { display: flex; align-items: center; gap: 18px; margin-bottom: 4px; }
+  .welcome-hero .hero-tino { width: 150px; flex: 0 0 auto; }
+  .welcome-hero h1 { margin-top: 0; }
+  .sample { margin: 6px 0 20px; }
+  .sample .sample-label { font-size: 12px; font-weight: 600; color: var(--muted); }
+  .sample .test-result { margin-top: 6px; background: var(--surface-2); }
+  .sample .sample-job { font-size: 13px; color: var(--muted); margin: 2px 0 6px; }
+  .sample .hint { margin-top: 8px; }
+  .tino-working { display: block; width: 170px; margin: 12px 0 0; }
+  @media (max-width: 640px) { .welcome-hero { flex-direction: column; align-items: flex-start; } }
   .score-line { display: flex; align-items: baseline; gap: 12px; }
   .score-line .score { font-size: 30px; font-weight: 700; }
   .verdict { text-transform: uppercase; font-size: 12px; font-weight: 700; letter-spacing: .05em; padding: 2px 8px; border-radius: 4px; }
@@ -194,7 +206,7 @@
 <body>
   <div class="shell">
     <aside class="rail">
-      <div class="brand" data-i18n="wiz.brand">JobFit setup</div>
+      <div class="brand"><img class="brand-mark" src="images/tino-mark.svg" alt=""><span data-i18n="wiz.brand">Tino setup</span></div>
       <div class="brand-sub" id="railSub"></div>
       <div class="lang-mini"><select id="railLanguage" aria-label="Language" data-i18n-aria-label="wiz.where.language"></select></div>
       <ol id="rail"></ol>
@@ -209,8 +221,14 @@
 
         <!-- Welcome -->
         <section class="step" data-step="welcome" hidden>
-          <h1 data-i18n="wiz.welcome.title">Welcome to JobFit</h1>
-          <p class="lede" data-i18n="wiz.welcome.lede">JobFit reads a job posting and tells you how well it fits you, with a score, what you match, what you're missing, and whether the pay is in your range.</p>
+          <div class="welcome-hero">
+            <img class="hero-tino" src="images/tino.svg" alt="">
+            <div>
+              <h1 data-i18n="wiz.welcome.title">Welcome to Tino</h1>
+              <p class="lede" data-i18n="wiz.welcome.lede">Tino reads a job posting and tells you how well it fits you, with a score, what you match, what you're missing, and whether the pay is in your range.</p>
+            </div>
+          </div>
+          <div class="sample" id="welcomeSample"></div>
           <div class="callout info" data-i18n-html="wiz.welcome.privacy">
             <strong>You choose where postings are scored.</strong> With LM Studio, a model runs on this computer and nothing is sent anywhere. With the OpenAI API, there's nothing to install, but postings and your profile are sent to OpenAI.
           </div>
@@ -225,7 +243,7 @@
         <!-- Language and location -->
         <section class="step" data-step="where" hidden>
           <h1 data-i18n="wiz.where.title">Language and location</h1>
-          <p class="lede" data-i18n="wiz.where.lede">JobFit works in your language, and where you are fills in the next steps for you. Both are optional and stay on this computer.</p>
+          <p class="lede" data-i18n="wiz.where.lede">Tino works in your language, and where you are fills in the next steps for you. Both are optional and stay on this computer.</p>
 
           <label class="field">
             <span data-i18n="wiz.where.language">Language</span>
@@ -349,7 +367,7 @@
                 <input id="oaKey" class="grow" type="password" autocomplete="off" spellcheck="false" placeholder="sk-…">
                 <button type="button" id="testOpenAi" data-i18n="wiz.model.connect">Connect</button>
               </div>
-              <div class="hint" data-i18n="wiz.model.keyHint">Create one at platform.openai.com under API keys. It's kept in JobFit's own key store in this browser, out of reach of the job sites you visit, and never included in backups.</div>
+              <div class="hint" data-i18n="wiz.model.keyHint">Create one at platform.openai.com under API keys. It's kept in Tino's own key store in this browser, out of reach of the job sites you visit, and never included in backups.</div>
             </label>
 
             <label class="field" id="lmUrlField">
@@ -560,7 +578,7 @@
         </div>
         <ol>
           <li data-i18n="wiz.done.step1">Open a job posting (LinkedIn, Greenhouse, Indeed, Workday and most career sites work).</li>
-          <li data-i18n-html="wiz.done.step2">Click the <strong>JobFit</strong> icon in the toolbar, then <strong>Evaluate this tab</strong>.</li>
+          <li data-i18n-html="wiz.done.step2">Click the <strong>Tino</strong> icon in the toolbar, then <strong>Evaluate this tab</strong>.</li>
           <li data-i18n-html="wiz.done.step3">The score appears on the page. Every job you score is kept in <strong>Tracked jobs</strong>.</li>
         </ol>
         <div class="row" style="justify-content:center;">
@@ -578,6 +596,7 @@
       <span class="save-state" id="saveState"></span>
       <span class="spacer"></span>
       <button type="button" class="link" id="skip" hidden data-i18n="wiz.skip">Skip for now</button>
+      <button type="button" class="link" id="skipRules" hidden data-i18n="wiz.skipRules">Use the recommended rules</button>
       <button type="button" class="primary" id="next" data-i18n="common.next">Next</button>
     </div>
   </div>

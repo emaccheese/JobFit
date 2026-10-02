@@ -1,0 +1,70 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 268 200" role="img" aria-label="Tino, the armadillo">
+  <title>Tino, the armadillo</title>
+  <style>
+    .ink { stroke: #283246; } .ink-fill { fill: #283246; }
+    .shell { fill: #5b7db8; } .scale { fill: #6c8bc3; } .band { fill: #8faad9; } .rim { fill: #4e6ea8; }
+    .skin { fill: #ebcfaa; } .blush { fill: #f2a99f; } .blush-line { stroke: #f2a99f; }
+    .accent { fill: #e8907a; } .accent-dark { fill: #d27560; } .accent-line { stroke: #d27560; }
+    @media (prefers-color-scheme: dark) {
+      .ink { stroke: #e6e9ee; }
+      .shell { fill: #6e8fcb; } .scale { fill: #7f9dd3; } .rim { fill: #5f80bb; }
+    }
+  </style>
+  <defs>
+    <clipPath id="tino-shell-clip">
+      <path d="M44 156 C44 96 86 52 130 52 C176 52 214 92 214 150 Q214 160 204 160 L54 160 Q44 160 44 156 Z"/>
+    </clipPath>
+  </defs>
+
+  <ellipse cx="132" cy="184" rx="96" ry="7" fill="#283246" opacity=".08"/>
+
+  <g stroke-width="3.5" stroke-linejoin="round" stroke-linecap="round">
+    <!-- tail, with rings -->
+    <path class="ink skin" d="M58 146 Q34 150 16 168 Q38 170 60 158 Z"/>
+    <path class="ink" d="M40 154 L45 162 M30 160 L34 166" fill="none" stroke-width="2.5"/>
+
+    <!-- legs -->
+    <rect class="ink skin" x="70" y="148" width="26" height="32" rx="11"/>
+    <rect class="ink skin" x="160" y="148" width="26" height="32" rx="11"/>
+    <path class="ink" d="M76 180 L76 174 M83 180 L83 174 M90 180 L90 174 M166 180 L166 174 M173 180 L173 174 M180 180 L180 174" fill="none" stroke-width="2.2"/>
+
+    <!-- shell: front and back shields with scales, three bands between them -->
+    <path class="ink shell" d="M44 156 C44 96 86 52 130 52 C176 52 214 92 214 150 Q214 160 204 160 L54 160 Q44 160 44 156 Z"/>
+    <g clip-path="url(#tino-shell-clip)" stroke="none">
+      <g class="scale">
+        <rect x="58" y="96" width="9" height="9" rx="3"/><rect x="72" y="82" width="9" height="9" rx="3"/>
+        <rect x="70" y="112" width="9" height="9" rx="3"/><rect x="56" y="126" width="9" height="9" rx="3"/>
+        <rect x="84" y="98" width="9" height="9" rx="3"/><rect x="82" y="128" width="9" height="9" rx="3"/>
+        <rect x="168" y="80" width="9" height="9" rx="3"/><rect x="182" y="96" width="9" height="9" rx="3"/>
+        <rect x="170" y="112" width="9" height="9" rx="3"/><rect x="194" y="114" width="9" height="9" rx="3"/>
+        <rect x="184" y="128" width="9" height="9" rx="3"/><rect x="198" y="134" width="9" height="9" rx="3"/>
+      </g>
+      <path class="band" d="M102 162 Q96 104 113 48 L121 48 Q105 104 111 162 Z"/>
+      <path class="band" d="M126 162 Q122 104 133 48 L141 48 Q131 104 135 162 Z"/>
+      <path class="band" d="M150 162 Q148 104 153 48 L161 48 Q157 104 159 162 Z"/>
+      <rect class="rim" x="40" y="148" width="180" height="14"/>
+    </g>
+    <path class="ink" d="M44 156 C44 96 86 52 130 52 C176 52 214 92 214 150 Q214 160 204 160 L54 160 Q44 160 44 156 Z" fill="none"/>
+
+    <!-- neckerchief: the vaquero / gaucho / cowboy bandana -->
+    <path class="ink accent" d="M188 136 L226 140 L204 166 Z"/>
+    <path class="accent-line" d="M200 146 L212 148 M203 154 L209 155" stroke-width="2.4" fill="none"/>
+    <circle class="ink accent-dark" cx="197" cy="139" r="5.5"/>
+
+    <!-- head -->
+    <path class="ink skin" d="M190 108 C200 93 226 92 240 104 C249 111 257 119 260 125 C262 130 258 134 252 134 C238 137 216 142 202 139 C187 134 182 120 190 108 Z"/>
+    <path class="shell" d="M193 107 C204 95 226 95 238 104 C224 103 209 107 199 117 Z" stroke="none"/>
+    <!-- ear -->
+    <path class="ink skin" d="M193 107 C184 88 187 70 197 70 C206 72 206 92 202 108 Z"/>
+    <path class="blush-line" d="M196 99 C192 88 193 79 198 78" fill="none" stroke-width="3"/>
+    <!-- eyebrow, a little raised: curious -->
+    <path class="ink" d="M214 104 Q221 99 229 103" fill="none" stroke-width="3"/>
+    <!-- eye -->
+    <circle class="ink-fill" cx="222" cy="117" r="4.6" stroke="none"/>
+    <circle cx="224" cy="115" r="1.6" fill="#ffffff" stroke="none"/>
+    <!-- cheek, smile, nose -->
+    <ellipse class="blush" cx="232" cy="128" rx="5" ry="3" opacity=".8" stroke="none"/>
+    <path class="ink" d="M236 134 Q242 137 249 134" fill="none" stroke-width="2.6"/>
+    <circle class="ink-fill" cx="258" cy="127" r="3.2" stroke="none"/>
+  </g>
+</svg>

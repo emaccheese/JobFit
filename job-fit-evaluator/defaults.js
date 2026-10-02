@@ -1,4 +1,8 @@
 var JOB_FIT_DEFAULTS = {
+  // Tino's public site: the privacy policy, and the page Chrome opens after
+  // an uninstall. GitHub Pages, served from docs/ in the repository; change
+  // it here (and homepage_url in manifest.json) if it moves to its own domain.
+  siteUrl: "https://emaccheese.github.io/JobFit/",
   // Name given to the first profile: the one migration builds out of the
   // pre-profiles settings, and the one a fresh install starts with. Neutral on
   // purpose — on a fresh install the setup wizard asks for a real name.

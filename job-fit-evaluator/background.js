@@ -28,7 +28,22 @@ importScripts(
 // user's language, which is a setting read from storage — so everything that
 // produces text waits for it, and follows it when it changes.
 const i18nReady = JOB_FIT_I18N.load();
-JOB_FIT_I18N.watch();
+JOB_FIT_I18N.watch(setUninstallPage);
+
+// Where Chrome sends someone who uninstalls: one question on Tino's site
+// (docs/goodbye.html), in their language. Only the language and the version
+// go in the address — nothing about them, their profile or their jobs.
+function setUninstallPage() {
+  try {
+    const url = new URL("goodbye.html", JOB_FIT_DEFAULTS.siteUrl);
+    url.searchParams.set("lang", JOB_FIT_I18N.lang);
+    url.searchParams.set("v", chrome.runtime.getManifest().version);
+    Promise.resolve(chrome.runtime.setUninstallURL(url.toString())).catch(() => {});
+  } catch (err) {
+    /* not available here */
+  }
+}
+i18nReady.then(setUninstallPage);
 
 const SYSTEM_PROMPT = `You evaluate job postings against a candidate profile.
 Return ONLY a JSON object, no prose, no markdown fences.
@@ -1556,7 +1571,7 @@ async function setBadge(count, state) {
   try {
     await chrome.action.setBadgeText({ text: count ? String(count) : "" });
     if (count) {
-      await chrome.action.setBadgeBackgroundColor({ color: state === "paused" ? "#9a6300" : "#2f6bd0" });
+      await chrome.action.setBadgeBackgroundColor({ color: state === "paused" ? "#9a6300" : "#2350c4" });
     }
   } catch (err) {
     // Badge is cosmetic; never let it break processing.
@@ -1840,7 +1855,7 @@ async function evaluateTab(tab, { ignoreCache = false, skipDuplicateCheck = fals
   try {
     await chrome.action.setBadgeBackgroundColor({ tabId: tab.id, color: "#b3261e" });
     await chrome.action.setBadgeText({ tabId: tab.id, text: "!" });
-    await chrome.action.setTitle({ tabId: tab.id, title: `JobFit — ${started.error}` });
+    await chrome.action.setTitle({ tabId: tab.id, title: `Tino — ${started.error}` });
     setTimeout(() => {
       // null, not "": null drops this tab's override so the queue count shows
       // again; "" would pin an empty badge on the tab. Same for the title.

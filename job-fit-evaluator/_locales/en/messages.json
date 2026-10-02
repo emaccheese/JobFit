@@ -1,9 +1,9 @@
 {
   "extName": {
-    "message": "JobFit"
+    "message": "Tino: Job Match Scores"
   },
   "extDescription": {
-    "message": "Evaluates a job posting on the current tab against a stored candidate profile."
+    "message": "Know before you apply: scores how well a job posting fits your CV, with matches, gaps and pay. Privately."
   },
   "cmdEvaluate": {
     "message": "Evaluate the job posting in this tab"

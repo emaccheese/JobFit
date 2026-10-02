@@ -30,6 +30,7 @@ function makeChrome({ store = {}, granted = new Set() } = {}) {
   const registered = new Map();
   const sentToTabs = [];
   const removedPerms = [];
+  const uninstallUrls = [];
   const ev = () => ({ addListener() {} });
 
   const local = {
@@ -70,6 +71,10 @@ function makeChrome({ store = {}, granted = new Set() } = {}) {
       onStartup: ev(),
       onInstalled: ev(),
       getURL: (p) => `${EXT_ORIGIN}/${String(p).replace(/^\//, "")}`,
+      getManifest: () => JSON.parse(fs.readFileSync(path.join(EXT, "manifest.json"), "utf8")),
+      async setUninstallURL(url) {
+        uninstallUrls.push(url);
+      },
     },
     permissions: {
       async contains({ origins }) {
@@ -116,7 +121,7 @@ function makeChrome({ store = {}, granted = new Set() } = {}) {
     i18n: { getUILanguage: () => "en" },
     contextMenus: { create() {}, onClicked: ev(), removeAll(cb) { if (cb) cb(); } },
   };
-  return { chrome, store, granted, listeners, registered, sentToTabs, removedPerms };
+  return { chrome, store, granted, listeners, registered, sentToTabs, removedPerms, uninstallUrls };
 }
 
 // A just-enough IndexedDB: open, one object store, get/put/delete, each in a

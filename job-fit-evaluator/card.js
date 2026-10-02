@@ -268,7 +268,7 @@
     * { box-sizing: border-box; }
     .wrap {
       --bg: #ffffff; --text: #1d2330; --muted: #5f6b7c; --line: rgba(20, 30, 50, .12); --soft: #f3f5f8; --chip: #eef1f5;
-      --accent: #2f6bd0; --focus: #2f6bd0; --green: #177a3e; --amber: #9a6300; --red: #b3261e; --grey: #5f6b7c;
+      --accent: #2350c4; --focus: #2350c4; --green: #177a3e; --amber: #9a6300; --red: #b3261e; --grey: #5f6b7c;
       --amber-soft: #fdf3e2; --amber-fg: #8a5700; --amber-line: #e8cfa0;
       --shadow: 0 10px 28px rgba(20, 30, 50, .20), 0 2px 6px rgba(20, 30, 50, .12);
       position: fixed; z-index: 2147483646;
@@ -301,7 +301,7 @@
       box-shadow: inset 0 -2px 0 rgba(0, 0, 0, .12); }
     .badge.green { background: var(--green); } .badge.amber { background: var(--amber); }
     .badge.red { background: var(--red); } .badge.muted, .badge.neutral { background: var(--grey); }
-    .badge.mark { font-size: 15px; letter-spacing: .02em; }
+    .badge.mark svg { width: 30px; height: 22px; }
     .badge.pop { animation: pop .42s cubic-bezier(.2, .9, .3, 1.4); }
     @keyframes pop { 0% { transform: scale(.7); } 60% { transform: scale(1.12); } 100% { transform: scale(1); } }
     .spin { width: 20px; height: 20px; border: 3px solid rgba(255, 255, 255, .35); border-top-color: #fff; border-radius: 50%;
@@ -386,6 +386,11 @@
       .card, .controls, .arrow { transition: none; }
     }
   `;
+
+  // Tino's shell, the brand mark (brand/tino-mark.svg), drawn in white on the
+  // blue badge: the card's "nothing scored yet" face.
+  const SHELL_GLYPH =
+    '<svg viewBox="0 0 120 80" aria-hidden="true"><path d="M8 70 C8 34 32 10 60 10 C88 10 112 34 112 70 Z" fill="#ffffff"/><path d="M37 70 Q33 40 45 9 L53 9 Q44 40 46 70 Z M56 70 Q54 40 60 9 L68 9 Q63 40 65 70 Z M75 70 Q75 40 77 9 L85 9 Q83 40 84 70 Z" fill="#8faad9"/></svg>';
 
   const ICON_SWAP =
     '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M7 8h13M16 4l4 4-4 4M17 16H4M8 12l-4 4 4 4"/></svg>';
@@ -609,7 +614,7 @@
       };
     }
     if (override === "loading") {
-      return { kind: "loading", spinner: true, badgeClass: "muted", primary: t("float.loading"), secondary: "JobFit", busy: true };
+      return { kind: "loading", spinner: true, badgeClass: "muted", primary: t("float.loading"), secondary: "Tino", busy: true };
     }
     const state = jobState || { kind: job ? "evaluate" : "none" };
     const noticeApplies = notice && (!notice.jobKey || (job && notice.jobKey === job.jobKey));
@@ -627,7 +632,7 @@
     }
     switch (state.kind) {
       case "starting":
-        return { kind: "starting", spinner: true, primary: t("float.starting"), secondary: "JobFit", busy: true };
+        return { kind: "starting", spinner: true, primary: t("float.starting"), secondary: "Tino", busy: true };
       case "queued":
         return {
           kind: `queued${state.position}`,
@@ -672,11 +677,11 @@
         };
       }
       case "none":
-        return { kind: "none", badge: "JF", badgeClass: "mark", primary: "JobFit", secondary: "", busy: true };
+        return { kind: "none", glyph: true, badgeClass: "mark", primary: "Tino", secondary: "", busy: true };
       default:
         return {
           kind: `evaluate:${job && job.jobKey}`,
-          badge: "JF",
+          glyph: true,
           badgeClass: "mark",
           primary: t("float.evaluate"),
           secondary: t("float.evaluateSub"),
@@ -702,6 +707,7 @@
     const badge = el("span", `badge ${look.badgeClass || ""}`);
     badge.setAttribute("aria-hidden", "true");
     if (look.spinner) badge.appendChild(el("span", "spin"));
+    else if (look.glyph) badge.innerHTML = SHELL_GLYPH;
     else badge.textContent = look.badge;
     // The pop is for news — a score arriving, a new job — not every redraw.
     if (lastLook && lastLook !== look.kind && !look.spinner) badge.classList.add("pop");
@@ -723,7 +729,7 @@
     const sep = /[.?!…:]$/.test(look.primary) ? " " : ". ";
     card.setAttribute(
       "aria-label",
-      `JobFit: ${isCollapsed ? `${t("float.expand")} — ${scoreWords}${look.primary}` : `${scoreWords}${look.primary}${look.secondary ? `${sep}${look.secondary}` : ""}`}`
+      `Tino: ${isCollapsed ? `${t("float.expand")} — ${scoreWords}${look.primary}` : `${scoreWords}${look.primary}${look.secondary ? `${sep}${look.secondary}` : ""}`}`
     );
     card.title = isCollapsed ? t("float.expand") : look.title || look.primary;
     if (look.expands && !isCollapsed) {

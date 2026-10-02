@@ -1,0 +1,103 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Before you go — Tino</title>
+<meta name="title-es" content="Antes de irte — Tino">
+<meta name="title-fr" content="Avant de partir — Tino">
+<meta name="title-pt" content="Antes de ir — Tino">
+<meta name="robots" content="noindex">
+<link rel="icon" href="assets/tino-mark.svg" type="image/svg+xml">
+<link rel="stylesheet" href="assets/site.css">
+</head>
+<body>
+<div class="wrap" style="max-width: 640px;">
+  <header class="top">
+    <a class="logo" href="./"><img class="logo-mark" src="assets/tino-mark.svg" alt=""><img class="logo-word" src="assets/wordmark.svg" alt="Tino"></a>
+  </header>
+
+  <main class="doc">
+    <img src="assets/tino-curled.svg" alt="" style="width: 120px; display: block; margin-bottom: 8px;">
+    <form id="ask">
+      <h1 data-lang="en">Thanks for trying Tino</h1>
+      <h1 data-lang="es">Gracias por probar Tino</h1>
+      <h1 data-lang="fr">Merci d'avoir essayé Tino</h1>
+      <h1 data-lang="pt">Obrigado por experimentar o Tino</h1>
+      <p data-lang="en">One question, if you have a moment: why did you uninstall it?</p>
+      <p data-lang="es">Una pregunta, si tienes un momento: ¿por qué la desinstalaste?</p>
+      <p data-lang="fr">Une question, si vous avez un instant : pourquoi l'avez-vous désinstallée ?</p>
+      <p data-lang="pt">Uma pergunta, se você tiver um minuto: por que desinstalou?</p>
+
+      <fieldset class="choices" style="border: 0; padding: 0; margin: 16px 0;">
+        <legend class="sr-only">Reason</legend>
+        <label><input type="radio" name="reason" value="setup" required>
+          <span data-lang="en">Setup was too much work</span><span data-lang="es">Configurarla era demasiado trabajo</span><span data-lang="fr">La configuration demandait trop d'efforts</span><span data-lang="pt">Configurar dava trabalho demais</span></label>
+        <label><input type="radio" name="reason" value="slow">
+          <span data-lang="en">It was too slow</span><span data-lang="es">Era demasiado lenta</span><span data-lang="fr">Elle était trop lente</span><span data-lang="pt">Era lenta demais</span></label>
+        <label><input type="radio" name="reason" value="wrong-scores">
+          <span data-lang="en">The scores didn't feel right</span><span data-lang="es">Los puntajes no me parecían acertados</span><span data-lang="fr">Les notes ne semblaient pas justes</span><span data-lang="pt">As notas não pareciam certas</span></label>
+        <label><input type="radio" name="reason" value="privacy">
+          <span data-lang="en">I was worried about privacy</span><span data-lang="es">Me preocupaba la privacidad</span><span data-lang="fr">La confidentialité m'inquiétait</span><span data-lang="pt">Fiquei preocupado com a privacidade</span></label>
+        <label><input type="radio" name="reason" value="done">
+          <span data-lang="en">I found a job, or only needed it briefly</span><span data-lang="es">Encontré empleo, o solo la necesitaba un tiempo</span><span data-lang="fr">J'ai trouvé un emploi, ou n'en avais besoin que brièvement</span><span data-lang="pt">Encontrei emprego, ou só precisava por pouco tempo</span></label>
+        <label><input type="radio" name="reason" value="other">
+          <span data-lang="en">Something else</span><span data-lang="es">Otra cosa</span><span data-lang="fr">Autre chose</span><span data-lang="pt">Outro motivo</span></label>
+      </fieldset>
+
+      <label for="details">
+        <span data-lang="en">Anything else? (optional)</span><span data-lang="es">¿Algo más? (opcional)</span><span data-lang="fr">Autre chose ? (facultatif)</span><span data-lang="pt">Algo mais? (opcional)</span>
+      </label>
+      <textarea id="details" name="details" maxlength="1000"></textarea>
+      <p class="note">
+        <span data-lang="en">Only your answer, your language and Tino's version are sent. Nothing about you or your jobs.</span>
+        <span data-lang="es">Solo se envían tu respuesta, tu idioma y la versión de Tino. Nada sobre ti ni tus empleos.</span>
+        <span data-lang="fr">Seuls votre réponse, votre langue et la version de Tino sont envoyés. Rien sur vous ni vos offres.</span>
+        <span data-lang="pt">Só são enviados sua resposta, seu idioma e a versão do Tino. Nada sobre você ou suas vagas.</span>
+      </p>
+      <button class="btn" type="submit">
+        <span data-lang="en">Send</span><span data-lang="es">Enviar</span><span data-lang="fr">Envoyer</span><span data-lang="pt">Enviar</span>
+      </button>
+    </form>
+
+    <div id="thanks" hidden>
+      <h1 data-lang="en">Thank you</h1><h1 data-lang="es">Gracias</h1><h1 data-lang="fr">Merci</h1><h1 data-lang="pt">Obrigado</h1>
+      <p data-lang="en">It helps make Tino better. Good luck with the search.</p>
+      <p data-lang="es">Ayuda a mejorar Tino. Mucha suerte con la búsqueda.</p>
+      <p data-lang="fr">Cela aide à améliorer Tino. Bonne chance dans votre recherche.</p>
+      <p data-lang="pt">Isso ajuda a melhorar o Tino. Boa sorte na busca.</p>
+    </div>
+  </main>
+</div>
+<script src="assets/site.js"></script>
+<script>
+  // The Google Form the answers go to (brand/brand.md, "Uninstall form").
+  // Until it's filled in, nothing is sent: the page just says thanks.
+  var FORM = {
+    action: "",   // https://docs.google.com/forms/d/e/<FORM_ID>/formResponse
+    reason: "",   // entry.<id> of the reason question
+    details: "",  // entry.<id> of "anything else"
+    lang: "",     // entry.<id> of the language field
+    version: ""   // entry.<id> of the version field
+  };
+
+  document.getElementById("ask").addEventListener("submit", function (event) {
+    event.preventDefault();
+    var form = event.target;
+    var choice = form.querySelector('input[name="reason"]:checked');
+    if (FORM.action && choice) {
+      var body = new URLSearchParams();
+      body.set(FORM.reason, choice.value);
+      if (FORM.details) body.set(FORM.details, form.details.value.slice(0, 1000));
+      if (FORM.lang) body.set(FORM.lang, window.TINO_LANG || "en");
+      if (FORM.version) body.set(FORM.version, (new URLSearchParams(location.search).get("v") || "").slice(0, 20));
+      // Google Forms doesn't allow reading the reply from another site; the
+      // answer is recorded all the same.
+      fetch(FORM.action, { method: "POST", mode: "no-cors", body: body }).catch(function () {});
+    }
+    form.hidden = true;
+    document.getElementById("thanks").hidden = false;
+  });
+</script>
+</body>
+</html>

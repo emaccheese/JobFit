@@ -1284,7 +1284,7 @@ function wireProfileButtons() {
 async function init() {
   await JOB_FIT_I18N.load();
   JOB_FIT_I18N.translatePage();
-  document.title = `${t("settings.title")} — JobFit`;
+  document.title = `${t("settings.title")} — Tino`;
 
   renderPresetCheckboxes();
   store = await JOB_FIT_PROFILES.load();

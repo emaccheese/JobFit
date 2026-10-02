@@ -1009,6 +1009,11 @@ function focusRow(jobKey) {
 
 async function renderEmpty() {
   const box = el("div", "empty");
+  // Tino, curled up: nothing here yet.
+  const tino = el("img", "empty-tino");
+  tino.src = "images/tino-curled.svg";
+  tino.alt = "";
+  box.appendChild(tino);
   box.appendChild(el("h2", null, t("history.emptyTitle")));
   let shortcut = "";
   try {
@@ -1684,7 +1689,7 @@ function exportCsv() {
     ]),
   ];
   const csv = rows.map((row) => row.map(csvCell).join(",")).join("\r\n");
-  JOB_FIT_BACKUP.download(csv, "text/csv;charset=utf-8", `job-fit-history-${new Date().toISOString().slice(0, 10)}.csv`);
+  JOB_FIT_BACKUP.download(csv, "text/csv;charset=utf-8", `tino-jobs-${new Date().toISOString().slice(0, 10)}.csv`);
 }
 
 function renderProfileOptions() {
@@ -1968,7 +1973,7 @@ async function loadProfile(profileId) {
 async function init() {
   await JOB_FIT_I18N.load();
   JOB_FIT_I18N.translatePage();
-  document.title = `${t("history.title")} — JobFit`;
+  document.title = `${t("history.title")} — Tino`;
   // Another page switched the language: this one follows on its next load
   // rather than half-translating itself now.
   JOB_FIT_I18N.watch(() => location.reload());
