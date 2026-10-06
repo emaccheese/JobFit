@@ -12,3 +12,6 @@ jobfit-backup-*.json
 job-fit-history-*.csv
 tino-backup-*.json
 tino-jobs-*.csv
+
+# Saved web pages used for analysis (may hold personal data)
+glassdoor page/

@@ -25,7 +25,14 @@
   // "still loading", not "no job here", and the card stays put.
   const RETRIES_MS = [0, 600, 1500, 3000, 6000];
 
-  let lastHref = location.href;
+  // Where the page is: its address, plus the job on screen for boards that
+  // change jobs without changing the address (extractors/sites.js).
+  function whereNow() {
+    const jf = window.__jobFit || {};
+    return `${location.href}#${typeof jf.jobOnScreen === "function" ? jf.jobOnScreen() : ""}`;
+  }
+
+  let lastWhere = whereNow();
   let timers = [];
   // The job in a Greenhouse board embedded in this page, as float-frame.js
   // read it in the iframe (via the worker). Only good for the address it
@@ -34,28 +41,13 @@
   let navigating = false;
   let seq = 0; // refreshes overlap; only the newest one may act
 
-  // Same order as content.js's dispatchExtraction and the popup's
-  // extractOnPage, so the card and an evaluation agree on the job.
+  // The same site readers as content.js's dispatchExtraction and the popup's
+  // extractOnPage (extractors/sites.js), so the card and an evaluation agree
+  // on the job.
   function extract() {
     const jf = window.__jobFit || {};
-    const host = location.hostname;
-    const chain = [
-      jf.greenhouse,
-      host.includes("linkedin.com") && jf.linkedin,
-      host.includes("indeed.") && jf.indeed,
-      jf.workday,
-      jf.jibe,
-      jf.eightfold,
-    ];
-    for (const run of chain) {
-      if (typeof run !== "function") continue;
-      try {
-        const result = run();
-        if (result) return result;
-      } catch (err) {
-        /* an extractor tripping on odd markup just means "not this one" */
-      }
-    }
+    const site = jf.readSite ? jf.readSite({ safe: true }) : null;
+    if (site) return site.result;
     // The generic extractor finds text on almost any page, which would put the
     // card on a site's home page too. Only trust it when the page says it's a
     // job posting.
@@ -148,11 +140,13 @@
   }
 
   // Single-page job boards change the job without a page load. Polling the
-  // address is cheaper and more reliable than patching history methods from
-  // an isolated world, which can't see the page's own calls.
+  // address (and, on boards that keep it, the job on screen) is cheaper and
+  // more reliable than patching history methods from an isolated world, which
+  // can't see the page's own calls.
   setInterval(() => {
-    if (location.href === lastHref) return;
-    lastHref = location.href;
+    const now = whereNow();
+    if (now === lastWhere) return;
+    lastWhere = now;
     scheduleRefreshes();
   }, 500);
 

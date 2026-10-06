@@ -87,6 +87,7 @@ function probePage() {
     jibe: Boolean(document.querySelector("descriptions-app #description-body")),
     eightfold: Boolean(document.querySelector("#pcsx #job-description-container")),
     indeed: location.hostname.includes("indeed.") && Boolean(document.querySelector("#jobDescriptionText, .simple-job-description-html")),
+    glassdoor: /(^|\.)glassdoor\.[a-z.]+$/i.test(location.hostname) && Boolean(document.querySelector('[class*="JobDetails_jobDescription"]')),
     workday: Boolean(document.querySelector('[data-automation-id="jobPostingDescription"]')),
   };
 }
@@ -115,46 +116,29 @@ async function checkPage() {
     return;
   }
   const p = pageProbe;
-  const site = p.linkedin
-    ? "LinkedIn"
-    : p.greenhouse
-      ? "Greenhouse"
-      : p.embedded
-        ? t("popup.siteEmbedded")
-        : p.indeed
-          ? "Indeed"
-          : p.workday
-            ? "Workday"
-            : p.jibe
-              ? t("popup.siteJibe")
-              : p.eightfold
-                ? t("popup.siteEightfold")
-                : null;
+  // The first that matches, in the readers' own order.
+  const site =
+    [
+      [p.linkedin, "LinkedIn"],
+      [p.greenhouse, "Greenhouse"],
+      [p.embedded, t("popup.siteEmbedded")],
+      [p.indeed, "Indeed"],
+      [p.glassdoor, "Glassdoor"],
+      [p.workday, "Workday"],
+      [p.jibe, t("popup.siteJibe")],
+      [p.eightfold, t("popup.siteEightfold")],
+    ].find(([found]) => found)?.[1] || null;
   pageKnown = Boolean(site);
   if (site) setReady("pageDot", "pageState", "ok", t("popup.postingDetected", { site }));
   else setReady("pageDot", "pageState", "warn", t("popup.noKnownPosting"), p.host);
 }
 
 // Runs in the page (executeScript serializes it, so it can't call anything
-// outside itself). Same order as content.js's dispatchExtraction.
+// outside itself). The same readers as content.js's dispatchExtraction.
 function extractOnPage() {
-  const host = location.hostname;
   const jf = window.__jobFit || {};
-  const chain = [
-    jf.greenhouse,
-    host.includes("linkedin.com") && jf.linkedin,
-    host.includes("indeed.") && jf.indeed,
-    jf.workday,
-    jf.jibe,
-    jf.eightfold,
-    jf.generic,
-  ];
-  let extracted = null;
-  for (const extract of chain) {
-    if (typeof extract !== "function") continue;
-    extracted = extract();
-    if (extracted) break;
-  }
+  const site = jf.readSite ? jf.readSite({ safe: true }) : null;
+  const extracted = site ? site.result : jf.generic ? jf.generic() : null;
   if (!extracted) return null;
   // As content.js does, so the posting is looked up under the same company.
   if (!extracted.company && jf.jsonLdCompany) extracted.company = jf.jsonLdCompany();

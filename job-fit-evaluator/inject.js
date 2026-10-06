@@ -23,6 +23,8 @@ const JOB_FIT_CONTENT_FILES = [
   "extractors/workday.js",
   "extractors/indeed.js",
   "extractors/eightfold.js",
+  "extractors/glassdoor.js",
+  "extractors/sites.js",
   "jobkey.js",
   "card.js",
   "content.js",
