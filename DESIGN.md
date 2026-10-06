@@ -82,6 +82,7 @@ job-fit-evaluator/
 ├── evalstore.js         # evaluated-job history records, cross-site duplicates
 ├── postingmeta.js       # JOB_FIT_META — requisition id, deadline, posting date, and their wording
 ├── vault.js             # JOB_FIT_VAULT — API key and allowed model addresses, out of reach of page scripts
+├── prompts.js           # JOB_FIT_PROMPTS — the model's instructions per kind of request, shared with Tino Cloud
 ├── images/              # Tino's drawings, copied from brand/ by tools/brand.js
 ├── icons/               # icon-16/32/48/128.png, rendered from brand/ by tools/brand.js
 ├── jobkey.js            # canonical job identity per page
@@ -111,9 +112,17 @@ job-fit-evaluator/
 brand/                   # the one source for Tino's drawings, and brand.md (story, voice, palette, designer brief)
 docs/                    # GitHub Pages: landing page, privacy policy, uninstall page
 store/                   # Chrome Web Store listing, permission answers, screenshots, checklist
+cloud/                   # Tino Cloud on Supabase: README.md (setup, API, operating it)
+└── supabase/
+    ├── config.toml
+    ├── migrations/      # plans, accounts, usage; consume_quota/finish_call; row-level security
+    ├── tests/database/  # pgTAP (supabase test db)
+    └── functions/       # score, account, checkout, billing-webhook, delete-account
+        └── _shared/     # the handlers (tested in Node), prompts.js copied by tools/cloud.js
 
 tools/
 ├── brand.js             # copies brand/ drawings into the extension and docs/, renders the icons
+├── cloud.js             # copies prompts.js into cloud/supabase/functions/_shared/
 ├── check-locales.js     # every used key exists in all four catalogs
 ├── test.js              # runs everything: syntax, tools/test/*.test.js, locales
 └── test/                # support.js (VM + chrome.*/IndexedDB stand-ins) and the suites
@@ -1977,6 +1986,63 @@ Internal names stay as they are, so nobody's data breaks: the `JOB_FIT_*` global
 - The page posts one answer to a Google Form whose ids live in `docs/goodbye.html`; until they're filled in, it sends nothing.
 
 **Store.** `store/` holds the listing (four languages), the permission justifications and draft privacy answers, and the launch checklist. It also holds 1280×800 screenshots and the 440×280 tile. Those were captured from the development harness with a fictional seed (Northwind Robotics, Contoso Cloud…), because store screenshots must not show real companies or people.
+
+## Tino Cloud backend (2026-10-06)
+
+Hosted scoring for people without a local model or an OpenAI key, paid for by a
+daily free allowance and a Pro plan. The server is in `cloud/` (Supabase); the
+extension doesn't use it yet (Phase 4). `cloud/README.md` has the setup, the
+API and how to operate it.
+
+**The server keeps accounts and counts, never content.** No CV, posting or model
+reply is stored; requests pass through to OpenAI with `store: false`. Logs hold the
+kind, status and timing only.
+
+**The server chooses the instructions.** A request names its kind (`evaluate`,
+`summarize`, `draftProfile`, `suggestSalary`, `suggestFlags`) and carries the user
+message; the system prompt, model and output limit come from the server. Otherwise
+the service would be a free general-purpose model on Tino's bill.
+- To score exactly like the extension, the prompts moved out of `background.js`
+  into `prompts.js`, which both use.
+- `tools/cloud.js` copies it into the functions as an ES module. Supabase deploys
+  only what's under `functions/`, so it can't be imported from the extension folder.
+- `cloud.test.js` fails if the copy is stale, and checks it gives the same text for
+  every kind and language.
+- The move was checked byte for byte against the old `background.js` in all four
+  languages.
+
+**The allowance is spent and refunded in the database**, in two functions only the
+service role can call:
+- `consume_quota` locks the account row, checks the operator switches, the user's
+  one-call-at-a-time lease, the hourly brake, and the day's (or Pro's month's)
+  allowance, then takes one unit. "Today" is the user's own day, from the time zone
+  they set (changeable once every 30 days, so hopping zones can't buy days).
+- `finish_call` frees the lease, records tokens for the user and the day's
+  spending, and refunds a failed call.
+- The lease lasts 3 minutes, longer than the function's model timeout (120 s), so
+  it only expires on its own when a function died mid-call.
+
+**Cost controls:** a global pause, a daily spending switch estimated from token
+counts and the plan's prices, the hourly brake, and a hard limit on a dedicated
+OpenAI project (set by hand).
+
+**Billing is an adapter.** The merchant of record isn't chosen yet. Everything
+provider-independent is built: `apply_billing_event` (idempotent by event id,
+ignores events older than the last applied), the webhook handler (signature check by
+the adapter, then apply), HMAC-SHA256 and constant-time comparison. Until an adapter
+exists, `checkout` and `billing-webhook` answer 501.
+
+**No SDKs.** The functions talk to Auth, PostgREST and OpenAI with `fetch`, and
+each handler takes its dependencies as arguments. So `node tools/test.js cloud` runs
+the TypeScript directly (Node strips the types) against stand-ins: 70 checks,
+including refunds on every kind of model failure, size and field limits, and logs
+free of request content. The SQL needs Postgres: `supabase test db` runs 31 pgTAP
+checks, and `cloud.test.js` checks the migration as text (row-level security on every
+table, pinned `search_path`, no function callable by users).
+
+**Status codes.** Any quota refusal is 429 with a `reason` (daily, monthly, hourly,
+busy) and an `upgrade` flag, rather than the plan's separate 402. One status is
+simpler for the extension's queue, which pauses on 429 until `resetAt` either way.
 
 ## Logging
 

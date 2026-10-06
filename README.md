@@ -352,6 +352,13 @@ practical fix is setting reasoning effort to `low` and disabling thinking.
 - **Tests:** `node tools/test.js` runs every check (syntax, the suites in `tools/test/`,
   the brand assets, the locale catalogs).
 
+## Tino Cloud (in progress)
+
+`cloud/` is the server for an optional hosted mode: sign in with Google and score
+without installing a model or bringing a key, with a daily free allowance. The server
+keeps accounts and usage counts, never CVs or postings. The extension doesn't use it
+yet. See [cloud/README.md](cloud/README.md).
+
 ## Design notes
 
 [`DESIGN.md`](DESIGN.md) is the working document: the architecture, and — more

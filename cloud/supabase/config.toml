@@ -1,0 +1,25 @@
+# Tino Cloud's local Supabase settings (supabase start). Only what differs
+# from the CLI's defaults is here; see cloud/README.md.
+project_id = "tino"
+
+[auth]
+site_url = "https://emaccheese.github.io/JobFit/"
+# The extension signs in with chrome.identity.launchWebAuthFlow, which
+# returns to https://<extension id>.chromiumapp.org/.
+additional_redirect_urls = ["https://*.chromiumapp.org/**"]
+# Google is the only way in: no email sign-ups.
+enable_signup = true
+
+[auth.email]
+enable_signup = false
+
+[auth.external.google]
+enabled = true
+client_id = "env(SUPABASE_AUTH_EXTERNAL_GOOGLE_CLIENT_ID)"
+secret = "env(SUPABASE_AUTH_EXTERNAL_GOOGLE_SECRET)"
+skip_nonce_check = false
+
+# Called by the payment provider, which has no Supabase session: the function
+# checks the provider's signature instead.
+[functions.billing-webhook]
+verify_jwt = false
