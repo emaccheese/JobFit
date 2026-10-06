@@ -18,6 +18,23 @@ var JOB_FIT_BOARDS = (function () {
     // Chrome grants it without asking and can't take it back.
     { id: "greenhouse", name: "Greenhouse", patterns: ["https://*.greenhouse.io/*"], alwaysGranted: true },
     { id: "workday", name: "Workday", patterns: ["https://*.myworkdayjobs.com/*"] },
+    // A site per country, and a match pattern can't leave the ending open:
+    // the Americas and the countries of Tino's languages.
+    {
+      id: "glassdoor",
+      name: "Glassdoor",
+      patterns: [
+        "https://*.glassdoor.com/*",
+        "https://*.glassdoor.ca/*",
+        "https://*.glassdoor.com.mx/*",
+        "https://*.glassdoor.com.br/*",
+        "https://*.glassdoor.com.ar/*",
+        "https://*.glassdoor.co.uk/*",
+        "https://*.glassdoor.fr/*",
+        "https://*.glassdoor.es/*",
+        "https://*.glassdoor.de/*",
+      ],
+    },
   ];
   const IDS = BOARDS.map((b) => b.id);
 

@@ -191,6 +191,10 @@ var JOB_FIT_META = (function () {
     /\bil y a\s+(\d+|une?)(\+?)\s*(minutes?|heures?|jours?|semaines?|mois)\b/i,
     /\bh[áa]\s+(\d+|uma?)(\+?)\s*(minutos?|horas?|dias?|semanas?|m[êe]s|meses)\b/i,
   ];
+  // A board's compact age label, the whole label and nothing else: Glassdoor's
+  // "7 d", "+ 30 d", "24 h", "30d+". Only from an extractor's field: in prose,
+  // "7 d" could be anything.
+  const COMPACT_AGE = /^\s*(\+?)\s*(\d+)\s*(h|d)\s*(\+?)\s*$/i;
   const TODAY = /\b(just posted|posted today|today|hoy|aujourd'hui|hoje)\b/i;
   const YESTERDAY = /\b(yesterday|ayer|hier|ontem)\b/i;
   // In the posting's own text an age only counts next to a word that makes it
@@ -213,6 +217,11 @@ var JOB_FIT_META = (function () {
       return { days: count * entry[1], approx: m[2] === "+" };
     }
     if (strict) return null;
+    const compact = COMPACT_AGE.exec(source);
+    if (compact) {
+      const days = compact[3].toLowerCase() === "h" ? 0 : Number(compact[2]);
+      return { days, approx: Boolean(compact[1] || compact[4]) };
+    }
     if (TODAY.test(source)) return { days: 0, approx: false };
     if (YESTERDAY.test(source)) return { days: 1, approx: false };
     return null;

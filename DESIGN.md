@@ -105,6 +105,8 @@ job-fit-evaluator/
 │   ├── lever.js
 │   ├── linkedin.js
 │   ├── eightfold.js     # Eightfold career sites (careers.qualcomm.com, …)
+│   ├── glassdoor.js     # Glassdoor's search page, on every country site
+│   ├── sites.js         # the site readers in order: the one list content.js, popup.js and float.js use
 │   └── generic.js       # fallback: largest text block
 └── README.md
 
@@ -837,6 +839,14 @@ read `innerText` — single-line values with no structure to preserve.)
   - **location** — first `·`-separated segment of that container's meta line (`Bellevue, WA · Reposted 1 week ago · 96 people clicked apply`).
   - Each field degrades to `null` independently — better to return nothing than to confidently label the posting with another job's title.
 - **eightfold.js** — Eightfold career sites on companies' own domains (careers.qualcomm.com, 2026-09-26). The search page is a single-page app: a results list on the left, and the selected job on the right, swapped in place as you click. Before this, those pages fell to the generic extractor, which sent the whole page (about 14,000 words on the Qualcomm page tested, including the results list) titled with the search, "C++ at Tijuana, B.C., Mexico | Qualcomm".
+- **glassdoor.js** — Glassdoor's search page (2026-10-06), on its country sites. Like Eightfold, a results list on the left and the selected job on the right; unlike it, **the address doesn't change** when you click another job.
+  - **Before this**, Glassdoor fell to the generic reader: 1,224 words for a 427-word description, with the menus, the other 29 jobs, and Glassdoor's "Your qualifications for this job" block, which is built from the reader's *own* Glassdoor profile, so the model read the user's skills as the job's requirements. Every job on one results page also shared one key (the address), so a second job showed the first one's saved score.
+  - **What it reads:** the detail pane's header (title, company, location) and its description (CSS-clamped behind "Show more", but all in the markup), plus the header's pay only when the employer gave it. Glassdoor otherwise shows its own estimate there, which the model would report as the posting's pay.
+  - **Which job:** the header's `jlid` (or the title's `jd-job-title-<id>`), then the selected card, then `jl` in a job page's address. Keyed `glassdoor:<id>`, the same on every country site. While the next job loads, the header can be new and the description old: the description's own `jlid` must match, otherwise it reads nothing yet.
+  - **Posted:** the card's compact age ("7 d", "+ 30 d", "24 h"). `parseAge` reads that form only from an extractor's field, never from posting text.
+  - **The on-page button** polls the address *and* the job on screen (`jobOnScreen()` in `sites.js`), so clicking another job updates the card.
+  - **Glassdoor board:** one per country can't be a single match pattern, so the board lists the Americas and the countries of Tino's languages.
+- **sites.js** — the readers in the order they're tried, used by the evaluation, the popup's lookup and the on-page button. They were three hand-kept lists before, so a new site could be added to one and missed in another. Callers decide on the generic fallback themselves (the on-page button only uses it with `JobPosting` markup). `safe` turns a reader that throws into "not this one" for the popup and the button; an evaluation still fails loudly.
   - **recognised** by Eightfold's app root `#pcsx` plus `#job-description-container`, not by hostname, like Jibe.
   - **text** — `#job-description-container`, a fixed id, where the classes carry a build hash (`position-title-3TPtN`), so only prefixes are matched.
   - **title / location** — `[class^="position-title-"]` and `[class^="position-location-"]` in the job header.
