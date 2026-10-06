@@ -304,10 +304,16 @@ posting evaluated for two people is two records.
 | Workday | `*.myworkdayjobs.com` postings, including the search panel |
 | Jibe (iCIMS) | Company career sites built on Jibe, e.g. careers.keysight.com |
 | Eightfold | Company career sites built on Eightfold, e.g. careers.qualcomm.com, including the search page where the selected job opens beside the results list |
-| Anything else | Generic extractor — finds the largest visible content block |
+| Anything else | Generic extractor — finds the largest visible content block, if the page looks like a posting |
 
 Site-specific extractors give better titles, companies and locations. The generic
-fallback usually gets the posting body right on its own.
+fallback usually gets the posting body right on its own. It only reads a page that
+looks like a posting: one with schema.org `JobPosting` markup, or with at least two
+of a posting's usual sections (what you'll do, requirements, benefits, how to
+apply) as headings, in any of the four languages. On LinkedIn it never reads
+anything outside `/jobs/`, so a profile or the feed isn't scored. Anything else
+gets "No posting found" with **Evaluate anyway**, for a real posting the check
+misses.
 
 Postings are identified by a canonical job key, not a URL: the same LinkedIn job is
 reachable under several URLs with tracking parameters that change per search, so

@@ -125,6 +125,7 @@ JOB_FIT_MESSAGES.fr = {
   "banner.warningsTitle": "Avertissements — à clarifier, pas des rejets automatiques",
   "banner.domainFlagsTitle": "Signaux de domaine détectés (recherche de mots-clés, indépendante du modèle)",
   "banner.noTextSummary": "Impossible d'extraire le texte de l'offre sur cette page.",
+  "banner.notPostingSummary": "Cette page ne ressemble pas à une offre d'emploi. Si c'en est une, vous pouvez l'évaluer quand même.",
   "banner.staleModel": "noté par {model}; le modèle actuel est {current}",
   "banner.aDifferentModel": "un autre modèle",
   "banner.notSet": "non défini",

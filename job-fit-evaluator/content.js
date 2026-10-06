@@ -204,13 +204,14 @@
     }
   }
 
-  async function run({ ignoreCache, skipDuplicateCheck } = {}) {
+  async function run({ ignoreCache, skipDuplicateCheck, anyPage } = {}) {
     // Logged on every run so it's immediately visible whether the injection
     // reached the iframe: a page with an embedded board should produce two of
     // these, the second with framed=true on a greenhouse.io host.
     console.log(`[Job Fit Evaluator] running on ${location.hostname} (framed=${window !== window.top})`);
 
     await JOB_FIT_I18N.load();
+    if (anyPage && window === window.top) window.__jobFit.forcedPage = location.href;
     const { result, extractorName } = dispatchExtraction();
 
     // On the top frame of a page that EMBEDS a Greenhouse board, the posting is
@@ -233,8 +234,17 @@
 
     if (!result) {
       if (window !== window.top) return;
-      console.log(`[Job Fit Evaluator] extraction failed on ${location.hostname} (no usable text found)`);
-      JOB_FIT_CARD.showNotice({ tone: "amber", title: t("float.noPosting"), summary: t("banner.noTextSummary") });
+      // Long enough to read, but it doesn't look like a posting (a profile, an
+      // article): say so, and let the person read it as one anyway.
+      const readable = window.__jobFit.generic && window.__jobFit.generic({ force: true });
+      console.log(`[Job Fit Evaluator] extraction failed on ${location.hostname} (${readable ? "not a job posting" : "no usable text found"})`);
+      JOB_FIT_CARD.showNotice({
+        tone: "amber",
+        title: t("float.noPosting"),
+        summary: t(readable ? "banner.notPostingSummary" : "banner.noTextSummary"),
+        actions: readable ? ["evaluatePage"] : [],
+        primaryAction: "evaluatePage",
+      });
       return;
     }
 
@@ -493,5 +503,5 @@
   // card's Evaluate anyway skips the check for the same posting elsewhere.
   const once = window.__jobFitRunOnce || {};
   window.__jobFitRunOnce = null;
-  start({ ignoreCache: Boolean(once.ignoreCache), skipDuplicateCheck: Boolean(once.skipDuplicateCheck) });
+  start({ ignoreCache: Boolean(once.ignoreCache), skipDuplicateCheck: Boolean(once.skipDuplicateCheck), anyPage: Boolean(once.anyPage) });
 })();

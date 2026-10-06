@@ -823,6 +823,7 @@
       evaluate: t("float.tryAgain"),
       showDuplicate: t("dup.show"),
       evaluateAnyway: t("dup.evaluateAnyway"),
+      evaluatePage: t("dup.evaluateAnyway"),
     };
     const button = el("button", isPrimary ? "primary" : "", labels[action]);
     button.type = "button";
@@ -944,7 +945,7 @@
   }
 
   function runAction(action) {
-    if (action === "reevaluate" || action === "evaluate" || action === "evaluateAnyway") {
+    if (action === "reevaluate" || action === "evaluate" || action === "evaluateAnyway" || action === "evaluatePage") {
       closePanel({ restoreFocus: true });
       notice = null;
       markStarting();
@@ -952,6 +953,7 @@
         type: "JOB_FIT_EVALUATE_TAB",
         ignoreCache: action === "reevaluate",
         skipDuplicateCheck: action === "evaluateAnyway",
+        anyPage: action === "evaluatePage",
       });
       return;
     }

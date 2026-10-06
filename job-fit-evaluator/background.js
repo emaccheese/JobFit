@@ -1847,10 +1847,10 @@ chrome.runtime.onInstalled.addListener((details) => {
 
 // Evaluating without the popup has nowhere to show an error, so it goes on
 // the icon: a red "!" for this tab, with the reason as the tooltip.
-async function evaluateTab(tab, { ignoreCache = false, skipDuplicateCheck = false } = {}) {
+async function evaluateTab(tab, { ignoreCache = false, skipDuplicateCheck = false, anyPage = false } = {}) {
   if (!tab || tab.id == null) return;
   await i18nReady;
-  const started = await startEvaluation(tab.id, { ignoreCache, skipDuplicateCheck });
+  const started = await startEvaluation(tab.id, { ignoreCache, skipDuplicateCheck, anyPage });
   if (started.ok) return;
   try {
     await chrome.action.setBadgeBackgroundColor({ tabId: tab.id, color: "#b3261e" });
@@ -2141,10 +2141,15 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
   }
   // The on-page card's click: exactly what the keyboard shortcut does. Its
   // Re-evaluate asks for the saved result to be skipped, and its Evaluate
-  // anyway for the same posting scored elsewhere to be.
+  // anyway for the same posting scored elsewhere to be, or for a page that
+  // doesn't look like a posting to be read as one.
   if (message?.type === "JOB_FIT_EVALUATE_TAB") {
     if (sender.tab) {
-      evaluateTab(sender.tab, { ignoreCache: Boolean(message.ignoreCache), skipDuplicateCheck: Boolean(message.skipDuplicateCheck) });
+      evaluateTab(sender.tab, {
+        ignoreCache: Boolean(message.ignoreCache),
+        skipDuplicateCheck: Boolean(message.skipDuplicateCheck),
+        anyPage: Boolean(message.anyPage),
+      });
     }
     sendResponse({ ok: Boolean(sender.tab) });
     return false;

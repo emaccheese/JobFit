@@ -132,6 +132,7 @@ JOB_FIT_MESSAGES.en = {
   "banner.warningsTitle": "Warnings — worth asking about, not automatic rejects",
   "banner.domainFlagsTitle": "Domain flags detected (keyword scan, independent of the model)",
   "banner.noTextSummary": "Couldn't extract job posting text on this page.",
+  "banner.notPostingSummary": "This page doesn't look like a job posting. If it is one, you can evaluate it anyway.",
   "banner.staleModel": "scored by {model}; the current model is {current}",
   "banner.aDifferentModel": "a different model",
   "banner.notSet": "not set",

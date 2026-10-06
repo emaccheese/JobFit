@@ -125,6 +125,7 @@ JOB_FIT_MESSAGES.pt = {
   "banner.warningsTitle": "Avisos — vale perguntar, não são descartes automáticos",
   "banner.domainFlagsTitle": "Alertas de domínio detectados (busca por palavras-chave, independente do modelo)",
   "banner.noTextSummary": "Não foi possível extrair o texto da vaga nesta página.",
+  "banner.notPostingSummary": "Esta página não parece uma vaga. Se for, você pode avaliá-la mesmo assim.",
   "banner.staleModel": "avaliado por {model}; o modelo atual é {current}",
   "banner.aDifferentModel": "outro modelo",
   "banner.notSet": "não definido",

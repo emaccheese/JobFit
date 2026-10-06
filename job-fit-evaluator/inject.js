@@ -154,8 +154,8 @@ async function injectJobFrames(tabId, files, { prelude = null } = {}) {
 
 // Runs in the page before content.js, for the next run only (read once and
 // cleared): skip the saved result and score the posting again (Re-evaluate),
-// or skip the check for the same posting scored from another link
-// (the card's Evaluate anyway).
+// skip the check for the same posting scored from another link, or read a
+// page that doesn't look like a posting (the card's two Evaluate anyways).
 function markRunOnce(options) {
   window.__jobFitRunOnce = options;
 }
@@ -163,12 +163,14 @@ function markRunOnce(options) {
 // Returns { ok: true } or { ok: false, error } with a message for a person.
 // `ignoreCache` re-scores a job that already has a saved result;
 // `skipDuplicateCheck` scores it even though the same posting was scored
-// from another site.
-async function startEvaluation(tabId, { ignoreCache = false, skipDuplicateCheck = false } = {}) {
+// from another site; `anyPage` reads a page that doesn't look like a posting.
+async function startEvaluation(tabId, { ignoreCache = false, skipDuplicateCheck = false, anyPage = false } = {}) {
   try {
     const files = await jobFitContentFiles();
     const prelude =
-      ignoreCache || skipDuplicateCheck ? { func: markRunOnce, args: [{ ignoreCache, skipDuplicateCheck }] } : null;
+      ignoreCache || skipDuplicateCheck || anyPage
+        ? { func: markRunOnce, args: [{ ignoreCache, skipDuplicateCheck, anyPage }] }
+        : null;
     if (prelude) await chrome.scripting.executeScript({ target: { tabId }, ...prelude });
     await chrome.scripting.executeScript({ target: { tabId }, files });
     // Find cross-origin iframes that host job content (e.g. embedded
