@@ -1281,6 +1281,14 @@ function wireProfileButtons() {
   setupProfileDelete();
 }
 
+// The toolbar icon's weekly count (background.js drawBadge). On unless turned off.
+async function setupAttentionBadge() {
+  const box = $("attentionBadge");
+  const { attentionBadge } = await chrome.storage.local.get("attentionBadge");
+  box.checked = attentionBadge !== false;
+  box.addEventListener("change", () => chrome.storage.local.set({ attentionBadge: box.checked }));
+}
+
 async function init() {
   await JOB_FIT_I18N.load();
   JOB_FIT_I18N.translatePage();
@@ -1307,6 +1315,7 @@ async function init() {
     if (off.length) toggleBoards(off, true, null);
   });
   renderTimingHint();
+  setupAttentionBadge();
   checkModel();
   $("changeShortcut").addEventListener("click", () => chrome.tabs.create({ url: "chrome://extensions/shortcuts" }));
   setupRail();

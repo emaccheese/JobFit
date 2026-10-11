@@ -59,6 +59,7 @@ async function switchProfile(id) {
   store.activeProfileId = id;
   await JOB_FIT_PROFILES.save(store);
   renderProfileNotices();
+  renderWeek();
   await renderThisJob();
   JOB_FIT_UI.announce(t("popup.switched", { name: activeProfile().name }));
 }
@@ -613,6 +614,11 @@ function wire() {
     window.close();
   });
   $("summarizeTab").addEventListener("click", summarizeCurrentTab);
+  $("backupNow").addEventListener("click", () => goToSettings("data"));
+  $("backupLater").addEventListener("click", async () => {
+    await chrome.storage.local.set({ backupNudgeSnoozedUntil: Date.now() + BACKUP_SNOOZE_DAYS * 86400000 });
+    $("backupNudge").hidden = true;
+  });
   $("copySummary").addEventListener("click", copySummary);
   $("floatToggle").addEventListener("change", onFloatToggle);
   // An extension page rather than a popup view: it needs room, and it keeps
@@ -623,6 +629,67 @@ function wire() {
   };
   $("viewHistory").addEventListener("click", openHistory);
   $("queueStatus").addEventListener("click", openHistory);
+}
+
+// --- this week -----------------------------------------------------------------
+
+// The week's to-do across this profile's tracked jobs (attention.js): an offer
+// or interview, a posting closing soon, an application gone quiet. A few lead;
+// the rest are a click away in Tracked jobs' "Needs attention".
+const WEEK_SHOWN = 3;
+
+function openTracked(params) {
+  chrome.tabs.create({ url: `${chrome.runtime.getURL("history.html")}?${new URLSearchParams(params).toString()}` });
+  window.close();
+}
+
+async function renderWeek() {
+  const profile = activeProfile();
+  const records = profile ? await JOB_FIT_EVALSTORE.list(profile.id).catch(() => []) : [];
+  const { items, strongMatches } = JOB_FIT_ATTENTION.thisWeek(records);
+  const list = $("weekList");
+  list.textContent = "";
+  items.slice(0, WEEK_SHOWN).forEach(({ record, kind, label }) => {
+    const li = document.createElement("li");
+    const button = document.createElement("button");
+    button.type = "button";
+    const why = document.createElement("span");
+    why.className = `why${kind === "offer" || kind === "interview" ? " good" : ""}`;
+    why.textContent = label.charAt(0).toLocaleUpperCase() + label.slice(1);
+    const which = document.createElement("span");
+    which.className = "which";
+    which.textContent = [record.title || t("history.untitled"), record.company].filter(Boolean).join(" · ");
+    button.append(why, which);
+    button.addEventListener("click", () => openTracked({ profile: profile.id, job: record.jobKey }));
+    li.appendChild(button);
+    list.appendChild(li);
+  });
+
+  const more = $("weekMore");
+  const hidden = items.length - WEEK_SHOWN;
+  more.hidden = hidden <= 0 && !strongMatches;
+  // The link opens Tracked jobs' "Needs attention", which lists the strong
+  // matches too, so the count is everything that's there.
+  if (hidden > 0) more.textContent = t("popup.weekMore", { count: items.length + strongMatches });
+  else if (strongMatches) more.textContent = t("popup.weekStrong", { count: strongMatches });
+  more.onclick = () => openTracked({ profile: profile.id, filter: "attention" });
+  $("weekPanel").hidden = !items.length && !strongMatches;
+}
+
+// --- backup reminder -------------------------------------------------------------
+
+// Everything lives in this browser, and uninstalling erases it. After this
+// many new tracked jobs without a backup, the popup says so, once in a while.
+const BACKUP_EVERY = 25;
+const BACKUP_SNOOZE_DAYS = 14;
+
+async function renderBackupNudge() {
+  const { backupState, backupNudgeSnoozedUntil } = await chrome.storage.local.get(["backupState", "backupNudgeSnoozedUntil"]);
+  const total = await JOB_FIT_EVALSTORE.countAll().catch(() => 0);
+  const since = total - ((backupState && backupState.jobs) || 0);
+  const show = since >= BACKUP_EVERY && !(backupNudgeSnoozedUntil > Date.now()) && $("setupBanner").hidden;
+  $("backupNudge").hidden = !show;
+  if (show) $("backupNudgeText").textContent = t(backupState ? "popup.backupSince" : "popup.backupNever", { count: backupState ? since : total });
 }
 
 async function init() {
@@ -639,6 +706,8 @@ async function init() {
   renderQueueStatus();
   checkModel();
   restoreLastSummary();
+  renderWeek();
+  renderBackupNudge();
   await checkPage();
   tabJob = await readTabJob();
   await renderThisJob();

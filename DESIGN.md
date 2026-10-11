@@ -82,6 +82,7 @@ job-fit-evaluator/
 ├── evalstore.js         # evaluated-job history records, cross-site duplicates
 ├── postingmeta.js       # JOB_FIT_META — requisition id, deadline, posting date, and their wording
 ├── vault.js             # JOB_FIT_VAULT — API key and allowed model addresses, out of reach of page scripts
+├── attention.js         # JOB_FIT_ATTENTION — what needs doing and why; Tracked jobs, the popup and the toolbar icon
 ├── images/              # Tino's drawings, copied from brand/ by tools/brand.js
 ├── icons/               # icon-16/32/48/128.png, rendered from brand/ by tools/brand.js
 ├── jobkey.js            # canonical job identity per page
@@ -1288,6 +1289,35 @@ CSS reached them. It's gone: every evaluation, whatever started it, now shows in
   to it and flashes it.
 
 ---
+
+## This week (2026-10-07)
+
+Retention, part one: bring people back for the jobs that need something, not to
+browse. Nothing new is stored about a job; it's all read from the records.
+
+**One set of rules, three places.** "Needs attention" lived in `history.js`. It moved to
+`attention.js` unchanged (an offer, an interview, closing within a week and not applied,
+a strong match not applied, no reply in 14 days), now with a `kind` and an `urgent`
+flag, and the date passed through instead of read inside, so the tests can fix "today".
+- **Tracked jobs** shows every rule's reason, as before. `?filter=attention` opens it on
+  that group.
+- **The popup's "This week"** shows the urgent ones: offers and interviews first, then
+  deadlines (soonest first), then silences (longest first). Three lead; the link to the
+  rest counts everything in "Needs attention", strong matches included, so the number
+  matches what opens.
+- **The toolbar icon** counts the urgent ones for the active profile, but only when the
+  queue is idle: the queue's own count (blue, amber when paused) wins while it works.
+  Coral `#A4462F` (white on it 6.0:1) so it doesn't read as a queue, with the reason in
+  the tooltip. It's redrawn after tracked-job writes settle (1.5 s), on profile or
+  language changes, and by an alarm just after each local midnight, since "closes in
+  2 days" changes with the date. `attentionBadge: false` (Settings) turns it off.
+
+Strong matches aren't urgent: a long search has dozens, and a count that never goes
+down stops meaning anything.
+
+**Backup reminder.** Everything lives in one browser profile, and uninstalling erases it.
+`exportAll` records `backupState: { at, jobs }`; the popup suggests a backup once there
+are 25 more tracked jobs than the last backup held, and "Later" snoozes it for 14 days.
 
 ## Evaluation history
 

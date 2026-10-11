@@ -171,6 +171,14 @@ that copy instead, and says so. It also warns when applications close within a w
 once lives in **Settings**, a full page with a section for each: profile and CV,
 salary, screening rules, model, the on-page button, language, and backups.
 
+**This week.** The popup also lists what needs doing across your tracked jobs: an
+offer to decide on, an interview, a posting that closes within a week and you haven't
+applied to, and applications with no reply in 14 days or more. Click one to open it in
+Tracked jobs. When nothing is being scored, the toolbar icon shows how many there are
+(in coral, with the reason in its tooltip). You can turn that count off in **Settings →
+On-page button and shortcut**. After 25 new tracked jobs without a backup, the popup
+also suggests making one.
+
 **On-page button (optional).** A card in the corner of job postings that evaluates the
 posting with one click, and already shows the score when you open a job you've scored
 before. It never evaluates on its own, and it's off everywhere until you turn it on:
