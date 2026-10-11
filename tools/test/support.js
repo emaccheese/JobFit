@@ -31,6 +31,9 @@ function makeChrome({ store = {}, granted = new Set() } = {}) {
   const sentToTabs = [];
   const removedPerms = [];
   const uninstallUrls = [];
+  // The toolbar icon's badge (not per-tab overrides), and alarms asked for.
+  const badge = { text: "", color: null, title: null };
+  const alarmsCreated = [];
   const ev = () => ({ addListener() {} });
 
   const local = {
@@ -114,14 +117,33 @@ function makeChrome({ store = {}, granted = new Set() } = {}) {
       },
       create() {},
     },
-    action: { async setBadgeText() {}, async setBadgeBackgroundColor() {}, async setTitle() {} },
-    alarms: { onAlarm: ev(), async get() { return null; }, async create() {}, async clear() {} },
+    action: {
+      async setBadgeText({ text, tabId }) {
+        if (tabId == null) badge.text = text;
+      },
+      async setBadgeBackgroundColor({ color, tabId }) {
+        if (tabId == null) badge.color = color;
+      },
+      async setTitle({ title, tabId }) {
+        if (tabId == null) badge.title = title;
+      },
+    },
+    alarms: {
+      onAlarm: ev(),
+      async get() {
+        return null;
+      },
+      async create(name, info) {
+        alarmsCreated.push({ name, info });
+      },
+      async clear() {},
+    },
     commands: { onCommand: ev() },
     webNavigation: { async getAllFrames() { return []; } },
     i18n: { getUILanguage: () => "en" },
     contextMenus: { create() {}, onClicked: ev(), removeAll(cb) { if (cb) cb(); } },
   };
-  return { chrome, store, granted, listeners, registered, sentToTabs, removedPerms, uninstallUrls };
+  return { chrome, store, granted, listeners, registered, sentToTabs, removedPerms, uninstallUrls, badge, alarmsCreated };
 }
 
 // A just-enough IndexedDB: open, one object store, get/put/delete, each in a

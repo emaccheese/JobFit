@@ -21,7 +21,9 @@ importScripts(
   "lmstudio-ui.js",
   "inject.js",
   "boards.js",
-  "ui-shared.js"
+  "ui-shared.js",
+  "postingmeta.js",
+  "attention.js"
 );
 
 // Messages this worker writes (errors, score-cap reasons, briefs) are in the
@@ -29,6 +31,8 @@ importScripts(
 // produces text waits for it, and follows it when it changes.
 const i18nReady = JOB_FIT_I18N.load();
 JOB_FIT_I18N.watch(setUninstallPage);
+// The badge's tooltip is in the interface language.
+JOB_FIT_I18N.watch(() => drawBadge());
 
 // Where Chrome sends someone who uninstalls: one question on Tino's site
 // (docs/goodbye.html), in their language. Only the language and the version
@@ -1567,14 +1571,68 @@ async function configuredTimeoutMs() {
   return (flexPossible ? Math.max(settings.timeoutSeconds, FLEX_MIN_TIMEOUT_SECONDS) : settings.timeoutSeconds) * 1000;
 }
 
+// The toolbar icon's badge. While the queue has work, its count (blue, or
+// amber when paused). When it's idle, how many of the active profile's tracked
+// jobs need something this week (attention.js: an offer, an interview, a
+// posting closing soon, no reply in two weeks), in coral, with the reason in
+// the tooltip. Settings can turn that second part off ("attentionBadge").
+const ATTENTION_ALARM = "jobfit-attention-day";
+const ATTENTION_COLOR = "#a4462f"; // coral, dark enough for white text (6.0:1)
+let queueBadge = { count: 0, state: null };
+
 async function setBadge(count, state) {
+  queueBadge = { count, state };
+  await drawBadge();
+}
+
+async function attentionCount() {
+  const { attentionBadge, activeProfileId } = await chrome.storage.local.get(["attentionBadge", "activeProfileId"]);
+  if (attentionBadge === false || !activeProfileId) return 0;
+  const records = await JOB_FIT_EVALSTORE.list(activeProfileId);
+  return JOB_FIT_ATTENTION.thisWeek(records).items.length;
+}
+
+async function drawBadge() {
   try {
-    await chrome.action.setBadgeText({ text: count ? String(count) : "" });
-    if (count) {
-      await chrome.action.setBadgeBackgroundColor({ color: state === "paused" ? "#9a6300" : "#2350c4" });
+    if (queueBadge.count) {
+      await chrome.action.setBadgeText({ text: String(queueBadge.count) });
+      await chrome.action.setBadgeBackgroundColor({ color: queueBadge.state === "paused" ? "#9a6300" : "#2350c4" });
+      await chrome.action.setTitle({ title: "Tino" });
+      return;
     }
+    await i18nReady;
+    const count = await attentionCount();
+    await chrome.action.setBadgeText({ text: count ? String(count) : "" });
+    if (count) await chrome.action.setBadgeBackgroundColor({ color: ATTENTION_COLOR });
+    await chrome.action.setTitle({ title: count ? `Tino — ${t("badge.attention", { count })}` : "Tino" });
   } catch (err) {
     // Badge is cosmetic; never let it break processing.
+  }
+}
+
+// A tracked job changing (a status, a new evaluation), the active profile or
+// the setting: redrawn once things settle, not on every write of a batch.
+let badgeTimer = null;
+function redrawBadgeSoon() {
+  clearTimeout(badgeTimer);
+  badgeTimer = setTimeout(drawBadge, 1500);
+}
+
+chrome.storage.onChanged.addListener((changes, area) => {
+  if (area !== "local") return;
+  const keys = Object.keys(changes);
+  if (keys.some((k) => k.startsWith("ev:") || k === "activeProfileId" || k === "attentionBadge")) redrawBadgeSoon();
+});
+
+// "Closes in 2 days" and "no reply in 14 days" change with the date, not with
+// any write: redrawn just after each local midnight.
+async function scheduleAttentionRedraw() {
+  const next = new Date();
+  next.setHours(24, 1, 0, 0);
+  try {
+    await chrome.alarms.create(ATTENTION_ALARM, { when: next.getTime() });
+  } catch (err) {
+    /* alarms unavailable: redrawn on the next change instead */
   }
 }
 
@@ -1822,6 +1880,10 @@ async function kick() {
 
 chrome.alarms.onAlarm.addListener((alarm) => {
   if (alarm.name === QUEUE_ALARM) kick();
+  if (alarm.name === ATTENTION_ALARM) {
+    drawBadge();
+    scheduleAttentionRedraw();
+  }
 });
 
 // Resume automatically after a browser restart or an extension reload: a batch
@@ -1829,11 +1891,15 @@ chrome.alarms.onAlarm.addListener((alarm) => {
 chrome.runtime.onStartup.addListener(() => {
   kick();
   syncFloatScripts();
+  drawBadge();
+  scheduleAttentionRedraw();
 });
 chrome.runtime.onInstalled.addListener((details) => {
   kick();
   // An update ships new files; re-register so the button runs the new ones.
   syncFloatScripts();
+  drawBadge();
+  scheduleAttentionRedraw();
   if (details.reason === "install") startFirstRunSetup();
 });
 

@@ -216,6 +216,11 @@ var JOB_FIT_EVALSTORE = (function () {
     return Object.keys(await chrome.storage.local.get(null)).filter((k) => k.startsWith(PREFIX));
   }
 
+  // How many tracked jobs there are, across every profile.
+  async function countAll() {
+    return (await allRecordKeys()).length;
+  }
+
   // Every tracked job, across every profile.
   async function exportRecords() {
     const keys = await allRecordKeys();
@@ -707,6 +712,7 @@ var JOB_FIT_EVALSTORE = (function () {
     remove,
     list,
     countForProfile,
+    countAll,
     removeAllForProfile,
     exportRecords,
     importRecord,
