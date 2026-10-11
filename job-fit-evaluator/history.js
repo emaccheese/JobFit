@@ -1210,60 +1210,10 @@ function onKeydown(e) {
 // Queue panel
 // ---------------------------------------------------------------------------
 
-// Days of silence after applying before a job is worth chasing. Two weeks is
-// the point past which most processes have either moved or gone quiet for good;
-// the row states the actual number so the rule is never magic.
-const SILENCE_DAYS = 14;
-
-// "Needs attention" is the page answering what to do next. Each rule carries
-// its own wording, because a list of jobs with no stated reason is just another
-// filter — the reason is the useful part.
-//
-// Ordered: the first match wins, most decisive first. Hard rejects are excluded
-// throughout — they are disqualified, not pending.
-const ATTENTION_RULES = [
-  {
-    test: (r) => r.status === "offer",
-    label: () => t("attention.offer"),
-  },
-  {
-    test: (r) => r.status === "interviewing",
-    label: () => t("attention.interview"),
-  },
-  {
-    // Ahead of the strong match: one that closes on Friday is the more urgent
-    // fact about it. Not for a skip — a deadline doesn't make it worth it.
-    test: (r) =>
-      (!r.status || r.status === "not_applied") &&
-      JOB_FIT_META.closingSoon(r.meta) != null &&
-      !(r.score != null && r.score < JOB_FIT_UI.AMBER_FROM),
-    label: (r) => {
-      const days = JOB_FIT_META.closingSoon(r.meta);
-      return days === 0 ? t("attention.closesToday") : t("attention.closesIn", { count: days });
-    },
-  },
-  {
-    // Deliberately reuses the card's green threshold: if the tool calls it a
-    // strong match, and you haven't acted, that is the thing to act on —
-    // unless applications have closed, and there's nothing left to act on.
-    test: (r) =>
-      (!r.status || r.status === "not_applied") &&
-      r.score != null &&
-      r.score >= JOB_FIT_UI.GREEN_FROM &&
-      !JOB_FIT_META.hasClosed(r.meta),
-    label: (r) => t("attention.strongMatch", { score: r.score }),
-  },
-  {
-    // Only "applied": ghosted means you have already decided it went quiet.
-    test: (r) => r.status === "applied" && r.appliedAt && daysSince(r.appliedAt) >= SILENCE_DAYS,
-    label: (r) => t("attention.noReply", { count: daysSince(r.appliedAt) }),
-  },
-];
-
+// What to do next, and why. The rules are in attention.js, shared with the
+// popup's "This week" and the toolbar icon's count.
 function attentionReason(record) {
-  if (record.hardReject) return null;
-  const rule = ATTENTION_RULES.find((r) => r.test(record));
-  return rule ? rule.label(record) : null;
+  return JOB_FIT_ATTENTION.reasonFor(record);
 }
 
 // The buckets a search actually moves through. Finer-grained filtering stays
@@ -2064,6 +2014,11 @@ async function init() {
 
   await loadProfile(els.profileSelect.value);
   if (wantedJob) revealJob(wantedJob);
+  // ?filter=attention from the popup's "This week": open on that group.
+  else if (Object.hasOwn(FILTERS, params.get("filter") || "")) {
+    groupFilter = params.get("filter");
+    render();
+  }
 }
 
 // Brings one job into view, clearing any filter that would hide it: selected in

@@ -91,6 +91,11 @@ var JOB_FIT_JOBKEY = (function () {
       if (jk) return `indeed:${jk}`;
     }
 
+    // Listing ids are Glassdoor's own, the same on every country site, so the
+    // key leaves out which one the job was opened on.
+    const glassdoorId = window.__jobFit && window.__jobFit.glassdoorJobId && window.__jobFit.glassdoorJobId();
+    if (glassdoorId) return `glassdoor:${glassdoorId}`;
+
     const workdayId =window.__jobFit && window.__jobFit.workdayJobId && window.__jobFit.workdayJobId();
     if (workdayId) return `workday:${workdayId}`;
 

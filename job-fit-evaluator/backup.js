@@ -42,6 +42,8 @@ var JOB_FIT_BACKUP = (function () {
       records: await JOB_FIT_EVALSTORE.exportRecords(),
     };
     download(JSON.stringify(payload, null, 2), "application/json", `tino-backup-${today()}.json`);
+    // For the popup's reminder: how many jobs the latest backup holds.
+    await chrome.storage.local.set({ backupState: { at: Date.now(), jobs: payload.records.length } });
     return t("backup.done", { profiles: payload.profiles.length, jobs: payload.records.length });
   }
 

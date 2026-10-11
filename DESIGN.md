@@ -83,6 +83,7 @@ job-fit-evaluator/
 ├── postingmeta.js       # JOB_FIT_META — requisition id, deadline, posting date, and their wording
 ├── vault.js             # JOB_FIT_VAULT — API key and allowed model addresses, out of reach of page scripts
 ├── prompts.js           # JOB_FIT_PROMPTS — the model's instructions per kind of request, shared with Tino Cloud
+├── attention.js         # JOB_FIT_ATTENTION — what needs doing and why; Tracked jobs, the popup and the toolbar icon
 ├── images/              # Tino's drawings, copied from brand/ by tools/brand.js
 ├── icons/               # icon-16/32/48/128.png, rendered from brand/ by tools/brand.js
 ├── jobkey.js            # canonical job identity per page
@@ -106,6 +107,8 @@ job-fit-evaluator/
 │   ├── lever.js
 │   ├── linkedin.js
 │   ├── eightfold.js     # Eightfold career sites (careers.qualcomm.com, …)
+│   ├── glassdoor.js     # Glassdoor's search page, on every country site
+│   ├── sites.js         # the site readers in order: the one list content.js, popup.js and float.js use
 │   └── generic.js       # fallback: largest text block
 └── README.md
 
@@ -846,6 +849,14 @@ read `innerText` — single-line values with no structure to preserve.)
   - **location** — first `·`-separated segment of that container's meta line (`Bellevue, WA · Reposted 1 week ago · 96 people clicked apply`).
   - Each field degrades to `null` independently — better to return nothing than to confidently label the posting with another job's title.
 - **eightfold.js** — Eightfold career sites on companies' own domains (careers.qualcomm.com, 2026-09-26). The search page is a single-page app: a results list on the left, and the selected job on the right, swapped in place as you click. Before this, those pages fell to the generic extractor, which sent the whole page (about 14,000 words on the Qualcomm page tested, including the results list) titled with the search, "C++ at Tijuana, B.C., Mexico | Qualcomm".
+- **glassdoor.js** — Glassdoor's search page (2026-10-06), on its country sites. Like Eightfold, a results list on the left and the selected job on the right; unlike it, **the address doesn't change** when you click another job.
+  - **Before this**, Glassdoor fell to the generic reader: 1,224 words for a 427-word description, with the menus, the other 29 jobs, and Glassdoor's "Your qualifications for this job" block, which is built from the reader's *own* Glassdoor profile, so the model read the user's skills as the job's requirements. Every job on one results page also shared one key (the address), so a second job showed the first one's saved score.
+  - **What it reads:** the detail pane's header (title, company, location) and its description (CSS-clamped behind "Show more", but all in the markup), plus the header's pay only when the employer gave it. Glassdoor otherwise shows its own estimate there, which the model would report as the posting's pay.
+  - **Which job:** the header's `jlid` (or the title's `jd-job-title-<id>`), then the selected card, then `jl` in a job page's address. Keyed `glassdoor:<id>`, the same on every country site. While the next job loads, the header can be new and the description old: the description's own `jlid` must match, otherwise it reads nothing yet.
+  - **Posted:** the card's compact age ("7 d", "+ 30 d", "24 h"). `parseAge` reads that form only from an extractor's field, never from posting text.
+  - **The on-page button** polls the address *and* the job on screen (`jobOnScreen()` in `sites.js`), so clicking another job updates the card.
+  - **Glassdoor board:** one per country can't be a single match pattern, so the board lists the Americas and the countries of Tino's languages.
+- **sites.js** — the readers in the order they're tried, used by the evaluation, the popup's lookup and the on-page button. They were three hand-kept lists before, so a new site could be added to one and missed in another. Callers decide on the generic fallback themselves (the on-page button only uses it with `JobPosting` markup). `safe` turns a reader that throws into "not this one" for the popup and the button; an evaluation still fails loudly.
   - **recognised** by Eightfold's app root `#pcsx` plus `#job-description-container`, not by hostname, like Jibe.
   - **text** — `#job-description-container`, a fixed id, where the classes carry a build hash (`position-title-3TPtN`), so only prefixes are matched.
   - **title / location** — `[class^="position-title-"]` and `[class^="position-location-"]` in the job header.
@@ -1287,6 +1298,35 @@ CSS reached them. It's gone: every evaluation, whatever started it, now shows in
   to it and flashes it.
 
 ---
+
+## This week (2026-10-07)
+
+Retention, part one: bring people back for the jobs that need something, not to
+browse. Nothing new is stored about a job; it's all read from the records.
+
+**One set of rules, three places.** "Needs attention" lived in `history.js`. It moved to
+`attention.js` unchanged (an offer, an interview, closing within a week and not applied,
+a strong match not applied, no reply in 14 days), now with a `kind` and an `urgent`
+flag, and the date passed through instead of read inside, so the tests can fix "today".
+- **Tracked jobs** shows every rule's reason, as before. `?filter=attention` opens it on
+  that group.
+- **The popup's "This week"** shows the urgent ones: offers and interviews first, then
+  deadlines (soonest first), then silences (longest first). Three lead; the link to the
+  rest counts everything in "Needs attention", strong matches included, so the number
+  matches what opens.
+- **The toolbar icon** counts the urgent ones for the active profile, but only when the
+  queue is idle: the queue's own count (blue, amber when paused) wins while it works.
+  Coral `#A4462F` (white on it 6.0:1) so it doesn't read as a queue, with the reason in
+  the tooltip. It's redrawn after tracked-job writes settle (1.5 s), on profile or
+  language changes, and by an alarm just after each local midnight, since "closes in
+  2 days" changes with the date. `attentionBadge: false` (Settings) turns it off.
+
+Strong matches aren't urgent: a long search has dozens, and a count that never goes
+down stops meaning anything.
+
+**Backup reminder.** Everything lives in one browser profile, and uninstalling erases it.
+`exportAll` records `backupState: { at, jobs }`; the popup suggests a backup once there
+are 25 more tracked jobs than the last backup held, and "Later" snoozes it for 14 days.
 
 ## Evaluation history
 

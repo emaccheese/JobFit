@@ -81,6 +81,19 @@
   .foot { display: flex; flex-direction: column; gap: 6px; }
   .foot button { width: 100%; }
   .tip { font-size: var(--fs-xs); color: var(--muted); text-align: center; }
+  /* This week: what needs doing across tracked jobs, most decisive first. */
+  .week { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 2px; }
+  .week button {
+    display: block; width: 100%; text-align: left; border: none; background: none; padding: 5px 6px; margin: 0 -6px;
+    border-radius: var(--radius-sm); font-size: var(--fs-xs); color: var(--text); cursor: pointer; width: calc(100% + 12px);
+  }
+  .week button:hover { background: var(--accent-soft); }
+  .week .why { display: block; font-weight: 600; color: var(--amber-fg); }
+  .week .why.good { color: var(--green-fg); }
+  .week .which { display: block; color: var(--muted); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .week-more { font-size: var(--fs-xs); margin-top: 6px; }
+  .callout.info { background: var(--accent-soft); border: 1px solid var(--accent-line); }
+  .callout .callout-actions { display: flex; gap: 6px; flex: 0 0 auto; }
 </style>
 </head>
 <body>
@@ -100,6 +113,13 @@
   <div class="callout warn" id="setupBanner" hidden>
     <span id="setupBannerText"></span>
     <button id="setupContinue" class="primary" type="button" data-i18n="popup.continueSetup">Continue setup</button>
+  </div>
+  <div class="callout info" id="backupNudge" hidden>
+    <span id="backupNudgeText"></span>
+    <span class="callout-actions">
+      <button id="backupNow" type="button" data-i18n="popup.backupNow">Back up</button>
+      <button id="backupLater" type="button" class="link" data-i18n="popup.backupLater">Later</button>
+    </span>
   </div>
   <div class="callout warn" id="cvMissing" hidden>
     <span data-i18n="popup.noCv">This profile has no CV summary yet, so scores won't mean much.</span>
@@ -160,6 +180,12 @@
     </div>
   </section>
 
+  <!-- This week: what needs doing across tracked jobs -->
+  <section class="panel" id="weekPanel" aria-labelledby="weekTitle" hidden>
+    <h2 class="panel-title" id="weekTitle" data-i18n="popup.thisWeek">This week</h2>
+    <ul class="week" id="weekList"></ul>
+    <button type="button" class="link week-more" id="weekMore" hidden></button>
+  </section>
   <div class="foot">
     <button id="viewHistory" type="button" data-i18n="popup.viewHistory">View tracked jobs</button>
     <div class="tip" id="evaluateTip"></div>
@@ -180,6 +206,7 @@
   <script src="postingmeta.js"></script>
   <script src="lmstudio-ui.js"></script>
   <script src="ui-shared.js"></script>
+  <script src="attention.js"></script>
   <script src="inject.js"></script>
   <script src="boards.js"></script>
   <script src="popup.js"></script>

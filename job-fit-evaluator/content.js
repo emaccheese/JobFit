@@ -79,53 +79,13 @@
     }
   }
 
+  // The site readers in extractors/sites.js, shared with the popup and the
+  // on-page button; the generic reader when none of them finds a posting.
   function dispatchExtraction() {
-    const host = location.hostname;
-    let result = null;
-    let extractorName = "generic";
-
-    // No host check on Greenhouse: as well as greenhouse.io itself, its board
-    // is embedded by company career sites on their own domain, so the
-    // extractor has to get a look regardless of hostname. It returns null
-    // quickly when its selectors aren't present.
-    if (window.__jobFit && window.__jobFit.greenhouse) {
-      result = window.__jobFit.greenhouse();
-      if (result) extractorName = "greenhouse";
-    }
-
-    if (!result && host.includes("linkedin.com") && window.__jobFit && window.__jobFit.linkedin) {
-      result = window.__jobFit.linkedin();
-      if (result) extractorName = "linkedin";
-    }
-
-    if (!result && host.includes("indeed.") && window.__jobFit && window.__jobFit.indeed) {
-      result = window.__jobFit.indeed();
-      if (result) extractorName = "indeed";
-    }
-
-    if (!result && window.__jobFit && window.__jobFit.workday) {
-      result = window.__jobFit.workday();
-      if (result) extractorName = "workday";
-    }
-
-    if (!result && window.__jobFit && window.__jobFit.jibe) {
-      result = window.__jobFit.jibe();
-      if (result) extractorName = "jibe";
-    }
-
-    // No host check, like Jibe: Eightfold runs companies' career sites on
-    // their own domains. It returns null at once without Eightfold's app root.
-    if (!result && window.__jobFit && window.__jobFit.eightfold) {
-      result = window.__jobFit.eightfold();
-      if (result) extractorName = "eightfold";
-    }
-
-    if (!result && window.__jobFit && window.__jobFit.generic) {
-      result = window.__jobFit.generic();
-      extractorName = "generic";
-    }
-
-    return { result, extractorName };
+    const site = window.__jobFit.readSite();
+    if (site) return { result: site.result, extractorName: site.name };
+    const result = window.__jobFit.generic ? window.__jobFit.generic() : null;
+    return { result, extractorName: "generic" };
   }
 
   // The posting's location from its schema.org JobPosting, for sites whose
