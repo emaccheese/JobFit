@@ -1,0 +1,113 @@
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Search insights — Tino</title>
+<link rel="stylesheet" href="ui.css">
+<style>
+  /* One series per chart, so one colour and no legend: Tino blue, and a step
+     lighter on the dark card (both checked for lightness and contrast against
+     their card). Values and labels stay in text colours. */
+  :root { --bar: #2350c4; --bar-track: #eef1f5; }
+  @media (prefers-color-scheme: dark) { :root { --bar: #5f8fe4; --bar-track: #262b33; } }
+
+  body { margin: 0; padding: 20px 20px 60px; font: 14px/1.5 var(--font); }
+  .wrap { max-width: 960px; margin: 0 auto; }
+  .page-head { display: flex; align-items: center; flex-wrap: wrap; gap: 10px 18px; margin-bottom: 6px; }
+  .page-head h1 { font-size: var(--fs-xl); margin: 0; }
+  .picker { display: flex; align-items: center; gap: 8px; }
+  .picker label { font-size: var(--fs-sm); color: var(--muted); }
+  .picker select { max-width: 260px; }
+  .head-actions { margin-left: auto; display: flex; gap: 8px; }
+  .lede { color: var(--muted); font-size: var(--fs-sm); margin: 0 0 16px; }
+
+  .card { background: var(--card); border: 1px solid var(--line); border-radius: var(--radius); padding: 16px 18px; margin-bottom: 14px; }
+  .card h2 { font-size: var(--fs-lg); margin: 0 0 4px; }
+  .card .sub { color: var(--muted); font-size: var(--fs-sm); margin: 0 0 14px; }
+  .note { color: var(--muted); font-size: var(--fs-xs); margin: 10px 0 0; }
+
+  /* Bars: thin, rounded at the data end, square at the baseline, on a faint
+     track; the number beside each is the label, in text colour. */
+  .bars { display: grid; grid-template-columns: minmax(110px, max-content) 1fr minmax(64px, max-content); gap: 10px 12px; align-items: center; margin: 0; }
+  .bars dt { font-size: var(--fs-sm); }
+  .bars dd { margin: 0; }
+  .bars .track { height: 16px; background: var(--bar-track); border-radius: 0 4px 4px 0; }
+  .bars .fill { height: 100%; background: var(--bar); border-radius: 0 4px 4px 0; min-width: 2px; }
+  .bars .fill.zero { min-width: 0; }
+  .bars .value { font-variant-numeric: tabular-nums; font-weight: 600; text-align: right; white-space: nowrap; }
+  .bars .detail { grid-column: 2 / 4; margin-top: -8px; font-size: var(--fs-xs); color: var(--muted); }
+  .bars .unknown { color: var(--muted); font-weight: 400; }
+
+  .tiles { display: grid; grid-template-columns: repeat(auto-fit, minmax(170px, 1fr)); gap: 10px; }
+  .tile { border: 1px solid var(--line); border-radius: var(--radius-sm); padding: 10px 12px; }
+  .tile .num { font-size: 24px; font-weight: 700; font-variant-numeric: tabular-nums; line-height: 1.2; }
+  .tile .what { font-size: var(--fs-xs); color: var(--muted); }
+
+  .finding { margin: 12px 0 0; padding: 8px 10px; border-radius: var(--radius-sm); background: var(--accent-soft); font-size: var(--fs-sm); }
+
+  /* On a narrow screen the table scrolls inside its card, not the page. */
+  .table-wrap { overflow-x: auto; }
+  table { width: 100%; border-collapse: collapse; font-size: var(--fs-sm); }
+  th, td { text-align: left; padding: 6px 8px; border-bottom: 1px solid var(--line); }
+  th { font-size: var(--fs-xs); color: var(--muted); font-weight: 600; }
+  td.n, th.n { text-align: right; font-variant-numeric: tabular-nums; }
+  tbody th { font-weight: 400; color: var(--text); font-size: var(--fs-sm); }
+  tbody tr:last-child td { border-bottom: none; }
+
+  .empty { background: var(--card); border: 1px dashed var(--border); border-radius: 8px; padding: 36px 28px; text-align: center; color: var(--muted); }
+  .empty img { display: block; width: 120px; margin: 0 auto 10px; }
+  .empty h2 { color: var(--text); font-size: var(--fs-lg); margin: 0 0 8px; }
+  .empty p { margin: 0 auto 14px; max-width: 520px; }
+
+  @media (max-width: 560px) {
+    body { padding: 14px 16px 40px; }
+    .head-actions { margin-left: 0; }
+    .bars { grid-template-columns: minmax(90px, max-content) 1fr minmax(52px, max-content); }
+    th, td { padding: 6px 5px; }
+    .card { padding: 14px; }
+  }
+</style>
+</head>
+<body>
+  <div class="wrap">
+    <header class="page-head">
+      <h1 data-i18n="insights.title">Search insights</h1>
+      <div class="picker">
+        <label for="profileSelect" data-i18n="history.profile">Profile</label>
+        <select id="profileSelect"></select>
+      </div>
+      <div class="picker">
+        <label for="periodSelect" data-i18n="insights.period">Period</label>
+        <select id="periodSelect">
+          <option value="" data-i18n="insights.allTime">All time</option>
+          <option value="90" data-i18n="insights.last90">Last 90 days</option>
+          <option value="30" data-i18n="insights.last30">Last 30 days</option>
+        </select>
+      </div>
+      <div class="head-actions">
+        <button id="openTracked" type="button" data-i18n="insights.backToTracked">Tracked jobs</button>
+      </div>
+    </header>
+    <p class="lede" data-i18n="insights.lede">From your tracked jobs and their statuses, worked out in this browser. Keep statuses up to date in Tracked jobs and this page follows.</p>
+    <main id="content" aria-live="polite"></main>
+  </div>
+
+  <script src="locales/en.js"></script>
+  <script src="locales/es.js"></script>
+  <script src="locales/fr.js"></script>
+  <script src="locales/pt.js"></script>
+  <script src="i18n.js"></script>
+  <script src="geo.js"></script>
+  <script src="defaults.js"></script>
+  <script src="provider.js"></script>
+  <script src="keywords.js"></script>
+  <script src="profiles.js"></script>
+  <script src="evalstore.js"></script>
+  <script src="postingmeta.js"></script>
+  <script src="ui-shared.js"></script>
+  <script src="attention.js"></script>
+  <script src="insights.js"></script>
+  <script src="insights-page.js"></script>
+</body>
+</html>

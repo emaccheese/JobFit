@@ -1968,6 +1968,9 @@ async function init() {
   });
 
   document.getElementById("exportCsv").addEventListener("click", exportCsv);
+  document.getElementById("openInsights").addEventListener("click", () => {
+    window.location.href = `insights.html?${new URLSearchParams({ profile: viewProfileId }).toString()}`;
+  });
   document.getElementById("openSettings").addEventListener("click", () => openSettings());
 
   // Keyboard shortcuts, and the list of them.

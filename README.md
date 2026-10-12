@@ -179,6 +179,16 @@ Tracked jobs. When nothing is being scored, the toolbar icon shows how many ther
 On-page button and shortcut**. After 25 new tracked jobs without a backup, the popup
 also suggests making one.
 
+**Search insights** (the button at the top of Tracked jobs) shows whether your search
+is working, from the statuses you set:
+- how many jobs you evaluated, applied to, interviewed for and got offers from;
+- how many applications got a reply, how long replies take, and how many went quiet;
+- whether Tino's high scores actually lead to interviews;
+- which sites and companies respond to you.
+
+Choose all time or the last 30 or 90 days. It's worked out in your browser from what
+Tino already keeps.
+
 **On-page button (optional).** A card in the corner of job postings that evaluates the
 posting with one click, and already shows the score when you open a job you've scored
 before. It never evaluates on its own, and it's off everywhere until you turn it on:
