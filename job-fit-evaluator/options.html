@@ -410,6 +410,24 @@
           <button id="importData" type="button" data-i18n="history.restore">Restore from backup…</button>
           <input id="importFile" type="file" accept="application/json,.json" hidden>
         </div>
+        <h3 data-i18n="sync.title">Sync across your computers</h3>
+        <div class="field">
+          <label class="row" style="gap:8px; align-items:flex-start; flex-wrap:nowrap;">
+            <input id="syncEnabled" type="checkbox" style="margin-top:4px;" aria-describedby="syncHint">
+            <span><span class="field-label" style="display:inline; margin:0;" data-i18n="sync.toggle">Sync profiles through your Chrome account</span>
+            <span class="hint" id="syncHint" style="display:block;" data-i18n="sync.hint">Profiles (CV summary, salary, screening rules), the language and the toolbar count stay the same on every computer where you turn this on, when you're signed in to Chrome with sync on. Google keeps the synced copy with your Chrome data. Tracked jobs stay on each computer (a backup moves them), and model settings and your OpenAI key never sync.</span></span>
+          </label>
+        </div>
+        <div class="status-box neutral" id="syncConflict" role="alert" hidden>
+          <p id="syncConflictText" style="margin:0 0 8px;"></p>
+          <div class="actions">
+            <button id="syncKeepRemote" type="button" class="primary" data-i18n="sync.keepRemote">Use the synced version</button>
+            <button id="syncKeepLocal" type="button" data-i18n="sync.keepLocal">Keep this computer's</button>
+          </div>
+        </div>
+        <div class="hint" id="syncStatus" role="status" aria-live="polite"></div>
+        <div class="actions"><button id="syncRemove" type="button" class="link" data-i18n="sync.remove">Remove the synced copy from your Google account</button></div>
+
         <h3 data-i18n="history.probe">Extraction coverage</h3>
         <p class="hint" data-i18n="settings.probeHint">How often job pages carried structured data that could have filled in something the extractor missed. Useful when reporting a site that reads badly.</p>
         <div class="actions"><button id="probeReport" type="button" data-i18n="settings.showReport">Show report</button></div>
@@ -429,6 +447,7 @@
   <script src="provider.js"></script>
   <script src="keywords.js"></script>
   <script src="profiles.js"></script>
+  <script src="sync.js"></script>
   <script src="evalstore.js"></script>
   <script src="lmstudio-ui.js"></script>
   <script src="ui-shared.js"></script>

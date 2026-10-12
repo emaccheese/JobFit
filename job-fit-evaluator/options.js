@@ -1281,6 +1281,44 @@ function wireProfileButtons() {
   setupProfileDelete();
 }
 
+// Sync (sync.js, run by the service worker). This page only switches it, shows
+// how it's going, and passes on the answer to a first-time conflict.
+async function renderSync() {
+  const { syncEnabled, syncStatus, syncConflict } = await chrome.storage.local.get(["syncEnabled", "syncStatus", "syncConflict"]);
+  const on = syncEnabled === true;
+  $("syncEnabled").checked = on;
+  const conflict = on && syncConflict && Array.isArray(syncConflict.profiles) && syncConflict.profiles.length ? syncConflict : null;
+  $("syncConflict").hidden = !conflict;
+  if (conflict) {
+    const names = JOB_FIT_I18N.list(conflict.profiles.map((p) => `“${p.name}”`));
+    $("syncConflictText").textContent = t("sync.conflict", { count: conflict.profiles.length, names });
+  }
+  let status = "";
+  if (on && syncStatus && syncStatus.error) status = t(syncStatus.error === "quota" ? "sync.tooBig" : "sync.failed");
+  else if (on && syncStatus && syncStatus.at) status = t("sync.lastSynced", { when: JOB_FIT_I18N.formatDate(syncStatus.at, { month: "short", day: "numeric", hour: "numeric", minute: "2-digit" }) });
+  else if (on) status = t("sync.starting");
+  $("syncStatus").textContent = status;
+}
+
+function setupSync() {
+  $("syncEnabled").addEventListener("change", (e) => chrome.storage.local.set({ syncEnabled: e.target.checked }));
+  const answer = (choice) => chrome.storage.local.set({ syncResolve: { choice, at: Date.now() } });
+  $("syncKeepRemote").addEventListener("click", () => answer("remote"));
+  $("syncKeepLocal").addEventListener("click", () => answer("local"));
+  JOB_FIT_UI.armConfirm($("syncRemove"), {
+    confirmLabel: t("sync.removeConfirm"),
+    onConfirm: async () => {
+      await chrome.storage.local.set({ syncEnabled: false });
+      await JOB_FIT_SYNC.removeSynced();
+      showDataStatus(t("sync.removed"));
+    },
+  });
+  chrome.storage.onChanged.addListener((changes, area) => {
+    if (area === "local" && (changes.syncEnabled || changes.syncStatus || changes.syncConflict)) renderSync();
+  });
+  renderSync();
+}
+
 // The toolbar icon's weekly count (background.js drawBadge). On unless turned off.
 async function setupAttentionBadge() {
   const box = $("attentionBadge");
@@ -1316,6 +1354,7 @@ async function init() {
   });
   renderTimingHint();
   setupAttentionBadge();
+  setupSync();
   checkModel();
   $("changeShortcut").addEventListener("click", () => chrome.tabs.create({ url: "chrome://extensions/shortcuts" }));
   setupRail();

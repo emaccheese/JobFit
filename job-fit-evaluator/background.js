@@ -16,6 +16,7 @@ importScripts(
   "keywords.js",
   "screening.js",
   "profiles.js",
+  "sync.js",
   "evalstore.js",
   "queue.js",
   "lmstudio-ui.js",
@@ -1624,6 +1625,51 @@ chrome.storage.onChanged.addListener((changes, area) => {
   if (keys.some((k) => k.startsWith("ev:") || k === "activeProfileId" || k === "attentionBadge")) redrawBadgeSoon();
 });
 
+// --- sync (sync.js): opt-in, per computer ------------------------------------
+//
+// One round at a time, a moment after changes settle: Settings saves as you
+// type, and each save would otherwise be a write to Chrome Sync, which allows
+// only so many a minute.
+let syncChain = Promise.resolve();
+let syncTimer = null;
+
+function runSync(task) {
+  syncChain = syncChain.then(task).catch((err) => console.warn("[Tino] sync failed", err));
+  return syncChain;
+}
+
+async function syncIsOn() {
+  return (await chrome.storage.local.get("syncEnabled")).syncEnabled === true;
+}
+
+function syncSoon(delayMs = 2000) {
+  clearTimeout(syncTimer);
+  syncTimer = setTimeout(() => runSync(async () => (await syncIsOn()) && JOB_FIT_SYNC.syncNow()), delayMs);
+}
+
+chrome.storage.onChanged.addListener((changes, area) => {
+  if (area === "sync") {
+    syncSoon(500);
+    return;
+  }
+  if (area !== "local") return;
+  if (changes.syncEnabled) {
+    if (changes.syncEnabled.newValue === true) runSync(() => JOB_FIT_SYNC.syncNow());
+    else runSync(() => JOB_FIT_SYNC.disable());
+    return;
+  }
+  // The user's answer to a first-time conflict, from Settings.
+  if (changes.syncResolve && changes.syncResolve.newValue) {
+    const choice = changes.syncResolve.newValue.choice;
+    runSync(async () => {
+      await chrome.storage.local.remove("syncResolve");
+      if (await syncIsOn()) await JOB_FIT_SYNC.resolve(choice);
+    });
+    return;
+  }
+  if (changes.profiles || JOB_FIT_SYNC.PREF_KEYS.some((k) => changes[k])) syncSoon();
+});
+
 // "Closes in 2 days" and "no reply in 14 days" change with the date, not with
 // any write: redrawn just after each local midnight.
 async function scheduleAttentionRedraw() {
@@ -1893,6 +1939,7 @@ chrome.runtime.onStartup.addListener(() => {
   syncFloatScripts();
   drawBadge();
   scheduleAttentionRedraw();
+  syncSoon(0);
 });
 chrome.runtime.onInstalled.addListener((details) => {
   kick();

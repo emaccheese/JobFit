@@ -25,7 +25,9 @@ function clone(value) {
 }
 
 // chrome.* with an in-memory storage.local and every listener captured.
-function makeChrome({ store = {}, granted = new Set() } = {}) {
+// `syncStore`: chrome.storage.sync's contents, which tests share between two
+// "computers"; `syncFails` makes its writes throw (Chrome's size limit).
+function makeChrome({ store = {}, granted = new Set(), syncStore = {}, syncFails = null } = {}) {
   const listeners = { message: [], storage: [], added: [], removed: [] };
   const registered = new Map();
   const sentToTabs = [];
@@ -62,9 +64,32 @@ function makeChrome({ store = {}, granted = new Set() } = {}) {
     },
   };
 
+  const sync = {
+    async get(keys) {
+      if (keys == null) return clone(syncStore);
+      const list = typeof keys === "string" ? [keys] : Array.isArray(keys) ? keys : Object.keys(keys);
+      const out = {};
+      list.forEach((k) => {
+        if (k in syncStore) out[k] = clone(syncStore[k]);
+      });
+      return out;
+    },
+    async set(obj) {
+      if (syncFails) throw new Error(syncFails);
+      Object.entries(obj).forEach(([k, v]) => (syncStore[k] = clone(v)));
+    },
+    async remove(k) {
+      (Array.isArray(k) ? k : [k]).forEach((x) => delete syncStore[x]);
+    },
+    async clear() {
+      Object.keys(syncStore).forEach((k) => delete syncStore[k]);
+    },
+  };
+
   const chrome = {
     storage: {
       local,
+      sync,
       session: { async get() { return {}; }, async set() {} },
       onChanged: { addListener: (f) => listeners.storage.push(f) },
     },

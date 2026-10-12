@@ -189,6 +189,13 @@ is working, from the statuses you set:
 Choose all time or the last 30 or 90 days. It's worked out in your browser from what
 Tino already keeps.
 
+**Sync across your computers** (optional, **Settings → Data**). Your profiles, the
+language and the toolbar count follow you to every Chrome where you're signed in with
+sync on and turn this on. They're stored by Google with your Chrome data. Tracked jobs
+stay on each computer (a backup moves them), and the model settings and your OpenAI key
+never sync. The first time, if a profile differs between this computer and the synced
+copy, Settings asks which one to keep instead of overwriting either.
+
 **On-page button (optional).** A card in the corner of job postings that evaluates the
 posting with one click, and already shows the score when you open a job you've scored
 before. It never evaluates on its own, and it's off everywhere until you turn it on:
