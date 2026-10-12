@@ -83,6 +83,9 @@ job-fit-evaluator/
 ├── postingmeta.js       # JOB_FIT_META — requisition id, deadline, posting date, and their wording
 ├── vault.js             # JOB_FIT_VAULT — API key and allowed model addresses, out of reach of page scripts
 ├── attention.js         # JOB_FIT_ATTENTION — what needs doing and why; Tracked jobs, the popup and the toolbar icon
+├── insights.html        # Search insights: is the search working?
+├── insights.js          # JOB_FIT_INSIGHTS — the counting (funnel, replies, score bands, sites, companies)
+├── insights-page.js     # draws it
 ├── images/              # Tino's drawings, copied from brand/ by tools/brand.js
 ├── icons/               # icon-16/32/48/128.png, rendered from brand/ by tools/brand.js
 ├── jobkey.js            # canonical job identity per page
@@ -1318,6 +1321,40 @@ down stops meaning anything.
 **Backup reminder.** Everything lives in one browser profile, and uninstalling erases it.
 `exportAll` records `backupState: { at, jobs }`; the popup suggests a backup once there
 are 25 more tracked jobs than the last backup held, and "Later" snoozes it for 14 days.
+
+## Search insights (2026-10-11)
+
+Retention, part two: a page that answers "is my search working?", from Tracked jobs'
+header. One profile, a period (all, 90 or 30 days, kept in the address), five cards:
+the funnel (evaluated, applied, interviews, offers, with the rate at each step),
+replies (reply rate, typical days to a reply, no reply after 14 days, still waiting),
+the interview rate by score band, and tables by site and by company.
+
+**Milestones, because only the current status was kept.** A job that went to
+interview and was then rejected just said "Rejected", so the funnel would undercount
+exactly the interviews that matter. `setStatus` now stamps `interviewAt` (on
+Interview scheduled or Offer) and `offerAt` (on Offer) once, and keeps them through
+later statuses. Moving back to Applied or Not applied is a correction and clears them.
+Older rejections can't be recovered: the page says how many might hide an interview
+(rejected before `MILESTONES_SINCE`).
+
+**Honest numbers.**
+- A rate from fewer than 3 applications shows "too few to tell" instead of 0% or 100%.
+- The score finding (high scores vs everything below green) only appears once both
+  sides have enough applications, and says plainly when high scores *don't* do better,
+  which points at the profile rather than at the user.
+- "Replied" means an interview, an offer or a rejection; ghosted and withdrawn are no
+  reply. Days to a reply run from `appliedAt` to the interview date, or to the status
+  change for a rejection.
+
+**Charts.** One series each, so one colour and no legend: Tino blue on the light card,
+`#5F8FE4` on the dark one (both pass the lightness and contrast checks). Thin bars on a
+faint track with the number beside each in text colour, and the exact values in a
+tooltip and in the detail line, so nothing depends on reading a bar's length. Site
+and company are tables, which scroll inside their card on a phone.
+
+`siteLabel` was missing Glassdoor and Eightfold (their jobs said "another site"); both
+are named now.
 
 ## Evaluation history
 

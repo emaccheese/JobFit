@@ -173,6 +173,18 @@ var JOB_FIT_EVALSTORE = (function () {
     // a later move to Rejected shouldn't overwrite when you actually applied.
     if (status !== "not_applied" && !existing.appliedAt) patch.appliedAt = Date.now();
     if (status === "not_applied") patch.appliedAt = null;
+    // Milestones, kept when the job moves on: an interview that ends in a
+    // rejection still happened, and Search insights counts it. Only the status
+    // is otherwise kept, so without these "Rejected" would erase it. Moving
+    // back before a milestone is a correction, so it clears it.
+    const now = patch.statusChangedAt;
+    if ((status === "interviewing" || status === "offer") && !existing.interviewAt) patch.interviewAt = now;
+    if (status === "offer" && !existing.offerAt) patch.offerAt = now;
+    if (status === "not_applied" || status === "applied") {
+      patch.interviewAt = null;
+      patch.offerAt = null;
+    }
+    if (status === "interviewing") patch.offerAt = null;
     return update(profileId, jobKey, patch);
   }
 
@@ -677,6 +689,7 @@ var JOB_FIT_EVALSTORE = (function () {
     greenhouse: "Greenhouse",
     indeed: "Indeed",
     workday: "Workday",
+    glassdoor: "Glassdoor",
     jibe: null,
     content: "Greenhouse portal",
   };
@@ -685,7 +698,7 @@ var JOB_FIT_EVALSTORE = (function () {
     const key = String(record.jobKey || "");
     const prefix = key.split(":")[0];
     if (SITE_LABELS[prefix]) return SITE_LABELS[prefix];
-    if (prefix === "jibe") return tr("site.careerSite", null, "company career site");
+    if (prefix === "jibe" || prefix === "eightfold") return tr("site.careerSite", null, "company career site");
     if (prefix === "url") return key.slice(4).split("/")[0] || tr("site.another", null, "another site");
     try {
       return new URL(record.url).hostname.replace(/^www\./, "");
