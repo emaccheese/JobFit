@@ -17,13 +17,15 @@
     "storage",
     "unlimitedStorage",
     "alarms",
-    "webNavigation"
+    "webNavigation",
+    "identity"
   ],
   "host_permissions": [
     "http://localhost/*",
     "http://127.0.0.1/*",
     "*://*.greenhouse.io/*",
-    "https://api.openai.com/*"
+    "https://api.openai.com/*",
+    "https://*.supabase.co/*"
   ],
   "optional_host_permissions": [
     "https://*/*",

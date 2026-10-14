@@ -16,11 +16,13 @@ they evaluate.
 | `scripting` | To run the posting reader in the tab the user asked to evaluate, and to register the optional on-page button on the job sites the user switched it on for. |
 | `storage` | To keep the user's profiles, settings and tracked jobs in the browser. Only if the user turns on sync in Settings, profiles and two preferences also go to `chrome.storage.sync`, so their other Chrome browsers can use them. |
 | `unlimitedStorage` | Tracked jobs keep each posting's text, so a long job search can pass Chrome's default 10 MB limit; without it, saving would start failing. |
-| `alarms` | To resume the evaluation queue after Chrome suspends the extension's background worker. |
+| `alarms` | To resume the evaluation queue after Chrome suspends the extension's background worker, and when a pause ends (Tino Cloud's hourly limit, the OpenAI daily budget at midnight). |
+| `identity` | For Tino Cloud's optional "Continue with Google" sign-in, which runs in Chrome's own sign-in window (`launchWebAuthFlow`). |
 | `webNavigation` | To find the job-board frame inside company career sites that embed a Greenhouse board (`getAllFrames`), so the posting inside it can be read. |
 | Host: `http://localhost/*`, `http://127.0.0.1/*` | To reach a model running on the user's own computer (LM Studio). |
 | Host: `*://*.greenhouse.io/*` | To read Greenhouse job boards embedded in company career sites, which load in a frame from greenhouse.io. |
 | Host: `https://api.openai.com/*` | For users who choose OpenAI, with their own API key, to score postings. |
+| Host: `https://*.supabase.co/*` | Tino Cloud's server (sign-in and scoring), for users who choose it. Narrowed to the project's own address once it exists. |
 | Optional host: `https://*/*`, `http://*/*` | Requested one site or job board at a time, only when the user switches on the on-page button there. Never requested broadly; the user can give each one back. |
 
 **Remote code:** No. All code ships in the package; nothing is loaded or evaluated from elsewhere.
@@ -29,16 +31,17 @@ they evaluate.
 
 What Tino handles, in the dashboard's categories. "Collected" there includes
 data sent off the device, which happens only when the user evaluates with a
-model off their computer (another computer they allowed, or OpenAI with their
-own key). Disclosing these conservatively is the safer reading.
+model off their computer (another computer they allowed, OpenAI with their
+own key, or Tino Cloud). Disclosing these conservatively is the safer reading.
 
 | Category | Handled? | What and why |
 |---|---|---|
-| Personally identifiable information | Yes | The CV summary the user writes (it may include their name). Sent only to the model the user chose, to score postings, and, only if the user turns on sync, kept in their Chrome Sync data. |
+| Personally identifiable information | Yes | The CV summary the user writes (it may include their name). Sent only to the model the user chose, to score postings, and, only if the user turns on sync, kept in their Chrome Sync data. With Tino Cloud: the user's email address, kept by Tino's server for the account. |
 | Website content | Yes | The text of job postings the user asks Tino to evaluate. Sent only to the model the user chose. |
 | Location | Yes, optional | City and region, only if the user turns that on; sent to the model with the profile. |
-| Authentication information | Yes | The user's OpenAI API key, if they add one. Stored locally out of reach of web pages; sent only to OpenAI. |
-| Health, financial and payment, personal communications, web history, user activity | No | |
+| Authentication information | Yes | The user's OpenAI API key, if they add one, and the Tino Cloud sign-in session, if they sign in. Both stored locally out of reach of web pages; the key sent only to OpenAI, the session only to Tino's server. |
+| User activity | Yes, with Tino Cloud | How many evaluations a Tino Cloud user ran per day, and their tokens, for the credit. Nothing about which pages or postings. |
+| Health, financial and payment, personal communications, web history | No | |
 
 **Certifications** (all true for Tino):
 - I do not sell or transfer user data to third parties, outside of the approved use cases.

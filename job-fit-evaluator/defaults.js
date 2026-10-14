@@ -97,6 +97,27 @@ Target: the roles, seniority and locations you actually want.`,
     { id: "balanced", label: "Balanced", model: "gpt-6-sol", blurb: "Reliable scoring at a low cost.", price: { standard: [2, 10], flex: [1, 5] } },
     { id: "best", label: "Best", model: "gpt-6-astra", blurb: "Most capable. For the postings you're serious about.", price: { standard: [10, 50], flex: [5, 25] } },
   ],
+  // Effort levels: the one choice of model and reasoning effort, for Tino
+  // Cloud and for your own OpenAI key alike. Higher levels read postings more
+  // carefully and cost more per evaluation. On Tino Cloud the server has the
+  // same table (cloud/supabase/migrations, `levels`) and decides from it;
+  // `estCost` is only a first guess at a typical evaluation, in dollars,
+  // until real costs come back.
+  modelLevels: [
+    { id: "quick", model: "gpt-6-luna", effort: "low", estCost: 0.001 },
+    { id: "careful", model: "gpt-6-luna", effort: "medium", estCost: 0.002 },
+    { id: "thorough", model: "gpt-6-sol", effort: "low", estCost: 0.025 },
+    { id: "deep", model: "gpt-6-sol", effort: "medium", estCost: 0.04 },
+  ],
+  modelLevel: "quick",
+  // Tino Cloud: the Supabase project the extension talks to. Empty until the
+  // project exists, and then Tino Cloud is offered as "coming soon" only.
+  // `publishableKey` is Supabase's public client key (it identifies the
+  // project; what a user may do is decided by their own session).
+  cloud: {
+    url: "",
+    publishableKey: "",
+  },
   expectedSalary: {
     USD: { min: null, max: null },
     CAD: { min: null, max: null },

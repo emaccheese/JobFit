@@ -28,7 +28,7 @@
     <article class="doc" data-lang="en" lang="en">
       <h1>Privacy policy</h1>
       <p class="updated">Last updated: October 1, 2026</p>
-      <p>Tino is a browser extension that scores job postings against your CV. It's built so your information stays with you. There's no account, no analytics and no advertising, and Tino doesn't run any servers: the developer receives nothing from your use of the extension.</p>
+      <p>Tino is a browser extension that scores job postings against your CV. It's built so your information stays with you. There's no analytics and no advertising, and you don't need an account: with LM Studio or your own OpenAI key, the developer receives nothing from your use of the extension. The one exception is Tino Cloud, which is optional and described below.</p>
 
       <h2>What Tino keeps, and where</h2>
       <ul>
@@ -44,9 +44,13 @@
         <li><strong>LM Studio on this computer:</strong> nothing leaves your computer.</li>
         <li><strong>A model on another computer:</strong> your CV summary, expected salary, the relevant preferences and the posting are sent to that computer. Tino sends only to an address you've explicitly allowed, and outside your local network only over an encrypted (https) connection.</li>
         <li><strong>OpenAI, with your own API key:</strong> the same information is sent to OpenAI under your account, and OpenAI's API terms and data policies apply. Tino asks OpenAI not to store the requests, and never sends your key anywhere else.</li>
+        <li><strong>Tino Cloud, if you sign in:</strong> the same information goes to Tino's server, which passes it to OpenAI to be scored and keeps none of it. Tino asks OpenAI not to store the requests; under OpenAI's API data policy, OpenAI may still keep them for up to 30 days to check for abuse.</li>
       </ul>
       <p>Your city and region are included only if you turn that on.</p>
       <p><strong>Sync across your computers</strong> (off unless you turn it on): your profiles (CV summary, expected salary, screening rules), the interface language and the toolbar count setting are saved to your Google account through Chrome Sync, so your other computers can use them. Google keeps that copy under its own privacy policy. Tracked jobs, model settings and your OpenAI key never sync. Settings › Data turns it off and can remove the synced copy.</p>
+
+      <h2>Your Tino Cloud account</h2>
+      <p>If you sign in to Tino Cloud (with Google or a code sent to your email), Tino's server keeps your email address, your credit balance and its history, how many evaluations you ran each day and how many tokens they used, and whether you asked to hear when recharges open. It never keeps your CV summary, your profile, your salary expectations, the postings or the scores. The server is hosted by Supabase. You can delete the account in Settings › Model, which erases all of it; signing out alone keeps it.</p>
 
       <h2>The on-page button</h2>
       <p>If you switch it on for a job board or a site, Tino asks Chrome for permission to run there and looks at the job pages you open, to show a saved score or offer an evaluation. It sends nothing anywhere unless you evaluate. You can switch it off, and give the permission back, at any time.</p>
@@ -80,7 +84,7 @@
     <article class="doc" data-lang="es" lang="es">
       <h1>Política de privacidad</h1>
       <p class="updated">Última actualización: 1 de octubre de 2026</p>
-      <p>Tino es una extensión del navegador que evalúa vacantes frente a tu CV. Está hecha para que tu información se quede contigo. No hay cuenta, ni analítica, ni publicidad, y Tino no opera ningún servidor: el desarrollador no recibe nada de tu uso de la extensión.</p>
+      <p>Tino es una extensión del navegador que evalúa vacantes frente a tu CV. Está hecha para que tu información se quede contigo. No hay analítica ni publicidad, y no necesitas una cuenta: con LM Studio o tu propia clave de OpenAI, el desarrollador no recibe nada de tu uso de la extensión. La única excepción es Tino Cloud, que es opcional y se describe abajo.</p>
 
       <h2>Qué guarda Tino, y dónde</h2>
       <ul>
@@ -96,9 +100,13 @@
         <li><strong>LM Studio en esta computadora:</strong> nada sale de tu computadora.</li>
         <li><strong>Un modelo en otra computadora:</strong> el resumen de tu CV, tu sueldo esperado, las preferencias relevantes y la vacante se envían a esa computadora. Tino solo envía a una dirección que hayas permitido expresamente y, fuera de tu red local, solo por una conexión cifrada (https).</li>
         <li><strong>OpenAI, con tu propia clave de API:</strong> la misma información se envía a OpenAI bajo tu cuenta, y aplican los términos y las políticas de datos de la API de OpenAI. Tino le pide a OpenAI que no guarde las solicitudes, y nunca envía tu clave a ningún otro lugar.</li>
+        <li><strong>Tino Cloud, si inicias sesión:</strong> la misma información va al servidor de Tino, que la pasa a OpenAI para evaluarla y no guarda nada de ella. Tino le pide a OpenAI que no guarde las solicitudes; según la política de datos de la API de OpenAI, OpenAI aun así puede conservarlas hasta 30 días para detectar abusos.</li>
       </ul>
       <p>Tu ciudad y región solo se incluyen si activas esa opción.</p>
       <p><strong>Sincronizar entre tus computadoras</strong> (desactivado salvo que lo actives): tus perfiles (resumen del CV, sueldo esperado, reglas de filtrado), el idioma y el ajuste del conteo del icono se guardan en tu cuenta de Google mediante la sincronización de Chrome, para que tus otras computadoras puedan usarlos. Google guarda esa copia según su propia política de privacidad. Los empleos guardados, la configuración del modelo y tu clave de OpenAI nunca se sincronizan. En Configuración › Datos puedes desactivarlo y quitar la copia sincronizada.</p>
+
+      <h2>Tu cuenta de Tino Cloud</h2>
+      <p>Si inicias sesión en Tino Cloud (con Google o con un código enviado a tu correo), el servidor de Tino guarda tu correo electrónico, tu saldo de crédito y su historial, cuántas evaluaciones hiciste cada día y cuántos tokens usaron, y si pediste que te avisaran cuando haya recargas. Nunca guarda tu resumen de CV, tu perfil, tus expectativas de sueldo, las vacantes ni las notas. El servidor está alojado en Supabase. Puedes eliminar la cuenta en Configuración › Modelo, lo que borra todo; cerrar sesión no la borra.</p>
 
       <h2>El botón en la página</h2>
       <p>Si lo activas para un portal de empleo o un sitio, Tino le pide permiso a Chrome para funcionar ahí y mira las vacantes que abres, para mostrar un puntaje guardado u ofrecer una evaluación. No envía nada a ningún lado a menos que evalúes. Puedes desactivarlo, y devolver el permiso, cuando quieras.</p>
@@ -132,7 +140,7 @@
     <article class="doc" data-lang="fr" lang="fr">
       <h1>Politique de confidentialité</h1>
       <p class="updated">Dernière mise à jour : 1er octobre 2026</p>
-      <p>Tino est une extension de navigateur qui évalue des offres d'emploi par rapport à votre CV. Elle est conçue pour que vos informations restent chez vous. Pas de compte, pas d'analytique, pas de publicité, et Tino ne fait tourner aucun serveur : le développeur ne reçoit rien de votre utilisation de l'extension.</p>
+      <p>Tino est une extension de navigateur qui évalue des offres d'emploi par rapport à votre CV. Elle est conçue pour que vos informations restent chez vous. Pas d'analytique, pas de publicité, et aucun compte n'est nécessaire : avec LM Studio ou votre propre clé OpenAI, le développeur ne reçoit rien de votre utilisation de l'extension. La seule exception est Tino Cloud, facultatif et décrit plus bas.</p>
 
       <h2>Ce que Tino conserve, et où</h2>
       <ul>
@@ -148,9 +156,13 @@
         <li><strong>LM Studio sur cet ordinateur :</strong> rien ne quitte votre ordinateur.</li>
         <li><strong>Un modèle sur un autre ordinateur :</strong> le résumé de votre CV, votre salaire attendu, les préférences utiles et l'offre sont envoyés à cet ordinateur. Tino n'envoie qu'à une adresse que vous avez explicitement autorisée et, hors de votre réseau local, uniquement par une connexion chiffrée (https).</li>
         <li><strong>OpenAI, avec votre propre clé d'API :</strong> les mêmes informations sont envoyées à OpenAI sous votre compte, et les conditions et politiques de données de l'API d'OpenAI s'appliquent. Tino demande à OpenAI de ne pas conserver les requêtes, et n'envoie jamais votre clé ailleurs.</li>
+        <li><strong>Tino Cloud, si vous vous connectez :</strong> les mêmes informations vont au serveur de Tino, qui les transmet à OpenAI pour l'évaluation et n'en conserve rien. Tino demande à OpenAI de ne pas conserver les requêtes ; selon la politique de données de l'API d'OpenAI, OpenAI peut toutefois les garder jusqu'à 30 jours pour détecter les abus.</li>
       </ul>
       <p>Votre ville et votre région ne sont incluses que si vous activez cette option.</p>
       <p><strong>Synchroniser entre vos ordinateurs</strong> (désactivé sauf si vous l'activez) : vos profils (résumé du CV, salaire attendu, règles de filtrage), la langue et le réglage du compteur de l'icône sont enregistrés dans votre compte Google via la synchronisation de Chrome, pour que vos autres ordinateurs puissent les utiliser. Google conserve cette copie selon sa propre politique de confidentialité. Les offres suivies, les réglages du modèle et votre clé OpenAI ne sont jamais synchronisés. Paramètres › Données permet de la désactiver et de supprimer la copie synchronisée.</p>
+
+      <h2>Votre compte Tino Cloud</h2>
+      <p>Si vous vous connectez à Tino Cloud (avec Google ou un code envoyé par e-mail), le serveur de Tino conserve votre adresse e-mail, votre solde de crédit et son historique, le nombre d'évaluations faites chaque jour et les tokens utilisés, et si vous avez demandé à être prévenu de l'ouverture des recharges. Il ne conserve jamais votre résumé de CV, votre profil, vos attentes salariales, les offres ni les notes. Le serveur est hébergé par Supabase. Vous pouvez supprimer le compte dans Paramètres › Modèle, ce qui efface tout ; se déconnecter ne le supprime pas.</p>
 
       <h2>Le bouton sur la page</h2>
       <p>Si vous l'activez pour un site d'emploi, Tino demande à Chrome la permission d'y fonctionner et regarde les offres que vous ouvrez, pour afficher une note enregistrée ou proposer une évaluation. Il n'envoie rien tant que vous n'évaluez pas. Vous pouvez le désactiver, et rendre la permission, à tout moment.</p>
@@ -184,7 +196,7 @@
     <article class="doc" data-lang="pt" lang="pt">
       <h1>Política de privacidade</h1>
       <p class="updated">Última atualização: 1º de outubro de 2026</p>
-      <p>O Tino é uma extensão de navegador que avalia vagas em relação ao seu CV. Ele foi feito para que suas informações fiquem com você. Não há conta, nem análise de uso, nem publicidade, e o Tino não opera nenhum servidor: o desenvolvedor não recebe nada do seu uso da extensão.</p>
+      <p>O Tino é uma extensão de navegador que avalia vagas em relação ao seu CV. Ele foi feito para que suas informações fiquem com você. Não há análise de uso nem publicidade, e você não precisa de conta: com o LM Studio ou sua própria chave da OpenAI, o desenvolvedor não recebe nada do seu uso da extensão. A única exceção é o Tino Cloud, que é opcional e está descrito abaixo.</p>
 
       <h2>O que o Tino guarda, e onde</h2>
       <ul>
@@ -200,9 +212,13 @@
         <li><strong>LM Studio neste computador:</strong> nada sai do seu computador.</li>
         <li><strong>Um modelo em outro computador:</strong> o resumo do seu CV, a pretensão salarial, as preferências relevantes e a vaga são enviados para esse computador. O Tino só envia para um endereço que você permitiu explicitamente e, fora da sua rede local, somente por uma conexão criptografada (https).</li>
         <li><strong>OpenAI, com sua própria chave de API:</strong> as mesmas informações são enviadas à OpenAI na sua conta, e valem os termos e as políticas de dados da API da OpenAI. O Tino pede à OpenAI que não guarde as solicitações, e nunca envia sua chave para nenhum outro lugar.</li>
+        <li><strong>Tino Cloud, se você entrar:</strong> as mesmas informações vão para o servidor do Tino, que as repassa à OpenAI para avaliação e não guarda nada delas. O Tino pede à OpenAI que não guarde as solicitações; pela política de dados da API da OpenAI, a OpenAI ainda pode mantê-las por até 30 dias para detectar abusos.</li>
       </ul>
       <p>Sua cidade e região só são incluídas se você ativar essa opção.</p>
       <p><strong>Sincronizar entre seus computadores</strong> (desativado, a menos que você ative): seus perfis (resumo do CV, salário esperado, regras de triagem), o idioma e a configuração da contagem do ícone são salvos na sua conta do Google pela sincronização do Chrome, para que seus outros computadores possam usá-los. O Google guarda essa cópia conforme a própria política de privacidade. As vagas acompanhadas, as configurações do modelo e sua chave da OpenAI nunca são sincronizadas. Em Configurações › Dados você pode desativar e remover a cópia sincronizada.</p>
+
+      <h2>Sua conta do Tino Cloud</h2>
+      <p>Se você entrar no Tino Cloud (com o Google ou com um código enviado ao seu e-mail), o servidor do Tino guarda seu endereço de e-mail, seu saldo de crédito e o histórico dele, quantas avaliações você fez por dia e quantos tokens elas usaram, e se você pediu para ser avisado quando as recargas abrirem. Ele nunca guarda seu resumo de CV, seu perfil, suas expectativas salariais, as vagas nem as notas. O servidor fica hospedado no Supabase. Você pode excluir a conta em Configurações › Modelo, o que apaga tudo; sair da conta não a exclui.</p>
 
       <h2>O botão na página</h2>
       <p>Se você o ativar para um site de vagas, o Tino pede permissão ao Chrome para funcionar ali e olha as vagas que você abre, para mostrar uma nota salva ou oferecer uma avaliação. Ele não envia nada para lugar nenhum a menos que você avalie. Você pode desativá-lo, e devolver a permissão, quando quiser.</p>

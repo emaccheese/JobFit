@@ -25,6 +25,8 @@ var JOB_FIT_QUEUE = (function () {
     summarize: async () => ({ ok: false, error: "queue not configured", failure: "config" }),
     timeoutMs: async () => 300000,
     setBadge: async () => {},
+    // Asked to wake the queue at a time (a chrome.alarms alarm in the worker).
+    scheduleResume: async () => {},
     now: () => Date.now(),
   };
 
@@ -92,10 +94,24 @@ var JOB_FIT_QUEUE = (function () {
   // exists to protect. Two timeouts in a row is the machine, not the posting.
   function shouldPause(failure, consecutiveTimeouts) {
     // "budget": the daily OpenAI token budget is spent — every remaining item
-    // would hit the same wall.
-    if (failure === "unreachable" || failure === "http" || failure === "config" || failure === "budget") return true;
+    // would hit the same wall. "credit": Tino Cloud's credit is used up.
+    // "quota": Tino Cloud's hourly brake, or hosted scoring paused for now.
+    if (["unreachable", "http", "config", "budget", "credit", "quota"].includes(failure)) return true;
     if (failure === "timeout") return consecutiveTimeouts >= 2;
     return false;
+  }
+
+  // When a pause ends by itself: Tino Cloud says when (`retryAt`), and the
+  // OpenAI daily budget is a new day's at local midnight. Other pauses wait
+  // for a fix (the settings watcher resumes them) or the Resume button.
+  function pauseEndsAt(outcome, now) {
+    if (outcome.failure === "quota" && outcome.retryAt) return Math.max(outcome.retryAt, now + 60 * 1000);
+    if (outcome.failure === "budget") {
+      const midnight = new Date(now);
+      midnight.setHours(24, 1, 0, 0);
+      return midnight.getTime();
+    }
+    return null;
   }
 
   async function enqueue(entry, { priority = false } = {}) {
@@ -224,7 +240,9 @@ var JOB_FIT_QUEUE = (function () {
           // message: the message is in the user's language, so nothing should
           // branch on its wording.
           queue.pauseFailure = outcome.failure || null;
+          queue.pauseUntil = pauseEndsAt(outcome, deps.now());
           await write(queue);
+          if (queue.pauseUntil) await deps.scheduleResume(queue.pauseUntil);
           break;
         }
 
@@ -268,9 +286,19 @@ var JOB_FIT_QUEUE = (function () {
     queue.state = activeCount(queue) ? "running" : "idle";
     queue.pauseReason = null;
     queue.pauseFailure = null;
+    queue.pauseUntil = null;
     queue.consecutiveTimeouts = 0;
     await write(queue);
     return { ok: true };
+  }
+
+  // The alarm's job: resume a pause whose time has come. A pause the user or
+  // a fix already ended, or a later one, is left alone.
+  async function resumeIfDue() {
+    const queue = await read();
+    if (queue.state !== "paused" || !queue.pauseUntil || queue.pauseUntil > deps.now() + 5000) return false;
+    await resume();
+    return true;
   }
 
   async function clearFinished() {
@@ -294,6 +322,8 @@ var JOB_FIT_QUEUE = (function () {
     cancel,
     retry,
     resume,
+    resumeIfDue,
+    pauseEndsAt,
     clearFinished,
     snapshot,
     read,

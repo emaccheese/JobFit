@@ -73,6 +73,8 @@ const state = {
   profile: null, // the working profile; written through to storage
   persisted: false, // false only for a "new" profile before it has a name
   lm: null,
+  level: null, // the effort level (JOB_FIT_DEFAULTS.modelLevels), for Tino Cloud and OpenAI
+  cloudAccount: null, // Tino Cloud's account, once signed in
   modelDirty: false,
   modelOk: false,
   modelExpanded: false,
@@ -159,22 +161,32 @@ function setSaveState(text, isError) {
 }
 
 // The provider's own settings object: its .model is the one in use.
+// Tino Cloud has none to edit: the server picks the model from the level.
 function activeModelSettings() {
+  if (state.provider === "tinocloud") return {};
   return state.provider === "openai" ? state.oa : state.lm;
 }
 
+// The model in use, as provider.js resolves it: for OpenAI the level's model
+// unless the level is "custom", for Tino Cloud "tino-cloud:<level>".
 function activeModel() {
-  const model = activeModelSettings().model || (state.provider === "openai" ? JOB_FIT_DEFAULTS.openai.model : "");
-  return (model || "").trim();
+  return (resolvedSettings().model || "").trim();
 }
 
 function resolvedSettings() {
-  return JOB_FIT_PROVIDER.resolve({ modelProvider: state.provider, lmStudio: state.lm, openai: state.oa });
+  return JOB_FIT_PROVIDER.resolve({ modelProvider: state.provider, modelLevel: state.level, lmStudio: state.lm, openai: state.oa });
+}
+
+// Tino Cloud has no "custom" level.
+function levelToStore() {
+  if (state.provider === "tinocloud" && !JOB_FIT_PROVIDER.levelById(state.level)) return JOB_FIT_DEFAULTS.modelLevel;
+  return state.level || JOB_FIT_DEFAULTS.modelLevel;
 }
 
 function modelSettingsToStore() {
   return {
     modelProvider: state.provider,
+    modelLevel: levelToStore(),
     lmStudio: {
       ...state.lm,
       url: (state.lm.url || "").trim() || JOB_FIT_DEFAULTS.lmStudio.url,
@@ -755,6 +767,61 @@ function collectWork() {
 
 // --- step: model -----------------------------------------------------------
 
+// The effort levels, for Tino Cloud and your own key, with each one's cost.
+function renderLevels() {
+  const provider = state.provider;
+  $("levelChoice").hidden = provider === "lmstudio";
+  if (provider === "lmstudio") return;
+  renderLevelPicker($("wizLevelPicker"), {
+    provider,
+    name: "wizLevel",
+    selected: provider === "tinocloud" ? levelToStore() : state.level,
+    account: provider === "tinocloud" ? state.cloudAccount : null,
+    onChange: (id) => {
+      state.level = id;
+      state.modelDirty = true;
+      // Your own model list only for "Custom".
+      if (provider === "openai") {
+        $("modelPicker").hidden = id !== "custom" || !$("modelList").children.length;
+        renderOaReasoning();
+      }
+      scheduleSave();
+      updateNav();
+    },
+  });
+}
+
+// Tino Cloud: not open yet, signed out (the sign-in form), or signed in (the
+// credit, and the levels with how many evaluations each has left).
+function renderCloudStatus(probe) {
+  const host = $("modelStatus");
+  const signIn = $("cloudSignInHost");
+  signIn.textContent = "";
+  if (probe.reason === "cloud-unavailable") {
+    host.appendChild(callout("info", t("cloud.comingSoon")));
+    return;
+  }
+  if (probe.reason === "signed-out") {
+    mountCloudSignIn(signIn, { idPrefix: "wizCloud", onSignedIn: () => testConnection() });
+    return;
+  }
+  if (!probe.ok) {
+    host.appendChild(callout("bad", t("cloud.unreachable")));
+    return;
+  }
+  state.cloudAccount = probe.account;
+  const dollars = creditDollars;
+  const email = probe.account.email || "";
+  host.appendChild(
+    callout(probe.outOfCredit ? "warn" : "ok", [
+      el("div", null, t("cloud.signedInAs", { email })),
+      el("div", "hint", t("cloud.credit", { left: dollars(probe.account.balanceMicros), start: dollars(probe.account.starterMicros) })),
+    ])
+  );
+  renderLevels();
+  state.modelOk = true;
+}
+
 function renderModelStatus(probe) {
   const host = $("modelStatus");
   host.innerHTML = "";
@@ -762,6 +829,7 @@ function renderModelStatus(probe) {
   state.modelOk = false;
 
   if (!probe) return;
+  if (state.provider === "tinocloud") return renderCloudStatus(probe);
   const openai = state.provider === "openai";
   if (probe.reason === "no-key") {
     host.appendChild(callout("info", t("wiz.model.pasteKey")));
@@ -879,20 +947,28 @@ function renderModelStatus(probe) {
   } else {
     probe.models.forEach((id) => addRow(list, id, document.createTextNode(id)));
   }
-  $("modelPicker").hidden = false;
+  // With your own key, a level sets the model; the list is for "Custom".
+  $("modelPicker").hidden = openai && state.level !== "custom";
   state.modelOk = true;
-  if (openai) renderOaReasoning();
+  if (openai) {
+    renderLevels();
+    renderOaReasoning();
+  }
 }
 
 async function testConnection() {
   collectModel();
-  const trigger = state.provider === "openai" ? $("testOpenAi") : $("testConnection");
-  const label = trigger.textContent;
-  trigger.disabled = true;
-  trigger.textContent = t("wiz.model.testing");
+  const trigger = state.provider === "openai" ? $("testOpenAi") : state.provider === "lmstudio" ? $("testConnection") : null;
+  const label = trigger ? trigger.textContent : "";
+  if (trigger) {
+    trigger.disabled = true;
+    trigger.textContent = t("wiz.model.testing");
+  }
   const probe = await probeModels(resolvedSettings(), 4000);
-  trigger.disabled = false;
-  trigger.textContent = label;
+  if (trigger) {
+    trigger.disabled = false;
+    trigger.textContent = label;
+  }
   renderModelStatus(probe);
   updateNav();
   return probe;
@@ -901,12 +977,16 @@ async function testConnection() {
 // Shows the fields for the chosen provider only: an endpoint means nothing to
 // OpenAI, and an API key means nothing to LM Studio.
 function showProviderFields() {
-  const openai = state.provider === "openai";
-  $("openAiKeyField").hidden = !openai;
-  $("lmUrlField").hidden = openai;
-  $("oaCostFields").hidden = !openai;
+  const provider = state.provider;
+  // Offered once Tino Cloud is open; until then, two cards.
+  $("cloudCard").hidden = !JOB_FIT_CLOUD.available() && provider !== "tinocloud";
+  $("cloudBox").hidden = provider !== "tinocloud";
+  $("openAiKeyField").hidden = provider !== "openai";
+  $("lmUrlField").hidden = provider !== "lmstudio";
+  $("oaCostFields").hidden = provider !== "openai";
   renderOaReasoning();
-  $("lmOnlyAdvanced").hidden = openai;
+  $("lmOnlyAdvanced").hidden = provider !== "lmstudio";
+  $("levelChoice").hidden = true; // shown once connected (renderLevels)
   document.querySelectorAll('input[name="provider"]').forEach((r) => (r.checked = r.value === state.provider));
 }
 
@@ -916,7 +996,8 @@ function showProviderFields() {
 function renderOaReasoning() {
   const model = state.oa.model || JOB_FIT_DEFAULTS.openai.model || "";
   const allowed = JOB_FIT_PROVIDER.reasoningEffortsFor(model);
-  $("oaReasoningField").hidden = !allowed.length;
+  // A level sets the effort; only "Custom" asks for one.
+  $("oaReasoningField").hidden = !allowed.length || state.level !== "custom";
   const select = $("oaReasoning");
   select.innerHTML = "";
   ["", ...allowed].forEach((value) => {
@@ -965,7 +1046,11 @@ async function enterModel() {
   $("modelFull").hidden = compactable;
   const probe = await testConnection();
   if (compactable && state.modelOk) {
-    $("compactModelName").textContent = `${activeModel()} (${resolvedSettings().label})`;
+    const settings = resolvedSettings();
+    $("compactModelName").textContent =
+      settings.provider === "lmstudio" || settings.level === "custom"
+        ? `${activeModel()} (${settings.label})`
+        : `${settings.label} · ${levelName(settings.level)}`;
     $("modelCompact").hidden = false;
   } else {
     $("modelFull").hidden = false;
@@ -1465,9 +1550,11 @@ function renderReview() {
     {
       step: "model",
       title: stepTitle("model"),
-      body: activeModel()
-        ? `${activeModel()}\n${state.provider === "openai" ? t("wiz.review.openaiNote") : state.lm.url}`
-        : t("wiz.review.noModel"),
+      body: !activeModel()
+        ? t("wiz.review.noModel")
+        : state.provider === "tinocloud"
+          ? `Tino Cloud · ${levelName(levelToStore())}\n${t("wiz.review.cloudNote")}`
+          : `${state.provider === "openai" && state.level !== "custom" ? `${levelName(state.level)} · ` : ""}${activeModel()}\n${state.provider === "openai" ? t("wiz.review.openaiNote") : state.lm.url}`,
       missing: !activeModel(),
     },
     {
@@ -1853,7 +1940,13 @@ async function init() {
   state.oa = { ...JOB_FIT_DEFAULTS.openai, ...(stored.openai || {}) };
   await JOB_FIT_VAULT.migrate();
   state.oa.apiKey = (await JOB_FIT_VAULT.openAiKey()) || "";
-  state.provider = stored.modelProvider === "openai" ? "openai" : "lmstudio";
+  // A fresh install starts on Tino Cloud once it's open: nothing to set up.
+  state.provider = JOB_FIT_PROVIDER.PROVIDERS.includes(stored.modelProvider)
+    ? stored.modelProvider
+    : JOB_FIT_CLOUD.available()
+      ? "tinocloud"
+      : "lmstudio";
+  state.level = stored.modelLevel || JOB_FIT_PROVIDER.resolve({ ...stored, modelProvider: "openai" }).level || JOB_FIT_DEFAULTS.modelLevel;
 
   let mode = params.get("mode");
   const profileId = params.get("profile");
@@ -1964,7 +2057,7 @@ $("card").addEventListener("change", (e) => {
   // key yet, that just asks for one.
   if (target.name === "provider") {
     collectModel();
-    state.provider = target.value === "openai" ? "openai" : "lmstudio";
+    state.provider = JOB_FIT_PROVIDER.PROVIDERS.includes(target.value) ? target.value : "lmstudio";
     state.modelDirty = true;
     // The list still shows the other provider's models; cleared before the
     // re-test reads the ticked one, or an LM Studio model name would be saved

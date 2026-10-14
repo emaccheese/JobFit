@@ -1,5 +1,5 @@
-// Secrets — the OpenAI API key now, an account session later — kept where the
-// scripts JobFit runs on job sites can't reach them.
+// Secrets — the OpenAI API key and the Tino Cloud session — kept where the
+// scripts Tino runs on job sites can't reach them.
 //
 // chrome.storage.local is shared with content scripts: anything in it can be
 // read, and rewritten, by a script running on linkedin.com. That's fine for
@@ -18,6 +18,7 @@ var JOB_FIT_VAULT = (function () {
   const STORE = "secrets";
   const OPENAI_KEY = "openaiApiKey";
   const APPROVED_ORIGINS = "approvedEndpointOrigins";
+  const TINO_SESSION = "tinoCloudSession";
 
   function inExtensionOrigin() {
     try {
@@ -112,6 +113,19 @@ var JOB_FIT_VAULT = (function () {
     return migrating;
   }
 
+  // The Tino Cloud session (tinocloud.js): { accessToken, refreshToken,
+  // expiresAt, email, userId }, or null when signed out. Whoever saves it
+  // stamps tinoCloud.sessionSavedAt in storage, as with the OpenAI key, so
+  // other pages and the worker notice.
+  async function tinoSession() {
+    const session = await get(TINO_SESSION);
+    return session && typeof session === "object" && session.accessToken ? session : null;
+  }
+
+  async function saveTinoSession(session) {
+    await set(TINO_SESSION, session && session.accessToken ? session : null);
+  }
+
   // Model endpoints off this machine that you've agreed may receive your CV
   // (provider.js endpointPolicy). Here rather than in storage, so a page
   // script can't approve its own server.
@@ -138,6 +152,8 @@ var JOB_FIT_VAULT = (function () {
   return {
     openAiKey,
     saveOpenAiKey,
+    tinoSession,
+    saveTinoSession,
     migrate,
     inExtensionOrigin,
     approvedOrigins,

@@ -59,7 +59,7 @@ const ADVANCED_SECTION_ID = {
   domainFlags: "adv-domainflags",
   learningFlags: "adv-learningflags",
 };
-const MODEL_KEYS = ["modelProvider", "lmStudio", "openai"];
+const MODEL_KEYS = ["modelProvider", "modelLevel", "lmStudio", "openai"];
 
 function el(tag, className, text) {
   const node = document.createElement(tag);
@@ -363,6 +363,21 @@ async function saveProfileFields() {
 // our own save from a change made in the wizard or another tab.
 let lastModelWrite = {};
 
+// The effort level picked here (lmstudio-ui.js renderLevelPicker), and the
+// Tino Cloud account as last read from the server.
+let modelLevel = JOB_FIT_DEFAULTS.modelLevel;
+let cloudAccount = null;
+
+function selectedProvider() {
+  return JOB_FIT_PROVIDER.PROVIDERS.includes(els.modelProvider.value) ? els.modelProvider.value : "lmstudio";
+}
+
+// Tino Cloud has no "custom" level: it shows Quick until something else is picked.
+function levelFor(provider) {
+  if (provider === "tinocloud" && !JOB_FIT_PROVIDER.levelById(modelLevel)) return JOB_FIT_DEFAULTS.modelLevel;
+  return modelLevel;
+}
+
 // The model settings as the form holds them, merged over what's stored so
 // fields this page doesn't show (LM Studio's seed, say) survive a save.
 async function saveModelSettings() {
@@ -372,7 +387,8 @@ async function saveModelSettings() {
   const keyChanged = await JOB_FIT_VAULT.saveOpenAiKey(els.openAiKey.value);
   const { apiKey, ...storedOpenAi } = stored.openai || {};
   const next = {
-    modelProvider: els.modelProvider.value === "openai" ? "openai" : "lmstudio",
+    modelProvider: selectedProvider(),
+    modelLevel: levelFor(selectedProvider()),
     lmStudio: {
       ...(stored.lmStudio || {}),
       url: els.lmStudioUrl.value.trim() || JOB_FIT_DEFAULTS.lmStudio.url,
@@ -402,7 +418,15 @@ async function fillModelFields() {
   const stored = await chrome.storage.local.get(JOB_FIT_PROVIDER.KEYS);
   const lmStudio = stored.lmStudio || JOB_FIT_DEFAULTS.lmStudio;
   const openai = { ...JOB_FIT_DEFAULTS.openai, ...(stored.openai || {}) };
-  els.modelProvider.value = stored.modelProvider === "openai" ? "openai" : "lmstudio";
+  els.modelProvider.value = JOB_FIT_PROVIDER.PROVIDERS.includes(stored.modelProvider) ? stored.modelProvider : "lmstudio";
+  // Offered once Tino Cloud is open (this build knows its address); until
+  // then, only to someone already on it.
+  const cloudOption = els.modelProvider.querySelector('option[value="tinocloud"]');
+  cloudOption.hidden = cloudOption.disabled = !JOB_FIT_CLOUD.available() && els.modelProvider.value !== "tinocloud";
+  // The level as provider.js reads it: for an older own-key setup with no
+  // level saved, the one matching its model and effort, or "custom".
+  const asOpenAi = JOB_FIT_PROVIDER.resolve({ ...stored, modelProvider: "openai" });
+  modelLevel = stored.modelLevel || asOpenAi.level || JOB_FIT_DEFAULTS.modelLevel;
   await JOB_FIT_VAULT.migrate();
   els.openAiKey.value = await JOB_FIT_VAULT.openAiKey();
   els.openAiModel.value = openai.model || JOB_FIT_DEFAULTS.openai.model;
@@ -425,9 +449,137 @@ async function fillModelFields() {
 }
 
 function showProviderFields() {
-  const openai = els.modelProvider.value === "openai";
-  $("lmStudioFields").hidden = openai;
-  $("openAiFields").hidden = !openai;
+  const provider = selectedProvider();
+  $("lmStudioFields").hidden = provider !== "lmstudio";
+  $("openAiFields").hidden = provider !== "openai";
+  $("cloudFields").hidden = provider !== "tinocloud";
+  $("levelField").hidden = provider === "lmstudio";
+  // Your own model and effort only for "Custom"; a level sets both.
+  $("openAiTierField").hidden = provider !== "openai" || modelLevel !== "custom";
+  renderReasoningOptions();
+  renderLevels();
+}
+
+function renderLevels() {
+  const provider = selectedProvider();
+  if (provider === "lmstudio") return;
+  renderLevelPicker($("levelPicker"), {
+    provider,
+    selected: levelFor(provider),
+    account: provider === "tinocloud" ? cloudAccount : null,
+    onChange: (id) => {
+      modelLevel = id;
+      $("openAiTierField").hidden = provider !== "openai" || id !== "custom";
+      renderReasoningOptions();
+      flushModelSave();
+      scheduleModelCheck();
+    },
+  });
+}
+
+// --- Tino Cloud: signing in, and the account -------------------------------------
+
+function setCloudStatus(text, kind = "") {
+  const line = $("cloudStatus");
+  line.textContent = text || "";
+  line.className = `hint${kind ? ` ${kind}` : ""}`;
+}
+
+async function renderCloud() {
+  const available = JOB_FIT_CLOUD.available();
+  $("cloudUnavailable").hidden = available;
+  $("cloudPrivacy").hidden = !available;
+  const signedIn = available && (await JOB_FIT_CLOUD.isSignedIn());
+  $("cloudSignedOut").hidden = !available || signedIn;
+  $("cloudSignedIn").hidden = !signedIn;
+  if (!signedIn) {
+    cloudAccount = null;
+    renderLevels();
+    return;
+  }
+  const { tinoCloud } = await chrome.storage.local.get("tinoCloud");
+  $("cloudWho").textContent = t("cloud.signedInAs", { email: (tinoCloud && tinoCloud.email) || "" });
+  const account = await JOB_FIT_CLOUD.account();
+  if (!account.ok) {
+    // Signed out by the server (the refresh was refused): show the sign-in.
+    if (account.status === 401) return renderCloud();
+    $("cloudCredit").textContent = t("cloud.unreachable");
+    return;
+  }
+  cloudAccount = account;
+  renderCloudAccount(account);
+}
+
+function renderCloudAccount(account) {
+  const dollars = (micros) => creditDollars(micros);
+  $("cloudCredit").textContent = t("cloud.credit", { left: dollars(account.balanceMicros), start: dollars(account.starterMicros) });
+  // Used up at every level, not just the one picked: a cheaper level is the
+  // first thing to try, and the picker says how many it has left.
+  const out = !(account.levels || []).some((l) => l.estLeft >= 1);
+  $("cloudOut").hidden = !out;
+  const asked = Boolean(account.rechargeInterestAt);
+  $("cloudInterest").hidden = asked;
+  $("cloudInterestDone").hidden = !asked;
+  if (asked) $("cloudInterestDone").textContent = t("cloud.interestDone", { email: account.email || "" });
+  renderLevels();
+}
+
+// After a sign-in: Tino Cloud becomes the model, and the account is shown.
+async function signedIn() {
+  // The signed-in box says who; the status line has nothing more to add.
+  setCloudStatus("");
+  els.modelProvider.value = "tinocloud";
+  showProviderFields();
+  await flushModelSave();
+  await renderCloud();
+  checkModel();
+}
+
+function setupCloud() {
+  mountCloudSignIn($("cloudSignInHost"), { onSignedIn: signedIn });
+
+  $("cloudSignOut").addEventListener("click", async () => {
+    await JOB_FIT_CLOUD.signOut();
+    setCloudStatus(t("cloud.signedOut"));
+    await renderCloud();
+    checkModel();
+  });
+
+  const switchTo = (provider) => {
+    els.modelProvider.value = provider;
+    els.modelProvider.dispatchEvent(new Event("change"));
+    els.modelProvider.focus();
+  };
+  $("cloudUseOpenAi").addEventListener("click", () => switchTo("openai"));
+  $("cloudUseLm").addEventListener("click", () => switchTo("lmstudio"));
+  $("cloudInterest").addEventListener("click", async () => {
+    const button = $("cloudInterest");
+    button.disabled = true;
+    const result = await JOB_FIT_CLOUD.registerInterest();
+    button.disabled = false;
+    if (result.ok) {
+      cloudAccount = { ...(cloudAccount || {}), ...result };
+      renderCloudAccount(cloudAccount);
+      JOB_FIT_UI.announce($("cloudInterestDone").textContent);
+    } else setCloudStatus(t("cloud.unreachable"), "error");
+  });
+
+  JOB_FIT_UI.armConfirm($("cloudDelete"), {
+    confirmLabel: t("cloud.deleteConfirm"),
+    onConfirm: async () => {
+      const result = await JOB_FIT_CLOUD.deleteAccount();
+      setCloudStatus(t(result.ok ? "cloud.deleted" : "cloud.errFailed"), result.ok ? "" : "error");
+      await renderCloud();
+      checkModel();
+    },
+  });
+
+  chrome.storage.onChanged.addListener((changes, area) => {
+    if (area !== "local") return;
+    // Signed in or out in the wizard or another tab.
+    if (changes.tinoCloud && (changes.tinoCloud.oldValue || {}).sessionSavedAt !== (changes.tinoCloud.newValue || {}).sessionSavedAt) renderCloud();
+  });
+  renderCloud();
 }
 
 // Only the effort levels this model accepts, and the field only for models
@@ -481,7 +633,8 @@ function renderReasoningOptions() {
   const select = els.openAiReasoningEffort;
   const allowed = JOB_FIT_PROVIDER.reasoningEffortsFor(selectedOpenAiModel());
   const wanted = select.dataset.saved ?? select.value ?? "";
-  $("openAiReasoningSection").hidden = !allowed.length;
+  // A level sets the effort; only "Custom" asks for one.
+  $("openAiReasoningSection").hidden = !allowed.length || modelLevel !== "custom";
   select.innerHTML = "";
   if (!allowed.length) return;
   ["", ...allowed].forEach((value) => {
@@ -603,7 +756,7 @@ async function checkModel() {
   box.title = verdict.title || "";
   // An endpoint off this machine: allowed here, by you, before your CV goes to
   // it — and the way to stop, once it has been.
-  if (settings.provider !== "openai") {
+  if (settings.provider === "lmstudio") {
     const policy = JOB_FIT_PROVIDER.endpointPolicy(settings.url);
     if (probe.reason === "not-approved") {
       box.textContent = t("model.notApprovedHere", { origin: policy.origin });
@@ -616,7 +769,12 @@ async function checkModel() {
       box.appendChild(line);
     }
   }
-  if (settings.provider !== "openai" && probe.ok) {
+  // The account came with the check: the credit line and the levels' counts.
+  if (settings.provider === "tinocloud" && probe.ok && probe.account) {
+    cloudAccount = probe.account;
+    renderCloudAccount(probe.account);
+  }
+  if (settings.provider === "lmstudio" && probe.ok) {
     const list = $("lmModelList");
     list.innerHTML = "";
     probe.models.forEach((id) => {
@@ -735,6 +893,7 @@ function watchFields() {
     showProviderFields();
     flushModelSave();
     if (els.modelProvider.value === "openai") loadOpenAiModels();
+    if (els.modelProvider.value === "tinocloud") renderCloud();
   });
   els.openAiKey.addEventListener("change", loadOpenAiModels);
   els.openAiTier.addEventListener("change", () => {
@@ -1354,6 +1513,7 @@ async function init() {
   });
   renderTimingHint();
   setupAttentionBadge();
+  setupCloud();
   setupSync();
   checkModel();
   $("changeShortcut").addEventListener("click", () => chrome.tabs.create({ url: "chrome://extensions/shortcuts" }));
