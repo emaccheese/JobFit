@@ -2084,6 +2084,35 @@ table, pinned `search_path`, no function callable by users).
 busy) and an `upgrade` flag, rather than the plan's separate 402. One status is
 simpler for the extension's queue, which pauses on 429 until `resetAt` either way.
 
+
+## Tino Cloud credits and effort levels (2026-10-14)
+
+The daily allowance became a **starter credit** ($1, once per account), and the
+user picks an **effort level** that decides the model and reasoning effort:
+Quick (luna·low, the default), Careful (luna·medium), Thorough (sol·low), Deep
+(sol·medium). Why: Phase 4's goal is "install, sign in, score" with nothing else,
+and the user wanted people to choose how fast their free credit goes rather than
+meet an arbitrary daily cap. Payments wait until "tell me when recharges open"
+shows interest (`accounts.recharge_interest_at`).
+
+- **Reserve, then settle.** `consume_quota` reserves the worst case: the request's
+  size at one token per 3 characters (usually 4), plus the kind's output cap, at
+  the level's prices, capped at the balance so the last calls of a balance still
+  run. `finish_call` charges the real tokens, never more than the reserve, and
+  nothing for a failure. It refunds the rest, once per call (the reserve row's
+  `settled_at`, and a unique index on its `call_id`), so a retried finish or an
+  expired lease can't double-charge.
+- **The ledger is the truth:** `grant`, `reserve`, `refund`, `adjust` rows add up
+  to `credit_micros`, which the tests check.
+- **"About N left"** divides the balance by each level's running average cost
+  (the last ~200 calls), seeded from estimates. On today's prices, Thorough
+  costs about 25 times what Quick does, and the picker shows it.
+- **Out of credit** is 402 (waiting won't help), unlike the brakes' 429. A cheaper
+  level may still have enough, so the 402 names the level.
+- Sign-in adds email codes next to Google: Supabase Auth's OTP with `{{ .Token }}`
+  in the template (`cloud/supabase/templates/sign-in-code.html`), typed into the
+  extension, so no link has to open a web page.
+
 ## Logging
 
 Append every evaluation to `chrome.storage.local["evaluations"]`:

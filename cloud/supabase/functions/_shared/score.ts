@@ -1,24 +1,27 @@
-// POST /score — one model call on Tino Cloud, against the user's allowance.
+// POST /score — one model call on Tino Cloud, paid from the user's credit.
 //
 // Request (Authorization: Bearer <the user's session token>):
-//   { kind, lang?, user, markets?, languages? }
+//   { kind, level?, lang?, user, markets?, languages? }
 //   - kind: evaluate | summarize | draftProfile | suggestSalary | suggestFlags
+//   - level: quick (the default) | careful | thorough | deep — the model and
+//     reasoning effort, and so how fast the credit goes (the `levels` table)
 //   - user: the request's user message, built by the extension exactly as for
 //     any other model (the posting, the profile, the CV…)
 //   - lang: the language the model writes its free text in (en, es, fr, pt)
 //   - markets: for suggestSalary, [{ currency, period, country? }]
 //   - languages: for suggestFlags, the languages the user reads postings in
 //
-// The instructions (system prompt), the model and the output limit are the
-// server's choice, by kind: a request can't bring its own, so Tino Cloud
-// can't be used as a general-purpose model on Tino's bill.
+// The instructions (system prompt), the output limit and, through the level,
+// the model are the server's choice: a request can't bring its own, so Tino
+// Cloud can't be used as a general-purpose model on Tino's bill.
 //
 // Replies:
-//   200 { data, model, plan, usage: { inputTokens, outputTokens }, limit, remaining, resetAt }
-//   400 bad_request · 401 unauthorized · 413 too_large
-//   429 quota { reason: daily | monthly | hourly | busy, resetAt?, upgrade } + Retry-After
+//   200 { data, model, level, usage: { inputTokens, outputTokens }, chargedMicros, balanceMicros, estLeft }
+//   400 bad_request (also an unknown or switched-off level) · 401 unauthorized · 413 too_large
+//   402 credit { balanceMicros, level }: not enough credit for a call at this level
+//   429 quota { reason: hourly | busy, resetAt? } + Retry-After
 //   503 paused (hosted scoring is switched off for now) + Retry-After
-//   502/504 upstream (the model failed; the allowance was given back)
+//   502/504 upstream (the model failed; nothing was charged)
 
 import { bearerToken, consoleLogger, errorReply, json, readJsonBody, secondsUntil, type Logger } from "./http.ts";
 import { callOpenAi, requestBody } from "./openai.ts";
@@ -59,13 +62,17 @@ export type ScoreDeps = {
 type Market = { currency: string; period: string; country?: string };
 
 export type Validated =
-  | { ok: true; kind: Kind; lang: string; user: string; markets: Market[] | null; languages: string[] | null }
+  | { ok: true; kind: Kind; level: string; lang: string; user: string; markets: Market[] | null; languages: string[] | null }
   | { ok: false; detail: string };
 
 export function validate(body: Record<string, unknown>, languages: string[]): Validated {
   const kind = body.kind;
   if (typeof kind !== "string" || !Object.hasOwn(KINDS, kind)) return { ok: false, detail: "Unknown kind." };
   const spec = KINDS[kind as Kind];
+
+  // Checked against the levels table by consume_quota; here only its shape.
+  const level = body.level === undefined ? "quick" : body.level;
+  if (typeof level !== "string" || !/^[a-z]{1,20}$/.test(level)) return { ok: false, detail: "Unknown level." };
 
   const lang = body.lang === undefined ? "en" : body.lang;
   if (typeof lang !== "string" || !languages.includes(lang)) return { ok: false, detail: "Unknown language." };
@@ -102,7 +109,7 @@ export function validate(body: Record<string, unknown>, languages: string[]): Va
     readLanguages = list as string[];
   }
 
-  return { ok: true, kind: kind as Kind, lang, user, markets, languages: readLanguages };
+  return { ok: true, kind: kind as Kind, level, lang, user, markets, languages: readLanguages };
 }
 
 export async function handleScore(req: Request, deps: ScoreDeps): Promise<Response> {
@@ -125,29 +132,28 @@ export async function handleScore(req: Request, deps: ScoreDeps): Promise<Respon
   if (!request.ok) return done(errorReply(400, "bad_request", { detail: request.detail }));
 
   const spec = KINDS[request.kind];
-  const quota = (await deps.backend.rpc("consume_quota", { p_user: user.id, p_kind: spec.counter })) as Record<string, any>;
+  const system = deps.prompts.forKind(request.kind, { lang: request.lang, markets: request.markets, languages: request.languages }) as string;
+  // The most this call can use, for the credit it reserves: about one token
+  // per 3 characters at most (usually 4), and the kind's output cap.
+  const quota = (await deps.backend.rpc("consume_quota", {
+    p_user: user.id,
+    p_kind: spec.counter,
+    p_level: request.level,
+    p_max_input_tokens: Math.ceil((system.length + request.user.length) / 3),
+    p_max_output_tokens: spec.maxOutputTokens,
+  })) as Record<string, any>;
   if (!quota || quota.ok !== true) {
     const reason = quota && typeof quota.reason === "string" ? quota.reason : "paused";
-    if (reason === "paused") return done(errorReply(503, "paused", {}, { "Retry-After": "3600" }), { kind: request.kind, reason });
+    const fields = { kind: request.kind, level: request.level, reason };
+    if (reason === "paused") return done(errorReply(503, "paused", {}, { "Retry-After": "3600" }), fields);
+    if (reason === "level") return done(errorReply(400, "bad_request", { detail: "Unknown level." }), fields);
+    if (reason === "credit") {
+      return done(errorReply(402, "credit", { balanceMicros: Number(quota.balance_micros) || 0, level: quota.level ?? request.level }), fields);
+    }
     const retryAfter = reason === "busy" ? Number(quota.retry_after) || 5 : secondsUntil(quota.reset_at);
-    return done(
-      errorReply(
-        429,
-        "quota",
-        {
-          reason,
-          resetAt: quota.reset_at ?? null,
-          limit: quota.limit ?? null,
-          plan: quota.plan ?? null,
-          upgrade: quota.plan === "free" && (reason === "daily" || reason === "hourly"),
-        },
-        { "Retry-After": String(retryAfter) }
-      ),
-      { kind: request.kind, reason }
-    );
+    return done(errorReply(429, "quota", { reason, resetAt: quota.reset_at ?? null }, { "Retry-After": String(retryAfter) }), fields);
   }
 
-  const system = deps.prompts.forKind(request.kind, { lang: request.lang, markets: request.markets, languages: request.languages });
   const result = await callOpenAi({
     apiKey: deps.openAiKey,
     fetch: deps.fetch,
@@ -155,25 +161,26 @@ export async function handleScore(req: Request, deps: ScoreDeps): Promise<Respon
     body: requestBody({
       model: quota.model,
       reasoningEffort: quota.reasoning_effort ?? null,
-      system: system as string,
+      system,
       user: request.user,
       maxOutputTokens: spec.maxOutputTokens,
     }),
   });
 
-  // Always finished, success or not: it frees the user's slot, records the
-  // tokens, and on failure gives the allowance back. If the database can't be
-  // reached now, the result still goes out; the slot frees itself when its
-  // lease runs out.
-  const fields: Record<string, unknown> = { kind: request.kind, plan: quota.plan, model: quota.model };
+  // Always finished, success or not: it charges what the call cost (nothing
+  // if it failed) and gives back the rest of the reserve, frees the user's
+  // slot and records the tokens. If the database can't be reached now, the
+  // result still goes out; the slot frees itself when its lease runs out.
+  const fields: Record<string, unknown> = { kind: request.kind, level: quota.level, model: quota.model };
+  let settled: Record<string, any> | null = null;
   try {
-    await deps.backend.rpc("finish_call", {
+    settled = (await deps.backend.rpc("finish_call", {
       p_user: user.id,
       p_call: quota.call_id,
       p_ok: result.ok,
       p_input_tokens: result.usage.inputTokens,
       p_output_tokens: result.usage.outputTokens,
-    });
+    })) as Record<string, any>;
   } catch {
     fields.finishFailed = true;
   }
@@ -190,11 +197,11 @@ export async function handleScore(req: Request, deps: ScoreDeps): Promise<Respon
     json(200, {
       data: result.data,
       model: quota.model,
-      plan: quota.plan,
+      level: quota.level,
       usage: result.usage,
-      limit: quota.limit ?? null,
-      remaining: quota.remaining ?? null,
-      resetAt: quota.reset_at ?? null,
+      chargedMicros: settled ? Number(settled.charged_micros) || 0 : null,
+      balanceMicros: settled ? Number(settled.balance_micros) : null,
+      estLeft: settled && settled.est_left != null ? Number(settled.est_left) : null,
     }),
     fields
   );

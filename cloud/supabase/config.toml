@@ -7,11 +7,28 @@ site_url = "https://emaccheese.github.io/JobFit/"
 # The extension signs in with chrome.identity.launchWebAuthFlow, which
 # returns to https://<extension id>.chromiumapp.org/.
 additional_redirect_urls = ["https://*.chromiumapp.org/**"]
-# Google is the only way in: no email sign-ups.
 enable_signup = true
 
+# The other way in: a 6-digit code sent by email, typed into the extension.
+# No passwords, and no links (a link would open a web page, not the
+# extension). The templates below put the code ({{ .Token }}) in the email.
+# Supabase's own mailer sends only a few emails an hour; for real use, set an
+# SMTP provider (Resend, Postmark…) in the project's Auth settings.
 [auth.email]
-enable_signup = false
+enable_signup = true
+enable_confirmations = false
+otp_length = 6
+otp_expiry = 600
+
+# A new address gets the confirmation email, a returning one the "magic link"
+# email; both carry the code.
+[auth.email.template.confirmation]
+subject = "Your Tino code / Tu código de Tino"
+content_path = "./supabase/templates/sign-in-code.html"
+
+[auth.email.template.magic_link]
+subject = "Your Tino code / Tu código de Tino"
+content_path = "./supabase/templates/sign-in-code.html"
 
 [auth.external.google]
 enabled = true

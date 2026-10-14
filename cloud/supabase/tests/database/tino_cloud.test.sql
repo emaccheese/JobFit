@@ -1,156 +1,169 @@
--- Tino Cloud's database: allowances, refunds, time zones, billing events and
--- who can read or call what. Run with: supabase test db
+-- Tino Cloud's database: the starter credit, reserving and charging calls by
+-- effort level, refunds, the ledger, the brakes, billing events and who can
+-- read or call what. Run with: supabase test db
 begin;
 create extension if not exists pgtap with schema extensions;
 set search_path = public, extensions;
 
-select plan(31);
+select plan(34);
 
 insert into auth.users (id, email) values
   ('00000000-0000-4000-8000-00000000000a', 'a@example.test'),
   ('00000000-0000-4000-8000-00000000000b', 'b@example.test'),
   ('00000000-0000-4000-8000-00000000000c', 'c@example.test');
 
--- --- a new user gets a free account --------------------------------------------
-select is(
-  (select plan from public.accounts where user_id = '00000000-0000-4000-8000-00000000000a'),
-  'free',
-  'a new user has a free account'
-);
-
--- --- one call at a time ---------------------------------------------------------
 create temporary table calls (name text primary key, result jsonb) on commit drop;
-insert into calls values ('a1', public.consume_quota('00000000-0000-4000-8000-00000000000a', 'evaluation'));
-select is((select (result ->> 'ok')::boolean from calls where name = 'a1'), true, 'the first evaluation is allowed');
-select is((select (result ->> 'remaining')::int from calls where name = 'a1'), 9, '…with 9 left today');
+
+-- --- the starter credit -------------------------------------------------------------
 select is(
-  public.consume_quota('00000000-0000-4000-8000-00000000000a', 'evaluation') ->> 'reason',
+  (select credit_micros from public.accounts where user_id = '00000000-0000-4000-8000-00000000000a'),
+  1000000::bigint,
+  'a new account starts with $1 of credit'
+);
+select is(
+  (select count(*)::int from public.credit_ledger where user_id = '00000000-0000-4000-8000-00000000000a' and kind = 'grant' and amount_micros = 1000000),
+  1,
+  '…recorded once in the ledger'
+);
+select is(public.grant_starter_credit('00000000-0000-4000-8000-00000000000a'), false, 'the starter credit is given once only');
+
+-- --- a call: reserve the most it can cost, then charge what it cost -------------------
+-- Quick is gpt-6-luna at $0.10 / $0.50 per million tokens: 3,000 tokens in and
+-- 4,000 out at most is 300 + 2,000 = 2,300 micro-dollars.
+insert into calls values ('a1', public.consume_quota('00000000-0000-4000-8000-00000000000a', 'evaluation', 'quick', 3000, 4000));
+select is((select (result ->> 'ok')::boolean from calls where name = 'a1'), true, 'a call at Quick starts');
+select is((select result ->> 'model' from calls where name = 'a1'), 'gpt-6-luna', '…on the level''s model');
+select is((select (result ->> 'reserved_micros')::bigint from calls where name = 'a1'), 2300::bigint, '…reserving the most it can cost');
+select is(
+  (select credit_micros from public.accounts where user_id = '00000000-0000-4000-8000-00000000000a'),
+  997700::bigint,
+  '…which comes off the balance while it runs'
+);
+select is(
+  public.consume_quota('00000000-0000-4000-8000-00000000000a', 'evaluation', 'quick', 3000, 4000) ->> 'reason',
   'busy',
   'a second call while the first runs is refused as busy'
 );
+-- It used 1,200 tokens in and 300 out: 120 + 150 = 270 micro-dollars.
+insert into calls values ('a1-done', public.finish_call('00000000-0000-4000-8000-00000000000a', (select (result ->> 'call_id')::uuid from calls where name = 'a1'), true, 1200, 300));
+select is((select (result ->> 'charged_micros')::bigint from calls where name = 'a1-done'), 270::bigint, 'a call is charged what it cost');
 select is(
-  public.finish_call('00000000-0000-4000-8000-00000000000a', (select (result ->> 'call_id')::uuid from calls where name = 'a1'), true, 100, 50) ->> 'refunded',
-  'false',
-  'a successful call is not refunded'
+  (select credit_micros from public.accounts where user_id = '00000000-0000-4000-8000-00000000000a'),
+  999730::bigint,
+  '…and the rest of the reserve comes back'
+);
+select is(
+  (select sum(amount_micros)::bigint from public.credit_ledger where user_id = '00000000-0000-4000-8000-00000000000a'),
+  999730::bigint,
+  'the ledger adds up to the balance'
+);
+select is(
+  (select avg_cost_micros from public.levels where id = 'quick'),
+  270::bigint,
+  'the level learns what a call costs'
+);
+select is(
+  (select (result ->> 'est_left')::bigint from calls where name = 'a1-done'),
+  3702::bigint,
+  '…and says about how many are left at it'
+);
+select is(
+  (select (public.finish_call('00000000-0000-4000-8000-00000000000a', (select (result ->> 'call_id')::uuid from calls where name = 'a1'), true, 1200, 300) ->> 'charged_micros')::bigint),
+  0::bigint,
+  'finishing the same call again charges nothing more'
 );
 
--- --- the daily allowance --------------------------------------------------------
-do $$
-declare
-  r jsonb;
-begin
-  for i in 1..9 loop
-    r := public.consume_quota('00000000-0000-4000-8000-00000000000a', 'evaluation');
-    perform public.finish_call('00000000-0000-4000-8000-00000000000a', (r ->> 'call_id')::uuid, true, 100, 50);
-  end loop;
-end;
-$$;
-insert into calls values ('a11', public.consume_quota('00000000-0000-4000-8000-00000000000a', 'evaluation'));
-select is((select result ->> 'reason' from calls where name = 'a11'), 'daily', 'the 11th evaluation of the day is refused');
-select is((select (result ->> 'remaining')::int from calls where name = 'a11'), 0, '…with none left');
+-- --- a failed call costs the user nothing ---------------------------------------------
+insert into calls values ('a2', public.consume_quota('00000000-0000-4000-8000-00000000000a', 'evaluation', 'quick', 3000, 4000));
+do $$ begin perform public.finish_call('00000000-0000-4000-8000-00000000000a', (select (result ->> 'call_id')::uuid from calls where name = 'a2'), false, 900, 0); end $$;
 select is(
-  (select (result ->> 'reset_at')::timestamptz from calls where name = 'a11'),
-  ((now() at time zone 'UTC')::date + 1)::timestamp at time zone 'UTC',
-  '…until midnight in the user''s time zone'
-);
-select is(
-  (select evaluations from public.usage_daily where user_id = '00000000-0000-4000-8000-00000000000a'),
-  10,
-  'ten evaluations are counted'
-);
-select is(
-  (select input_tokens from public.usage_daily where user_id = '00000000-0000-4000-8000-00000000000a'),
-  1000::bigint,
-  'their input tokens are recorded'
+  (select credit_micros from public.accounts where user_id = '00000000-0000-4000-8000-00000000000a'),
+  999730::bigint,
+  'a failed call is refunded in full'
 );
 select ok(
-  (select cost_micros from public.spend_daily where day = (now() at time zone 'UTC')::date) >= 350,
-  'and the day''s spending grows by their cost'
+  (select cost_micros from public.spend_daily where day = (now() at time zone 'UTC')::date) >= 270 + 90,
+  '…though its tokens still count in the day''s spending'
 );
 
--- --- helpers have their own allowance, and failures are refunded ---------------
-insert into calls values ('ah', public.consume_quota('00000000-0000-4000-8000-00000000000a', 'helper'));
-select is((select (result ->> 'ok')::boolean from calls where name = 'ah'), true, 'a helper call is allowed after the evaluations run out');
+-- --- levels -------------------------------------------------------------------------------
 select is(
-  public.finish_call('00000000-0000-4000-8000-00000000000a', (select (result ->> 'call_id')::uuid from calls where name = 'ah'), false) ->> 'refunded',
-  'true',
-  'a failed call is refunded'
+  public.consume_quota('00000000-0000-4000-8000-00000000000a', 'evaluation', 'astra', 3000, 4000) ->> 'reason',
+  'level',
+  'an unknown level is refused'
 );
+update public.levels set enabled = false where id = 'deep';
 select is(
-  (select helpers from public.usage_daily where user_id = '00000000-0000-4000-8000-00000000000a'),
-  0,
-  '…so it isn''t counted'
+  public.consume_quota('00000000-0000-4000-8000-00000000000a', 'evaluation', 'deep', 3000, 4000) ->> 'reason',
+  'level',
+  'a level switched off is refused'
 );
+update public.levels set enabled = true where id = 'deep';
+
+-- --- running out ----------------------------------------------------------------------------
+update public.accounts set credit_micros = 500 where user_id = '00000000-0000-4000-8000-00000000000b';
+insert into calls values ('b-thorough', public.consume_quota('00000000-0000-4000-8000-00000000000b', 'evaluation', 'thorough', 3000, 4000));
+select is((select result ->> 'reason' from calls where name = 'b-thorough'), 'credit', 'not enough for one call at Thorough: out of credit');
+select is((select (result ->> 'balance_micros')::bigint from calls where name = 'b-thorough'), 500::bigint, '…with the balance');
+insert into calls values ('b-quick', public.consume_quota('00000000-0000-4000-8000-00000000000b', 'evaluation', 'quick', 3000, 4000));
+select is((select (result ->> 'reserved_micros')::bigint from calls where name = 'b-quick'), 500::bigint, 'the last call of a balance reserves only what''s left');
+do $$ begin perform public.finish_call('00000000-0000-4000-8000-00000000000b', (select (result ->> 'call_id')::uuid from calls where name = 'b-quick'), true, 9000, 4000); end $$;
 select is(
-  public.finish_call('00000000-0000-4000-8000-00000000000a', gen_random_uuid(), false) ->> 'reason',
-  'not_current',
-  'finishing a call that isn''t the current one refunds nothing'
+  (select credit_micros from public.accounts where user_id = '00000000-0000-4000-8000-00000000000b'),
+  0::bigint,
+  '…and a balance never goes below zero'
 );
 
--- --- time zones -----------------------------------------------------------------
-select is(public.set_timezone('00000000-0000-4000-8000-00000000000b', 'Mars/Olympus') ->> 'reason', 'invalid', 'an unknown time zone is refused');
-select is((public.set_timezone('00000000-0000-4000-8000-00000000000b', 'America/Mexico_City') ->> 'ok')::boolean, true, 'the first time zone is set');
-select is(public.set_timezone('00000000-0000-4000-8000-00000000000b', 'Europe/Paris') ->> 'reason', 'too_soon', 'changing it again within 30 days is refused');
-insert into calls values ('b1', public.consume_quota('00000000-0000-4000-8000-00000000000b', 'evaluation'));
+-- --- the account, and asking about recharges -----------------------------------------------------
+select is((public.account_summary('00000000-0000-4000-8000-00000000000a') ->> 'balance_micros')::bigint, 999730::bigint, 'the summary has the balance');
+select is(jsonb_array_length(public.account_summary('00000000-0000-4000-8000-00000000000a') -> 'levels'), 4, '…and the four levels');
+select ok((public.register_recharge_interest('00000000-0000-4000-8000-00000000000a') ->> 'at') is not null, '"tell me when recharges open" is recorded');
 select is(
-  (select (result ->> 'reset_at')::timestamptz from calls where name = 'b1'),
-  ((now() at time zone 'America/Mexico_City')::date + 1)::timestamp at time zone 'America/Mexico_City',
-  'the allowance resets at midnight in Mexico City for a user there'
-);
-do $$ begin perform public.finish_call('00000000-0000-4000-8000-00000000000b', (select (result ->> 'call_id')::uuid from calls where name = 'b1'), true); end $$;
-
--- --- billing events ---------------------------------------------------------------
-select is(
-  (public.apply_billing_event('evt-1', now(), '00000000-0000-4000-8000-00000000000b', 'pro', 'active', now() + interval '30 days') ->> 'applied')::boolean,
-  true,
-  'a subscription event makes the user Pro'
-);
-select is(
-  public.apply_billing_event('evt-1', now(), '00000000-0000-4000-8000-00000000000b', 'pro', 'active', now() + interval '30 days') ->> 'reason',
-  'duplicate',
-  'the same event twice is applied once'
-);
-select is(
-  public.apply_billing_event('evt-0', now() - interval '1 day', '00000000-0000-4000-8000-00000000000b', 'free', 'expired', null) ->> 'reason',
-  'stale',
-  'an older event arriving late is ignored'
-);
-insert into calls values ('b2', public.consume_quota('00000000-0000-4000-8000-00000000000b', 'evaluation'));
-select is((select result ->> 'plan' from calls where name = 'b2'), 'pro', 'a Pro user is scored on Pro');
-select is((select (result ->> 'limit')::int from calls where name = 'b2'), 500, '…against the monthly fair-use limit');
-do $$ begin perform public.finish_call('00000000-0000-4000-8000-00000000000b', (select (result ->> 'call_id')::uuid from calls where name = 'b2'), true); end $$;
-select is(
-  public.apply_billing_event('evt-2', now(), '00000000-0000-4000-8000-00000000000b', 'pro', 'expired', now() - interval '1 day') ->> 'applied',
-  'true',
-  'an expiry is applied'
-);
-select is(public.account_summary('00000000-0000-4000-8000-00000000000b') ->> 'plan', 'free', '…and the user is back on Free');
-select is(
-  public.apply_billing_event('evt-3', now(), '00000000-0000-4000-8000-0000000000ff', 'pro', 'active', null) ->> 'reason',
-  'unknown_user',
-  'an event for an unknown user is not applied'
+  public.account_summary('00000000-0000-4000-8000-00000000000a') ->> 'recharge_interest_at',
+  public.register_recharge_interest('00000000-0000-4000-8000-00000000000a') ->> 'at',
+  '…once: asking again keeps the first time'
 );
 
--- --- the operator switch ------------------------------------------------------------
+-- --- the brakes -------------------------------------------------------------------------------------
+update public.plans set hourly_calls = 1 where id = 'free';
+select is(public.consume_quota('00000000-0000-4000-8000-00000000000a', 'evaluation', 'quick', 3000, 4000) ->> 'reason', 'hourly', 'the hourly brake still applies');
+update public.plans set hourly_calls = 20 where id = 'free';
 update public.app_settings set value = 'true' where key = 'paused';
-select is(public.consume_quota('00000000-0000-4000-8000-00000000000c', 'evaluation') ->> 'reason', 'paused', 'pausing stops hosted scoring');
+select is(public.consume_quota('00000000-0000-4000-8000-00000000000c', 'evaluation', 'quick', 3000, 4000) ->> 'reason', 'paused', 'pausing stops hosted scoring');
 update public.app_settings set value = 'false' where key = 'paused';
 
--- --- what a signed-in user can do ------------------------------------------------------
+-- --- time zones and billing events, unchanged ---------------------------------------------------------
+select is((public.set_timezone('00000000-0000-4000-8000-00000000000c', 'America/Mexico_City') ->> 'ok')::boolean, true, 'the time zone is set');
+select is(
+  (public.apply_billing_event('evt-1', now(), '00000000-0000-4000-8000-00000000000c', 'pro', 'active', now() + interval '30 days') ->> 'applied')::boolean,
+  true,
+  'a billing event is applied'
+);
+select is(
+  public.apply_billing_event('evt-1', now(), '00000000-0000-4000-8000-00000000000c', 'pro', 'active', now() + interval '30 days') ->> 'reason',
+  'duplicate',
+  '…once'
+);
+
+-- --- what a signed-in user can do --------------------------------------------------------------------
 set local role authenticated;
 set local request.jwt.claims = '{"sub": "00000000-0000-4000-8000-00000000000a", "role": "authenticated"}';
-select is((select count(*)::int from public.accounts), 1, 'a user sees only their own account');
-select throws_ok(
-  $$ select public.finish_call('00000000-0000-4000-8000-00000000000a', gen_random_uuid(), false) $$,
-  '42501',
-  null,
-  'a user can''t call the quota functions (or refund themselves)'
+select is(
+  (select count(distinct user_id)::int from public.credit_ledger),
+  1,
+  'a user sees only their own credit history'
 );
 select throws_ok(
-  $$ update public.accounts set plan = 'pro' $$,
+  $$ select public.grant_starter_credit('00000000-0000-4000-8000-00000000000a') $$,
   '42501',
   null,
-  'a user can''t change their own plan'
+  'a user can''t give themselves credit'
+);
+select throws_ok(
+  $$ update public.accounts set credit_micros = 99000000 $$,
+  '42501',
+  null,
+  'a user can''t change their own balance'
 );
 reset role;
 

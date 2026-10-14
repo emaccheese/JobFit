@@ -29,13 +29,33 @@ function fakeBackend({ quota = null, summary = null, finishThrows = false, delet
     async rpc(name, args) {
       calls.push({ rpc: name, args });
       if (name === "consume_quota") {
-        return quota || { ok: true, call_id: "call-1", plan: "free", model: "gpt-6-luna", reasoning_effort: "low", limit: 10, remaining: 9, reset_at: "2026-10-07T06:00:00+00:00" };
+        if (quota) return quota;
+        // As the levels table has them.
+        const levels = { quick: ["gpt-6-luna", "low"], careful: ["gpt-6-luna", "medium"], thorough: ["gpt-6-sol", "low"], deep: ["gpt-6-sol", "medium"] };
+        const [model, effort] = levels[args.p_level] || [];
+        return model ? { ok: true, call_id: "call-1", level: args.p_level, model, reasoning_effort: effort, reserved_micros: 3500 } : { ok: false, reason: "level" };
       }
       if (name === "finish_call") {
         if (finishThrows) throw new Error("db down");
-        return { ok: true, refunded: !args.p_ok };
+        return { ok: true, charged_micros: args.p_ok ? 270 : 0, refunded_micros: args.p_ok ? 3230 : 3500, balance_micros: 840000, est_left: 840, level: "quick" };
       }
-      if (name === "account_summary") return summary || { plan: "free", purchased_plan: "free", billing_status: "none", tz: "UTC", evaluations: { used_today: 3, daily_limit: 10 }, helpers: { used_today: 0, daily_limit: 5 } };
+      if (name === "account_summary")
+        return (
+          summary || {
+            plan: "free",
+            purchased_plan: "free",
+            billing_status: "none",
+            tz: "UTC",
+            balance_micros: 840000,
+            starter_micros: 1000000,
+            recharge_interest_at: null,
+            levels: [
+              { id: "quick", model: "gpt-6-luna", reasoning_effort: "low", cost_micros: 1000, est_left: 840 },
+              { id: "thorough", model: "gpt-6-sol", reasoning_effort: "low", cost_micros: 25000, est_left: 33 },
+            ],
+          }
+        );
+      if (name === "register_recharge_interest") return { ok: true, at: "2026-10-14T10:00:00Z" };
       if (name === "set_timezone") return args.p_tz === "Europe/Paris" ? { ok: false, reason: "too_soon", tz: "UTC", retry_at: "2026-11-01T00:00:00Z" } : { ok: true, tz: args.p_tz };
       if (name === "apply_billing_event") return { applied: true };
       throw new Error(`unexpected rpc ${name}`);
@@ -150,10 +170,17 @@ function request(body, { token = TOKEN, method = "POST", raw = null } = {}) {
   r = await run({ kind: "evaluate", user: POSTING, lang: "es" });
   const sent = r.ai.requests[0];
   check("score: an evaluation → 200 with the model's JSON", r.resp.status === 200 && r.json.data.score === 82, r.json);
-  check("…and the allowance left", r.json.remaining === 9 && r.json.limit === 10 && r.json.resetAt === "2026-10-07T06:00:00+00:00", r.json);
-  check("…spends an evaluation", r.b.rpcs("consume_quota")[0].args.p_kind === "evaluation" && r.b.rpcs("consume_quota")[0].args.p_user === USER.id);
+  check("…with what it cost and the credit left", r.json.chargedMicros === 270 && r.json.balanceMicros === 840000 && r.json.estLeft === 840, r.json);
+  const reserved = r.b.rpcs("consume_quota")[0].args;
+  check("…counts as an evaluation, at the default level, Quick", reserved.p_kind === "evaluation" && reserved.p_user === USER.id && reserved.p_level === "quick");
+  check(
+    "…reserving for the most it can use: the request's size and the kind's output cap",
+    reserved.p_max_output_tokens === KINDS.evaluate.maxOutputTokens &&
+      reserved.p_max_input_tokens === Math.ceil((PROMPTS.forKind("evaluate", { lang: "es" }).length + POSTING.length) / 3),
+    reserved
+  );
   check("…calls OpenAI's Responses API with the server's key", sent.url === "https://api.openai.com/v1/responses" && sent.init.headers.Authorization === "Bearer sk-server-key");
-  check("…with the plan's model and effort, not stored", sent.body.model === "gpt-6-luna" && sent.body.reasoning.effort === "low" && sent.body.store === false && !("temperature" in sent.body));
+  check("…with the level's model and effort, not stored", sent.body.model === "gpt-6-luna" && sent.body.reasoning.effort === "low" && sent.body.store === false && !("temperature" in sent.body));
   check("…with the server's instructions in the user's language", sent.body.input[0].role === "developer" && sent.body.input[0].content === PROMPTS.forKind("evaluate", { lang: "es" }));
   check("…and the request's text as the user message", sent.body.input[1].content === POSTING && sent.body.input.length === 2);
   check("…in JSON mode, with the kind's output limit", sent.body.text.format.type === "json_object" && sent.body.max_output_tokens === KINDS.evaluate.maxOutputTokens);
@@ -181,22 +208,30 @@ function request(body, { token = TOKEN, method = "POST", raw = null } = {}) {
   r = await run({ kind: "suggestFlags", user: "CANDIDATE PROFILE:\nGo engineer", languages: ["en", "es"] });
   check("score: flag suggestions get the reading languages", r.ai.requests[0].body.input[0].content === PROMPTS.forKind("suggestFlags", { languages: ["en", "es"] }));
 
-  // --- out of allowance --------------------------------------------------------------
-  const resetSoon = new Date(Date.now() + 3 * 3600 * 1000).toISOString();
-  r = await run({ kind: "evaluate", user: POSTING }, { quota: { ok: false, reason: "daily", plan: "free", limit: 10, remaining: 0, reset_at: resetSoon } });
+  // --- effort levels -------------------------------------------------------------------
+  r = await run({ kind: "evaluate", user: POSTING, level: "deep" });
+  check("levels: Deep uses gpt-6-sol at medium effort", r.ai.requests[0].body.model === "gpt-6-sol" && r.ai.requests[0].body.reasoning.effort === "medium" && r.b.rpcs("consume_quota")[0].args.p_level === "deep");
+  r = await run({ kind: "evaluate", user: POSTING, level: "careful", model: "gpt-6-astra", reasoning: { effort: "high" } });
+  check("…the model and effort come from the level, never from the request", r.ai.requests[0].body.model === "gpt-6-luna" && r.ai.requests[0].body.reasoning.effort === "medium");
+  r = await run({ kind: "evaluate", user: POSTING, level: "astra" });
+  check("…an unknown level → 400, no model call", r.resp.status === 400 && r.ai.requests.length === 0);
+  r = await run({ kind: "evaluate", user: POSTING, level: "Quick; drop table" });
+  check("…a level that isn't a name → 400, never sent on", r.resp.status === 400 && r.b.rpcs("consume_quota").length === 0);
+
+  // --- out of credit -------------------------------------------------------------------
+  r = await run({ kind: "evaluate", user: POSTING }, { quota: { ok: false, reason: "credit", balance_micros: 400, level: "quick" } });
+  check("credit: not enough left → 402, with the balance", r.resp.status === 402 && r.json.error === "credit" && r.json.balanceMicros === 400 && r.json.level === "quick", r.json);
+  check("…no Retry-After (waiting doesn't help), and no model call", !r.resp.headers.has("Retry-After") && r.ai.requests.length === 0 && r.b.rpcs("finish_call").length === 0);
+  const resetSoon = new Date(Date.now() + 40 * 60 * 1000).toISOString();
+  r = await run({ kind: "evaluate", user: POSTING }, { quota: { ok: false, reason: "hourly", reset_at: resetSoon } });
   const retry = Number(r.resp.headers.get("Retry-After"));
-  check("quota: the day's allowance used up → 429", r.resp.status === 429 && r.json.error === "quota" && r.json.reason === "daily", r.json);
-  check("…with when it refills, as a time and as Retry-After", r.json.resetAt === resetSoon && retry > 3 * 3600 - 60 && retry <= 3 * 3600);
-  check("…offering Pro to a free user", r.json.upgrade === true);
-  check("…and no model call", r.ai.requests.length === 0 && r.b.rpcs("finish_call").length === 0);
-  r = await run({ kind: "evaluate", user: POSTING }, { quota: { ok: false, reason: "monthly", plan: "pro", limit: 500, remaining: 0, reset_at: resetSoon } });
-  check("quota: Pro's monthly fair use → 429, nothing to upgrade to", r.resp.status === 429 && r.json.reason === "monthly" && r.json.upgrade === false);
+  check("quota: the hourly brake → 429, with when it lifts", r.resp.status === 429 && r.json.reason === "hourly" && r.json.resetAt === resetSoon && retry > 40 * 60 - 60 && retry <= 40 * 60);
   r = await run({ kind: "evaluate", user: POSTING }, { quota: { ok: false, reason: "busy", retry_after: 5 } });
   check("quota: a second call at once → 429 busy, retry in 5 s", r.resp.status === 429 && r.json.reason === "busy" && r.resp.headers.get("Retry-After") === "5");
   r = await run({ kind: "evaluate", user: POSTING }, { quota: { ok: false, reason: "paused" } });
   check("quota: hosted scoring paused → 503", r.resp.status === 503 && r.json.error === "paused" && r.ai.requests.length === 0);
 
-  // --- the model fails: the allowance comes back --------------------------------------
+  // --- the model fails: nothing is charged ----------------------------------------------
   r = await run({ kind: "evaluate", user: POSTING }, { reply: 500 });
   check("upstream: OpenAI fails → 502", r.resp.status === 502 && r.json.error === "upstream");
   check("…and the call is refunded", r.b.rpcs("finish_call")[0].args.p_ok === false);
@@ -222,7 +257,13 @@ function request(body, { token = TOKEN, method = "POST", raw = null } = {}) {
     return { resp, json: await resp.json(), b };
   };
   let a = await account();
-  check("account: plan and today's usage", a.resp.status === 200 && a.json.plan === "free" && a.json.evaluations.usedToday === 3 && a.json.evaluations.dailyLimit === 10 && a.json.email === USER.email);
+  check("account: the credit, in micro-dollars, and the starter amount", a.resp.status === 200 && a.json.balanceMicros === 840000 && a.json.starterMicros === 1000000 && a.json.email === USER.email, a.json);
+  check(
+    "…and each level with what a call costs and about how many are left",
+    a.json.levels.length === 2 && a.json.levels[0].id === "quick" && a.json.levels[0].estLeft === 840 && a.json.levels[1].model === "gpt-6-sol" && a.json.levels[1].effort === "low" && a.json.levels[1].costMicros === 25000
+  );
+  a = await account({}, { rechargeInterest: true });
+  check('account: "tell me when recharges open" is recorded', a.resp.status === 200 && a.b.rpcs("register_recharge_interest")[0].args.p_user === USER.id && a.b.rpcs("set_timezone").length === 0);
   check("…and says checkout isn't available yet", a.json.checkoutAvailable === false);
   a = await account({ token: null });
   check("account: no session → 401", a.resp.status === 401);

@@ -1,8 +1,11 @@
-// /account — the signed-in user's plan and today's usage, for the
-// extension's Settings and popup; and setting their time zone.
+// /account — the signed-in user's credit and the effort levels, for the
+// extension's Settings, wizard and popup; the "tell me when recharges open"
+// request; and the time zone.
 //
-//   GET  → 200 { email, plan, billingStatus, periodEnd, tz, evaluations, helpers, dayResetsAt, monthResetsAt, checkoutAvailable }
-//   POST { tz } → 200 { tz } · 400 bad_request · 409 too_soon { retryAt }
+//   GET  → 200 { email, balanceMicros, starterMicros, levels: [{ id, model, effort, costMicros, estLeft }],
+//                rechargeInterestAt, checkoutAvailable }
+//   POST { rechargeInterest: true } → 200 (the same, with rechargeInterestAt set; asking twice keeps the first time)
+//   POST { tz } → 200 · 400 bad_request · 409 too_soon { retryAt }
 //
 // POST /delete-account is in delete-account.ts.
 
@@ -18,24 +21,21 @@ export async function signedInUser(req: Request, backend: Backend): Promise<User
 
 // The database's snake_case summary, as the extension reads it.
 export function shapeSummary(summary: Record<string, any>, email: string | null, billingConfigured: boolean) {
-  const evaluations = summary.evaluations || {};
-  const helpers = summary.helpers || {};
+  const levels = Array.isArray(summary.levels) ? summary.levels : [];
   return {
     email,
+    balanceMicros: Number(summary.balance_micros) || 0,
+    starterMicros: Number(summary.starter_micros) || 0,
+    levels: levels.map((l: Record<string, any>) => ({
+      id: l.id,
+      model: l.model,
+      effort: l.reasoning_effort ?? null,
+      costMicros: Number(l.cost_micros) || 0,
+      estLeft: Number(l.est_left) || 0,
+    })),
+    rechargeInterestAt: summary.recharge_interest_at ?? null,
     plan: summary.plan,
-    purchasedPlan: summary.purchased_plan,
     billingStatus: summary.billing_status,
-    periodEnd: summary.period_end ?? null,
-    tz: summary.tz,
-    evaluations: {
-      usedToday: evaluations.used_today ?? 0,
-      dailyLimit: evaluations.daily_limit ?? null,
-      usedThisMonth: evaluations.used_this_month ?? 0,
-      monthlyLimit: evaluations.monthly_limit ?? null,
-    },
-    helpers: { usedToday: helpers.used_today ?? 0, dailyLimit: helpers.daily_limit ?? null },
-    dayResetsAt: summary.day_resets_at ?? null,
-    monthResetsAt: summary.month_resets_at ?? null,
     checkoutAvailable: billingConfigured,
   };
 }
@@ -59,12 +59,16 @@ export async function handleAccount(req: Request, deps: AccountDeps): Promise<Re
   if (req.method === "POST") {
     const read = await readJsonBody(req, 4096);
     if (!read.ok) return done(read.response);
-    const tz = read.body.tz;
-    if (typeof tz !== "string" || tz.length > 64 || !TZ_NAME.test(tz)) return done(errorReply(400, "bad_request", { detail: "Invalid time zone." }));
-    const set = (await deps.backend.rpc("set_timezone", { p_user: user.id, p_tz: tz })) as Record<string, any>;
-    if (set.ok !== true) {
-      if (set.reason === "too_soon") return done(errorReply(409, "too_soon", { tz: set.tz, retryAt: set.retry_at }));
-      return done(errorReply(400, "bad_request", { detail: "Invalid time zone." }));
+    if (read.body.rechargeInterest === true) {
+      await deps.backend.rpc("register_recharge_interest", { p_user: user.id });
+    } else {
+      const tz = read.body.tz;
+      if (typeof tz !== "string" || tz.length > 64 || !TZ_NAME.test(tz)) return done(errorReply(400, "bad_request", { detail: "Invalid time zone." }));
+      const set = (await deps.backend.rpc("set_timezone", { p_user: user.id, p_tz: tz })) as Record<string, any>;
+      if (set.ok !== true) {
+        if (set.reason === "too_soon") return done(errorReply(409, "too_soon", { tz: set.tz, retryAt: set.retry_at }));
+        return done(errorReply(400, "bad_request", { detail: "Invalid time zone." }));
+      }
     }
   }
 
