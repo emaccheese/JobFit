@@ -86,6 +86,7 @@ job-fit-evaluator/
 ├── insights.html        # Search insights: is the search working?
 ├── insights.js          # JOB_FIT_INSIGHTS — the counting (funnel, replies, score bands, sites, companies)
 ├── insights-page.js     # draws it
+├── sync.js              # JOB_FIT_SYNC — opt-in sync of profiles and two preferences through chrome.storage.sync
 ├── images/              # Tino's drawings, copied from brand/ by tools/brand.js
 ├── icons/               # icon-16/32/48/128.png, rendered from brand/ by tools/brand.js
 ├── jobkey.js            # canonical job identity per page
@@ -1357,6 +1358,45 @@ and company are tables, which scroll inside their card on a phone.
 
 `siteLabel` was missing Glassdoor and Eightfold (their jobs said "another site"); both
 are named now.
+
+## Sync across computers (2026-10-11)
+
+Opt-in per computer (Settings → Data, `syncEnabled`), run by the service worker.
+
+**What syncs, and why only that.** `chrome.storage.sync` allows about 100 KB in all and
+8 KB per item, and it's the user's Google account. Profiles fit (a few KB each) and
+are what's tedious to recreate; the language and the toolbar count come along.
+Tracked jobs don't fit (megabytes of posting text) and stay per computer, with backups
+for moving them. Model settings are per machine by nature (an LM Studio address), the
+OpenAI key never leaves the vault, the active profile is a per-computer choice, and
+on-page button sites are Chrome permissions that don't sync.
+
+**Layout.** `prof:<id>` holds `{ updatedAt, parts }` and `prof:<id>#<n>` slices of the
+profile's JSON, 1,800 characters each (under 8 KB even at 4 bytes a character). A
+deleted profile leaves `{ deleted: true }`. Preferences are one `prefs` item.
+
+**Rounds.** `syncNow` pulls, then pushes, and is the only writer.
+- `syncState` keeps the hash this computer last agreed with sync, per profile. Changed
+  here: pushed. Changed elsewhere: pulled. Deleted elsewhere and unchanged here:
+  removed (the active profile falls back to one that exists). Tracked jobs of a removed
+  profile stay on disk, unreachable, until the profile comes back.
+- Both changed before either synced: the version that reached sync first wins. Each
+  computer syncs 2 s after a change (Settings saves as you type, and Chrome limits
+  writes per minute), so that needs two edits seconds apart.
+- Local writes go first, so the change event they fire finds nothing new to push.
+
+**The first time** a computer syncs, its profiles and the synced ones may differ under
+the same id: every install starts with `seed`. A blank template gives way silently.
+Otherwise `syncConflict` lists them, nothing is overwritten, and Settings asks: "Use
+the synced version" or "Keep this computer's" (`syncResolve`, handled by the worker).
+The first time, this computer also adopts the synced language.
+
+**Limits and errors.** A write over Chrome's quota resets `syncState` (so the next change
+retries everything) and Settings says the profiles are too big, with what to do.
+"Remove the synced copy" clears `chrome.storage.sync` and turns sync off here; other
+computers keep their profiles.
+
+The privacy policy (four languages) and the store's data answers say all this.
 
 ## Evaluation history
 

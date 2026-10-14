@@ -14,7 +14,7 @@ they evaluate.
 |---|---|
 | `activeTab` | To read the job posting in the current tab when the user clicks Evaluate, uses the keyboard shortcut or the on-page button. |
 | `scripting` | To run the posting reader in the tab the user asked to evaluate, and to register the optional on-page button on the job sites the user switched it on for. |
-| `storage` | To keep the user's profiles, settings and tracked jobs in the browser. |
+| `storage` | To keep the user's profiles, settings and tracked jobs in the browser. Only if the user turns on sync in Settings, profiles and two preferences also go to `chrome.storage.sync`, so their other Chrome browsers can use them. |
 | `unlimitedStorage` | Tracked jobs keep each posting's text, so a long job search can pass Chrome's default 10 MB limit; without it, saving would start failing. |
 | `alarms` | To resume the evaluation queue after Chrome suspends the extension's background worker. |
 | `webNavigation` | To find the job-board frame inside company career sites that embed a Greenhouse board (`getAllFrames`), so the posting inside it can be read. |
@@ -34,7 +34,7 @@ own key). Disclosing these conservatively is the safer reading.
 
 | Category | Handled? | What and why |
 |---|---|---|
-| Personally identifiable information | Yes | The CV summary the user writes (it may include their name). Sent only to the model the user chose, to score postings. |
+| Personally identifiable information | Yes | The CV summary the user writes (it may include their name). Sent only to the model the user chose, to score postings, and, only if the user turns on sync, kept in their Chrome Sync data. |
 | Website content | Yes | The text of job postings the user asks Tino to evaluate. Sent only to the model the user chose. |
 | Location | Yes, optional | City and region, only if the user turns that on; sent to the model with the profile. |
 | Authentication information | Yes | The user's OpenAI API key, if they add one. Stored locally out of reach of web pages; sent only to OpenAI. |
