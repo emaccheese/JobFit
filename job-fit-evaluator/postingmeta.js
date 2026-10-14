@@ -196,6 +196,9 @@ var JOB_FIT_META = (function () {
   // "7 d" could be anything.
   const COMPACT_AGE = /^\s*(\+?)\s*(\d+)\s*(h|d)\s*(\+?)\s*$/i;
   const TODAY = /\b(just posted|posted today|today|hoy|aujourd'hui|hoje)\b/i;
+  // "Reposted", in the board languages Tino reads: LinkedIn's "Publicado de
+  // nuevo", "Republié", "Republicada", and the like.
+  const REPOSTED = /\bre-?posted\b|publicad[oa] de nuevo|volvi[óo] a publicarse|\brepubli(?:é|ée|cad[oa])\b|\breanunciad[oa]\b/i;
   const YESTERDAY = /\b(yesterday|ayer|hier|ontem)\b/i;
   // In the posting's own text an age only counts next to a word that makes it
   // the posting's: "we shipped it two weeks ago" is not a posting date.
@@ -425,13 +428,24 @@ var JOB_FIT_META = (function () {
       (daysLeft ? plausibleDeadline(new Date(startOfToday(now).getTime() + Number(daysLeft[1]) * DAY_MS), now) : null) ||
       plausibleDeadline(isoFromJsonLd(jsonLd && jsonLd.validThrough), now);
 
-    let postedOn = plausiblePosted(isoFromJsonLd(jsonLd && jsonLd.datePosted), now);
-    let postedApprox = false;
+    // A board that says "Reposted 1 week ago" is saying when the posting came
+    // back, which is what tells you how fresh it is; the page's structured data
+    // often still carries the original date. So a repost on the board's own
+    // line leads, and is marked as one.
+    const ageOn = (age) => isoDay(new Date(startOfToday(now).getTime() - age.days * DAY_MS));
+    const boardLine = String(fields.postedText || "");
+    const repostAge = REPOSTED.test(boardLine) ? parseAge(boardLine) : null;
+    let postedOn = repostAge ? ageOn(repostAge) : plausiblePosted(isoFromJsonLd(jsonLd && jsonLd.datePosted), now);
+    let postedApprox = repostAge ? repostAge.approx : false;
+    let reposted = Boolean(repostAge);
     if (!postedOn) {
-      const age = parseAge(fields.postedText) || parseAge(details, { strict: true }) || parseAge(body, { strict: true });
+      const fromBoard = parseAge(boardLine);
+      const fromDetails = fromBoard ? null : parseAge(details, { strict: true });
+      const age = fromBoard || fromDetails || parseAge(body, { strict: true });
       if (age) {
-        postedOn = isoDay(new Date(startOfToday(now).getTime() - age.days * DAY_MS));
+        postedOn = ageOn(age);
         postedApprox = age.approx;
+        reposted = Boolean(fromDetails && REPOSTED.test(details));
       } else {
         postedOn =
           plausiblePosted(labelledDate(details, POSTED_LABEL, { ...options, future: false }), now) ||
@@ -439,7 +453,7 @@ var JOB_FIT_META = (function () {
       }
     }
 
-    return { reqId: reqId || null, deadline: deadline || null, postedOn: postedOn || null, postedApprox };
+    return { reqId: reqId || null, deadline: deadline || null, postedOn: postedOn || null, postedApprox, reposted: Boolean(postedOn && reposted) };
   }
 
   // Read in the page itself: the JSON-LD, the extractor's fields, the text.
@@ -451,7 +465,7 @@ var JOB_FIT_META = (function () {
         country,
       });
     } catch (err) {
-      return { reqId: null, deadline: null, postedOn: null, postedApprox: false };
+      return { reqId: null, deadline: null, postedOn: null, postedApprox: false, reposted: false };
     }
   }
 
@@ -519,9 +533,8 @@ var JOB_FIT_META = (function () {
     }
     if (meta && meta.postedOn) {
       const date = dateLabel(meta.postedOn, now);
-      details.push(
-        meta.postedApprox ? t("posting.postedApprox", { date }) : t("posting.posted", { date, when: relativeLabel(-daysSince(meta.postedOn, now)) })
-      );
+      const kind = meta.reposted ? "posting.reposted" : "posting.posted";
+      details.push(meta.postedApprox ? t(`${kind}Approx`, { date }) : t(kind, { date, when: relativeLabel(-daysSince(meta.postedOn, now)) }));
       // Moot once applications have closed.
       const weeks = hasClosed(meta, now) ? null : oldPostingWeeks(meta, now);
       if (!applied && weeks) {
@@ -531,7 +544,19 @@ var JOB_FIT_META = (function () {
     return { details, deadlineNote, ageNote, notes: [deadlineNote, ageNote].filter(Boolean) };
   }
 
+  // Tracked jobs' "Posted" filter: "1", "3", "7", "14", "30" (within that many
+  // days), "older" (more than 30), "unknown" (the board never said), "any".
+  function postedWithin(meta, choice, now = Date.now()) {
+    if (!choice || choice === "any") return true;
+    const days = meta && meta.postedOn ? daysSince(meta.postedOn, now) : null;
+    if (choice === "unknown") return days == null;
+    if (days == null) return false;
+    if (choice === "older") return days > 30;
+    return days <= Number(choice);
+  }
+
   return {
+    postedWithin,
     CLOSING_SOON_DAYS,
     OLD_POSTING_DAYS,
     read,

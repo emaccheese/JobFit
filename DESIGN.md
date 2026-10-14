@@ -1532,7 +1532,7 @@ deadline joined them. It now leads only when `staleNote` is set (`primaryAction`
 
 ### Requisition ID, deadline and posting age (2026-10-01)
 
-`postingmeta.js` (`JOB_FIT_META`) reads `{ reqId, deadline, postedOn, postedApprox }`
+`postingmeta.js` (`JOB_FIT_META`) reads `{ reqId, deadline, postedOn, postedApprox, reposted }`
 in the page, after screening, since the country decides how to read 05/10/2026. Each
 value comes from the first source that has it.
 
@@ -1540,7 +1540,19 @@ value comes from the first source that has it.
 |---|---|
 | `reqId` | the extractor's field (Workday's `requisitionId`) → JSON-LD `identifier` → a labelled id in the details panel, then the text |
 | `deadline` | a labelled date in the details, then the text → Workday's "N days left to apply" → JSON-LD `validThrough` |
-| `postedOn` | JSON-LD `datePosted` → the board's age line → "posted 3 days ago" in the text → a labelled date |
+| `postedOn` | a repost on the board's age line → JSON-LD `datePosted` → the board's age line → "posted 3 days ago" in the text → a labelled date |
+
+**Reposts** (2026-10-11). "Reposted 1 week ago" on the board's own line leads, ahead of
+JSON-LD, and sets `reposted`: the page's structured data often keeps the original
+date, but when it came back is what says how fresh it is. Recognised in the board
+languages (LinkedIn's "Publicado de nuevo", "Republié", "Republicada"…), only on the
+board's line or details panel, never in the description, where "we reposted" means
+nothing about the posting. `postedOn` is a day, not an age, so Tracked jobs keeps
+counting: each row shows "posted / reposted N days ago" (amber past
+`OLD_POSTING_DAYS`), the *Posted* filter (`postedWithin`: 1, 3, 7, 14, 30 days, older,
+unknown) combines with the chips and search, the sort has *Date posted* both ways with
+unknown dates last, and the CSV has a *Reposted* column. The row's other date now says
+"evaluated", so the two can't be confused.
 
 What each source looks like:
 - **Requisition IDs in the text** follow labels such as "Req ID", "Job ID", "Job

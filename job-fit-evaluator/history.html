@@ -192,6 +192,8 @@
   .copy-name.done { color: var(--green-fg); border-color: var(--green-line); }
   .job-sub { display: block; margin-top: 2px; font-size: var(--fs-xs); color: var(--muted); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
   .job-sub .badge { margin-right: 2px; }
+  /* Past the point where many have applied already (postingmeta OLD_POSTING_DAYS). */
+  .job-sub .posted.old { color: var(--amber-fg); }
   .badge {
     display: inline-block; vertical-align: middle; white-space: nowrap;
     font-size: var(--fs-xs); font-weight: 600; border-radius: 4px; padding: 1px 6px;
@@ -349,6 +351,8 @@
           <option value="viewed-desc" data-i18n="history.sortViewedDesc">Last activity — newest</option>
           <option value="viewed-asc" data-i18n="history.sortViewedAsc">Last activity — oldest</option>
           <option value="applied-desc" data-i18n="history.sortApplied">Date applied — newest</option>
+          <option value="posted-desc" data-i18n="history.sortPostedDesc">Date posted — newest</option>
+          <option value="posted-asc" data-i18n="history.sortPostedAsc">Date posted — oldest</option>
           <option value="company-asc" data-i18n="history.sortCompany">Company A–Z</option>
           <option value="status" data-i18n="history.sortStatus">Application status</option>
         </select>
@@ -358,6 +362,18 @@
         <div class="menu-body">
           <label class="field"><span data-i18n="history.exactStatus">Exact status</span>
             <select id="statusFilter"></select>
+          </label>
+          <label class="field"><span data-i18n="history.postedFilter">Posted</span>
+            <select id="postedFilter">
+              <option value="any" data-i18n="history.postedAny">Any time</option>
+              <option value="1" data-i18n="history.posted1">In the last day</option>
+              <option value="3" data-i18n="history.posted3">In the last 3 days</option>
+              <option value="7" data-i18n="history.posted7">In the last week</option>
+              <option value="14" data-i18n="history.posted14">In the last 2 weeks</option>
+              <option value="30" data-i18n="history.posted30">In the last month</option>
+              <option value="older" data-i18n="history.postedOlder">More than a month ago</option>
+              <option value="unknown" data-i18n="history.postedUnknown">Date unknown</option>
+            </select>
           </label>
           <label class="check"><input id="hideRejects" type="checkbox"> <span data-i18n="history.hideRejects">Hide hard rejects</span></label>
         </div>

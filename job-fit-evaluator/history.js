@@ -27,6 +27,7 @@ const els = {
   profileSelect: document.getElementById("profileSelect"),
   sortSelect: document.getElementById("sortSelect"),
   statusFilter: document.getElementById("statusFilter"),
+  postedFilter: document.getElementById("postedFilter"),
   search: document.getElementById("search"),
   hideRejects: document.getElementById("hideRejects"),
   list: document.getElementById("list"),
@@ -120,6 +121,40 @@ function scoreRank(record) {
   return record.score;
 }
 
+// --- when the posting went up ----------------------------------------------------
+
+// Days since the posting went up (or came back up, for a repost), or null when
+// the board never said. From the day stored with the job, so it keeps counting.
+function postedDays(record) {
+  const on = record.meta && record.meta.postedOn;
+  return on ? JOB_FIT_META.daysSince(on) : null;
+}
+
+function postedSortKey(record, unknown) {
+  const on = record.meta && record.meta.postedOn;
+  return on ? JOB_FIT_META.dayTs(on) : unknown;
+}
+
+
+// "posted 9 days ago", "reposted today", "posted 30+ days ago" (a board that
+// only says "30+ days" gives a lower bound).
+function postedLabel(record) {
+  const days = postedDays(record);
+  if (days == null) return null;
+  const meta = record.meta;
+  const kind = meta.reposted ? "history.reposted" : "history.posted";
+  if (days <= 0) return t(`${kind}Today`);
+  return t(meta.postedApprox ? `${kind}AgoApprox` : `${kind}Ago`, { count: days });
+}
+
+function buildPosted(record) {
+  const label = postedLabel(record);
+  if (!label) return null;
+  const span = el("span", `posted${postedDays(record) > JOB_FIT_META.OLD_POSTING_DAYS ? " old" : ""}`, label);
+  span.title = JOB_FIT_META.describe(record.meta).details.find((d) => d) || "";
+  return span;
+}
+
 function sortRecords(list, mode) {
   const by = {
     "score-desc": (a, b) => scoreRank(b) - scoreRank(a),
@@ -127,6 +162,9 @@ function sortRecords(list, mode) {
     "viewed-desc": (a, b) => JOB_FIT_EVALSTORE.activityTs(b) - JOB_FIT_EVALSTORE.activityTs(a),
     "viewed-asc": (a, b) => JOB_FIT_EVALSTORE.activityTs(a) - JOB_FIT_EVALSTORE.activityTs(b),
     "applied-desc": (a, b) => (b.appliedAt || 0) - (a.appliedAt || 0),
+    // Jobs with no known posting date go last either way.
+    "posted-desc": (a, b) => postedSortKey(b, -1) - postedSortKey(a, -1),
+    "posted-asc": (a, b) => postedSortKey(a, Infinity) - postedSortKey(b, Infinity),
     "company-asc": (a, b) => (a.company || "￿").localeCompare(b.company || "￿"),
     status: (a, b) => statusOrder(a.status) - statusOrder(b.status) || scoreRank(b) - scoreRank(a),
   };
@@ -166,6 +204,7 @@ function filteredRecords() {
       if (els.hideRejects.checked && r.hardReject) return false;
       if (groupFilter && !FILTERS[groupFilter].match(r)) return false;
       if (status !== "all" && r.status !== status) return false;
+      if (!JOB_FIT_META.postedWithin(r.meta, els.postedFilter.value)) return false;
       if (!query) return true;
       // Notes are searched too — a recruiter's name or "asked about OpenCL" is
       // exactly what you come back looking for weeks later.
@@ -578,6 +617,7 @@ function buildCompanyLine(record, note) {
   all.addEventListener("click", () => {
     groupFilter = null;
     els.statusFilter.value = "all";
+    els.postedFilter.value = "any";
     els.search.value = record.company;
     resetPage();
     render();
@@ -606,6 +646,7 @@ function renderDupChip() {
   open.addEventListener("click", () => {
     groupFilter = groupFilter === "duplicates" ? null : "duplicates";
     els.statusFilter.value = "all";
+    els.postedFilter.value = "any";
     resetPage();
     render();
   });
@@ -748,6 +789,11 @@ function renderRow(record) {
     sub.appendChild(document.createTextNode(" "));
   }
   sub.appendChild(document.createTextNode([record.company, record.location].filter(Boolean).join(" · ") || record.url));
+  const posted = buildPosted(record);
+  if (posted) {
+    sub.appendChild(document.createTextNode(" · "));
+    sub.appendChild(posted);
+  }
   sub.appendChild(document.createTextNode(" · "));
   sub.appendChild(buildWhen(record));
   titleWrap.appendChild(sub);
@@ -1041,6 +1087,7 @@ function renderNoMatches() {
   clear.addEventListener("click", () => {
     groupFilter = null;
     els.statusFilter.value = "all";
+    els.postedFilter.value = "any";
     els.search.value = "";
     els.hideRejects.checked = false;
     resetPage();
@@ -1055,7 +1102,7 @@ function renderNoMatches() {
 // "More filters" says how many of its filters are on, so a list narrowed from
 // inside the closed menu doesn't look like a list with jobs missing.
 function renderMoreFiltersLabel() {
-  const count = (els.statusFilter.value !== "all" ? 1 : 0) + (els.hideRejects.checked ? 1 : 0);
+  const count = (els.statusFilter.value !== "all" ? 1 : 0) + (els.postedFilter.value !== "any" ? 1 : 0) + (els.hideRejects.checked ? 1 : 0);
   els.moreFiltersLabel.textContent = count ? t("history.moreFiltersCount", { count }) : t("history.moreFilters");
 }
 
@@ -1591,6 +1638,7 @@ function renderFunnel() {
     btn.addEventListener("click", () => {
       groupFilter = groupFilter === key ? null : key;
       els.statusFilter.value = "all";
+      els.postedFilter.value = "any";
       resetPage();
       render();
     });
@@ -1618,6 +1666,7 @@ function exportCsv() {
       t("csv.reqId"),
       t("csv.closes"),
       t("csv.posted"),
+      t("csv.reposted"),
       "URL",
       t("csv.notes"),
     ],
@@ -1634,6 +1683,7 @@ function exportCsv() {
       (r.meta && r.meta.reqId) || "",
       (r.meta && r.meta.deadline) || "",
       (r.meta && r.meta.postedOn) || "",
+      r.meta && r.meta.postedOn && r.meta.reposted ? t("csv.yes") : "",
       r.url,
       r.notes,
     ]),
@@ -1725,6 +1775,7 @@ function renderStaleChip() {
   open.addEventListener("click", () => {
     groupFilter = groupFilter === "stale" ? null : "stale";
     els.statusFilter.value = "all";
+    els.postedFilter.value = "any";
     resetPage();
     render();
   });
@@ -1938,6 +1989,7 @@ async function init() {
   all.textContent = t("history.allStatuses");
   els.statusFilter.insertBefore(all, els.statusFilter.firstChild);
   els.statusFilter.value = "all";
+  els.postedFilter.value = "any";
 
   store = await JOB_FIT_PROFILES.load();
   await loadUi();
@@ -1953,6 +2005,8 @@ async function init() {
     groupFilter = null; // the dropdown and the chips never filter at once
     relist();
   });
+  // Combines with everything else: "strong matches posted this week".
+  els.postedFilter.addEventListener("change", relist);
   els.search.addEventListener("input", relist);
   // The filter menu closes when you click elsewhere, like any menu.
   const moreFilters = document.getElementById("moreFilters");
@@ -2031,6 +2085,7 @@ function revealJob(jobKey) {
   if (!records.some((r) => r.jobKey === jobKey)) return;
   groupFilter = null;
   els.statusFilter.value = "all";
+  els.postedFilter.value = "any";
   els.search.value = "";
   els.hideRejects.checked = false;
   const visible = visibleRecords();

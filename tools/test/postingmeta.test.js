@@ -103,5 +103,26 @@ w = M.describe({ deadline: "2027-01-10" }, { now: NOW });
 check("describe: other year shows the year", /2027/.test(w.details[0]) && !w.deadlineNote, w);
 check("describe: nothing", M.describe(null).details.length === 0 && M.describe(undefined).notes.length === 0);
 
+// --- reposts, and the Posted filter -------------------------------------------------
+m = read("", { fields: { postedText: "Sunnyvale, CA · Reposted 1 week ago · Over 100 people clicked apply" }, jsonLd: { datePosted: "2026-06-01" } });
+check("a board's 'Reposted 1 week ago' is the date, ahead of the page's original one", m.postedOn === "2026-09-24" && m.reposted === true, m);
+m = read("", { fields: { postedText: "Ciudad de México · Publicado de nuevo hace 2 semanas" } });
+check("…in Spanish too", m.postedOn === "2026-09-17" && m.reposted === true, m);
+m = read("", { fields: { postedText: "Bellevue, WA · 3 days ago · 40 applicants" } });
+check("a plain age isn't a repost", m.postedOn === "2026-09-28" && m.reposted === false, m);
+m = read("We reposted our values last year. Posted 2 days ago.", {});
+check("'reposted' in the description doesn't make it a repost", m.reposted === false, m);
+check("no date, no repost", read("Nothing about dates.").reposted === false);
+const dRe = M.describe({ postedOn: "2026-09-24", reposted: true }, { now: NOW });
+check("describe says Reposted", /^Reposted /.test(dRe.details[0]), dRe);
+
+const within = (meta, choice) => M.postedWithin(meta, choice, NOW);
+const posted = (daysAgo) => ({ postedOn: new Date(NOW - daysAgo * 86400000).toISOString().slice(0, 10) });
+check("Posted filter: any lets everything through", within(null, "any") && within(posted(400), "any"));
+check("…last day", within(posted(0), "1") && within(posted(1), "1") && !within(posted(2), "1"));
+check("…last week", within(posted(7), "7") && !within(posted(8), "7"));
+check("…last month and older", within(posted(30), "30") && !within(posted(31), "30") && within(posted(31), "older") && !within(posted(30), "older"));
+check("…unknown is only the jobs with no date", within(null, "unknown") && within({ postedOn: null }, "unknown") && !within(posted(3), "unknown") && !within(null, "7"));
+
 console.log(fails ? `\n${fails} FAILED` : "\nall passed");
 process.exit(fails ? 1 : 0);
