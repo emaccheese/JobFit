@@ -78,7 +78,10 @@ var JOB_FIT_EVALSTORE = (function () {
     ["reqId", "deadline", "postedOn"].forEach((key) => {
       if (newer[key]) merged[key] = newer[key];
     });
-    if (newer.postedOn) merged.postedApprox = Boolean(newer.postedApprox);
+    if (newer.postedOn) {
+      merged.postedApprox = Boolean(newer.postedApprox);
+      merged.reposted = Boolean(newer.reposted);
+    }
     return merged;
   }
 

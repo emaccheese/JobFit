@@ -250,8 +250,12 @@ application status pipeline (not applied → applied → interviewing → offer 
 rejected / ghosted), free-text notes, search across the posting body, and CSV
 export. On a wide window the list and the selected job's details sit side by side;
 narrower, a job opens under its row. The status chips (Needs attention, Not applied,
-Waiting, In play, Closed) are the filter; the exact status and *Hide hard rejects* are
-under **More filters**. It works from the keyboard: `/` search, `j` / `k` next and
+Waiting, In play, Closed) are the filter; the exact status, *Posted* and *Hide hard
+rejects* are under **More filters**. Each row says how long ago the posting went up
+("posted 9 days ago", or "reposted 2 days ago" when the board says it came back),
+in amber once it's more than three weeks old. *Posted* filters by that (the last
+day, 3 days, week, 2 weeks, month, more than a month, or unknown), and the sort has
+*Date posted — newest / oldest*. It works from the keyboard: `/` search, `j` / `k` next and
 previous job, `Enter` or `o` details, `1`–`7` set the status, `x` tick for
 re-evaluation, `Esc` back, and `?` lists them all.
 
