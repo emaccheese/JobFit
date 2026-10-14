@@ -6,80 +6,10 @@
 const vm = require("vm");
 const fs = require("fs");
 const path = require("path");
-const { EXT, suite, load } = require("./support");
+const { EXT, suite, load, el } = require("./support");
 
 const { check, done } = suite("glassdoor");
 const read = (f) => fs.readFileSync(path.join(EXT, f), "utf8");
-
-// --- a just-enough DOM ----------------------------------------------------------
-// Selectors: tag and [attr], [attr="v"], [attr^="v"], [attr*="v"] compounds,
-// joined by spaces (descendant). That's all the Glassdoor reader uses.
-function el(tag, attrs = {}, children = []) {
-  const node = { tagName: tag.toUpperCase(), attrs: { ...attrs }, children: [], parent: null };
-  (Array.isArray(children) ? children : [children]).forEach((c) => {
-    const child = typeof c === "string" ? { text: c, parent: node } : c;
-    child.parent = node;
-    node.children.push(child);
-  });
-  Object.defineProperty(node, "id", { get: () => node.attrs.id || "", set: (v) => (node.attrs.id = v) });
-  node.getAttribute = (name) => (name in node.attrs ? node.attrs[name] : null);
-  node.setAttribute = (name, value) => (node.attrs[name] = String(value));
-  Object.defineProperty(node, "textContent", {
-    get: () => node.children.map((c) => (c.tagName ? c.textContent : c.text)).join(node.tagName === "UL" ? "\n" : " "),
-  });
-  Object.defineProperty(node, "innerText", { get: () => node.textContent });
-  node.querySelectorAll = (selector) => queryAll(node, selector);
-  node.querySelector = (selector) => queryAll(node, selector)[0] || null;
-  node.closest = (selector) => {
-    for (let n = node; n && n.tagName; n = n.parent) if (matchesAll(n, selector)) return n;
-    return null;
-  };
-  return node;
-}
-
-function parseCompound(part) {
-  const tag = (part.match(/^[a-z0-9]+/i) || [""])[0].toUpperCase();
-  const attrs = [...part.matchAll(/\[([\w-]+)(?:([*^]?=)"([^"]*)")?\]/g)].map(([, name, op, value]) => ({ name, op, value }));
-  return { tag, attrs };
-}
-
-function matchesCompound(node, { tag, attrs }) {
-  if (!node.tagName || (tag && node.tagName !== tag)) return false;
-  return attrs.every(({ name, op, value }) => {
-    const v = node.getAttribute(name);
-    if (v === null) return false;
-    if (!op) return true;
-    if (op === "=") return v === value;
-    if (op === "^=") return v.startsWith(value);
-    return v.includes(value);
-  });
-}
-
-function matchesAll(node, selector) {
-  return selector.split(",").some((one) => {
-    const parts = one.trim().split(/\s+/).map(parseCompound);
-    if (!matchesCompound(node, parts[parts.length - 1])) return false;
-    let at = node.parent;
-    for (let i = parts.length - 2; i >= 0; i--) {
-      while (at && at.tagName && !matchesCompound(at, parts[i])) at = at.parent;
-      if (!at || !at.tagName) return false;
-      at = at.parent;
-    }
-    return true;
-  });
-}
-
-function queryAll(root, selector) {
-  const out = [];
-  (function walk(n) {
-    for (const c of n.children || []) {
-      if (!c.tagName) continue;
-      if (matchesAll(c, selector)) out.push(c);
-      walk(c);
-    }
-  })(root);
-  return out;
-}
 
 // --- the page --------------------------------------------------------------------
 const DESCRIPTION =
