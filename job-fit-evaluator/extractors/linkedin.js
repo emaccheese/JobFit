@@ -45,9 +45,7 @@
   // It's the one source that doesn't depend on which buttons happen to link
   // to the job, so it's trusted ahead of any guess. Only on the job's own page:
   // on search results the tab title describes the search, not this job.
-  function fromDocumentTitle() {
-    const pathId = jobIdFromPath(location.pathname);
-    if (!pathId || pathId !== currentJobId()) return null;
+  function tabTitle() {
     const parts = document.title
       .replace(/^\(\d+\+?\)\s*/, "")
       .split(" | ")
@@ -55,7 +53,25 @@
     if (parts.length < 3 || !/^linkedin$/i.test(parts[parts.length - 1])) return null;
     const title = parts[0];
     if (!title || notATitle(title)) return null;
-    return { title, company: parts.length >= 3 ? parts[1] : null };
+    return { title, company: parts[1] || null };
+  }
+
+  function fromDocumentTitle() {
+    const pathId = jobIdFromPath(location.pathname);
+    if (!pathId || pathId !== currentJobId()) return null;
+    return tabTitle();
+  }
+
+  // The search page's newer layout (2026) also titles the tab after the job
+  // on screen; the older one titled it after the search. So off the job's own
+  // page the tab title is only taken when the page agrees with it: its title
+  // is a link to this job, or its company is the header's company link.
+  function agreeingTabTitle(header) {
+    const tab = tabTitle();
+    if (!tab) return null;
+    const titles = titleCandidates().map(({ text }) => text);
+    const companies = header ? companyNames(header) : [];
+    return titles.includes(tab.title) || (tab.company && companies.includes(tab.company)) ? tab : null;
   }
 
   function inHeading(anchor) {
@@ -119,17 +135,43 @@
   // the job. The header is still reachable from a pill, and the title is its
   // first text block that isn't the company, a pill, a button or the
   // "location · posted · applicants" line.
+  // The company's name from the header's links to it. The first link is often
+  // the logo, with no text: taking it gave no company, and let the company's
+  // name, written beside the logo, pass for the job title.
+  function companyNames(header) {
+    return Array.from(header.querySelectorAll('a[href*="/company/"]'))
+      .map((a) => (a.innerText || "").trim().split("\n")[0].trim())
+      .filter(Boolean);
+  }
+
   function titleFromHeader(header) {
-    const company = header.querySelector('a[href*="/company/"]');
-    const companyName = company ? company.innerText.trim() : "";
+    const companies = companyNames(header);
     const blocks = header.querySelectorAll("h1, h2, h3, p");
     for (const block of blocks) {
       if (block.closest("a, button")) continue;
       const text = (block.innerText || "").trim();
-      if (!text || text === companyName || text.includes("·") || notATitle(text)) continue;
+      if (!text || companies.includes(text) || text.includes("·") || notATitle(text)) continue;
       return text;
     }
     return null;
+  }
+
+  // The description of the job on screen. The newer layout tags each part of
+  // the job pane with the job's id ("JobDetails_AboutTheJob_<id>"), and has
+  // many expandable boxes (About the company has several), so the box is taken
+  // from that section. While the next job loads, the pane can still be the
+  // last one's: no section for this id means nothing to read yet.
+  const STILL_LOADING = {};
+
+  function descriptionBox() {
+    const sections = Array.from(document.querySelectorAll('[componentkey^="JobDetails_AboutTheJob_"]'));
+    if (sections.length) {
+      const jobId = currentJobId();
+      const mine = jobId ? sections.find((s) => s.getAttribute("componentkey") === `JobDetails_AboutTheJob_${jobId}`) : sections[0];
+      if (!mine) return STILL_LOADING;
+      return mine.querySelector('[data-testid="expandable-text-box"]') || mine;
+    }
+    return document.querySelector('[data-testid="expandable-text-box"]');
   }
 
   function textOf(selector) {
@@ -166,7 +208,8 @@
   }
 
   function extractLinkedIn() {
-    const descEl = document.querySelector('[data-testid="expandable-text-box"]');
+    const descEl = descriptionBox();
+    if (descEl === STILL_LOADING) return null;
     if (!descEl) return extractSignedOut();
 
     // The full description is already in the DOM while the box is visually
@@ -175,20 +218,28 @@
     const text = window.__jobFit.textFrom(descEl);
     if (text.split(/\s+/).length < 100) return null;
 
-    // Most trustworthy first: a heading link, the tab title on the job's own
-    // page, the header's plain-text title, and only then the longest-link
-    // guess. The guess used to come second, ahead of the header, which is how
-    // a "Show all" link won over a plain-text title that was right there.
+    // Most trustworthy first: a heading link, the tab title (on the job's own
+    // page, or on a search page when the page agrees with it), the longest
+    // link to the job, and the header's plain text last. The link once lost to
+    // the header after a "Show all" link won as the title; UI controls are
+    // filtered out of the links now (UI_CONTROL), and in the 2026 layout the
+    // header's plain text is the company's name.
     const headingAnchor = findHeadingAnchor();
     const docTitle = fromDocumentTitle();
     const seed = headingAnchor || jobAnchors()[0];
     const header = seed ? findHeaderContainer(seed) : null;
     const guess = longestAnchor();
+    const agreeing = docTitle ? null : agreeingTabTitle(header);
+    // A link to this job comes ahead of the header's plain text: in the newer
+    // layout the title is such a link, and the header's first plain text is
+    // the company's name or "Responses managed off LinkedIn". Pills, buttons
+    // and pay that also link to the job are filtered out of the candidates.
     const title =
       (headingAnchor && headingAnchor.innerText.trim()) ||
       (docTitle && docTitle.title) ||
-      (header && titleFromHeader(header)) ||
+      (agreeing && agreeing.title) ||
       (guess && guess.innerText.trim()) ||
+      (header && titleFromHeader(header)) ||
       null;
 
     let company = null;
@@ -196,8 +247,7 @@
     let metaLine = null;
 
     if (header) {
-      const companyEl = header.querySelector('a[href*="/company/"]');
-      company = companyEl ? companyEl.innerText.trim() || null : null;
+      company = companyNames(header)[0] || null;
 
       // e.g. "Bellevue, WA · Reposted 1 week ago · 96 people clicked apply"
       metaLine =
@@ -211,6 +261,7 @@
     // The header's company link is preferred; the tab title covers a header
     // that couldn't be found.
     if (!company && docTitle && docTitle.company) company = docTitle.company;
+    if (!company && agreeing && agreeing.company) company = agreeing.company;
 
     return {
       title,
