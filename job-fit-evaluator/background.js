@@ -14,6 +14,7 @@ importScripts(
   "prompts.js",
   "vault.js",
   "provider.js",
+  "tinocloud.js",
   "keywords.js",
   "screening.js",
   "profiles.js",
@@ -567,13 +568,96 @@ function wantsFlex(settings, bulk, caps) {
 // `signal` lets a caller cancel: the setup wizard's model calls can take
 // minutes, and a Cancel button that only hid the spinner would leave LM
 // Studio busy generating an answer nobody is waiting for.
-async function callLmStudio(systemPrompt, userPrompt, { signal, bulk = false } = {}) {
+// --- Tino Cloud ------------------------------------------------------------------
+//
+// One call to Tino's server (tinocloud.js, cloud/supabase/functions/score).
+// It sends what kind of request this is and the user message; the server
+// picks the instructions, and the model and effort from the level. The reply
+// is the model's JSON, like OpenAI's, so everything after it is the same.
+//
+// Failures, in the queue's terms:
+//   config  signed out, or Tino Cloud isn't set up in this build
+//   credit  the starter credit is used up (402)
+//   quota   the hourly brake, or hosted scoring paused for now: retried at
+//           `retryAt` (429 hourly, 503)
+//   unreachable / timeout / http  as for any other model
+const BUSY_RETRY_MAX_SECONDS = 10;
+
+async function callTinoCloud(settings, userPrompt, { signal, kind, extra = {} }) {
+  if (!JOB_FIT_CLOUD.available()) return { ok: false, failure: "config", error: t("bg.cloudUnavailable") };
+  if (!settings.session) return { ok: false, failure: "config", error: t("bg.cloudSignedOut") };
+  if (!kind) return { ok: false, failure: "config", error: t("bg.cloudUnavailable") };
+  const startedAt = Date.now();
+  const body = { kind, level: settings.level, lang: JOB_FIT_I18N.lang, user: userPrompt, ...extra };
+  const timeoutMs = settings.timeoutSeconds * 1000;
+
+  let resp = await JOB_FIT_CLOUD.score(body, { signal, timeoutMs });
+  // Another of your calls still running (a second window, the wizard): wait
+  // its few seconds out once, rather than failing.
+  if (resp.status === 429 && resp.json && resp.json.reason === "busy") {
+    const wait = Math.min(Number(resp.headers && resp.headers.get("Retry-After")) || 5, BUSY_RETRY_MAX_SECONDS);
+    await new Promise((resolve) => setTimeout(resolve, wait * 1000));
+    if (signal && signal.aborted) return { ok: false, failure: "cancelled", error: t("bg.cancelled") };
+    resp = await JOB_FIT_CLOUD.score(body, { signal, timeoutMs });
+  }
+
+  if (resp.error === "cancelled") return { ok: false, failure: "cancelled", error: t("bg.cancelled") };
+  if (resp.error === "timeout") return { ok: false, failure: "timeout", error: t("bg.cloudTimeout", { seconds: settings.timeoutSeconds }) };
+  if (resp.error === "unreachable") return { ok: false, failure: "unreachable", error: t("bg.cloudUnreachable") };
+  if (resp.error === "signedOut" || resp.status === 401) return { ok: false, failure: "config", error: t("bg.cloudSignedOut") };
+
+  const json = resp.json || {};
+  if (resp.status === 402) {
+    await rememberCloudBalance({ balanceMicros: Number(json.balanceMicros) || 0, estLeft: 0, level: settings.level });
+    return { ok: false, failure: "credit", error: t("bg.cloudCredit") };
+  }
+  if (resp.status === 429 || resp.status === 503) {
+    const retryAfter = Number(resp.headers && resp.headers.get("Retry-After")) || 3600;
+    const retryAt = json.resetAt ? Date.parse(json.resetAt) || Date.now() + retryAfter * 1000 : Date.now() + retryAfter * 1000;
+    const time = JOB_FIT_I18N.formatDate(retryAt, { hour: "numeric", minute: "2-digit" });
+    return {
+      ok: false,
+      failure: "quota",
+      retryAt,
+      error: t(resp.status === 503 ? "bg.cloudPaused" : "bg.cloudHourly", { time }),
+    };
+  }
+  if (!resp.ok) {
+    if (resp.status === 504) return { ok: false, failure: "timeout", error: t("bg.cloudTimeout", { seconds: settings.timeoutSeconds }) };
+    return { ok: false, failure: "http", error: t("bg.cloudFailed", { status: resp.status }) };
+  }
+
+  const usage = {
+    input: Number(json.usage && json.usage.inputTokens) || 0,
+    output: Number(json.usage && json.usage.outputTokens) || 0,
+    reasoning: 0,
+    cached: 0,
+    cacheWrite: 0,
+  };
+  await recordUsage("tinocloud", usage);
+  if (json.balanceMicros != null) {
+    await rememberCloudBalance({ balanceMicros: Number(json.balanceMicros), estLeft: Number(json.estLeft) || 0, level: settings.level });
+  }
+  if (!json.data || typeof json.data !== "object") return { ok: false, failure: "shape", error: t("bg.cloudFailed", { status: resp.status }) };
+  return { ok: true, data: json.data, model: settings.model, usage, durationMs: Date.now() - startedAt };
+}
+
+// The last balance the server reported, for the popup and the card, which
+// shouldn't each ask the server. Refreshed on every call and by Settings.
+async function rememberCloudBalance({ balanceMicros, estLeft, level }) {
+  await chrome.storage.local.set({ tinoCloudBalance: { balanceMicros, estLeft, level, at: Date.now() } });
+}
+
+async function callLmStudio(systemPrompt, userPrompt, { signal, bulk = false, kind = null, extra = {} } = {}) {
   await i18nReady;
   // Named for where it started; it now calls whichever provider is selected
-  // (see provider.js): LM Studio's chat-completions endpoint, or OpenAI's
-  // Responses API. The request and reply shapes differ per provider; the
-  // result handed back is the same either way.
+  // (see provider.js): LM Studio's chat-completions endpoint, OpenAI's
+  // Responses API, or Tino Cloud. The request and reply shapes differ per
+  // provider; the result handed back is the same either way. `kind` (evaluate,
+  // summarize, draftProfile, suggestSalary, suggestFlags) and `extra` are for
+  // Tino Cloud, which picks the instructions itself from them.
   const settings = await JOB_FIT_PROVIDER.load();
+  if (settings.provider === "tinocloud") return callTinoCloud(settings, userPrompt, { signal, kind, extra });
   const { url, provider, label, timeoutSeconds } = settings;
   const model = settings.model || undefined;
 
@@ -1218,7 +1302,7 @@ async function evaluateWithLmStudio(
     learningFlags,
     coreWorkOnly,
   });
-  const result = await callLmStudio(systemPrompt(), prompt, { signal, bulk });
+  const result = await callLmStudio(systemPrompt(), prompt, { signal, bulk, kind: "evaluate" });
 
   if (result.ok && result.data) {
     // Surfaced in the result panel: a score produced from a partial posting is worth
@@ -1250,10 +1334,11 @@ function salarySuggestPrompt(markets) {
 async function suggestSalary({ profile, markets, jobSearch }, signal) {
   await i18nReady;
   const situation = describeSituation(jobSearch);
+  const list = Array.isArray(markets) && markets.length ? markets : null;
   return callLmStudio(
     salarySuggestPrompt(markets),
     `CANDIDATE PROFILE:\n${profile}${situation ? `\n\nCANDIDATE SITUATION:\n${situation}` : ""}`,
-    { signal }
+    { signal, kind: "suggestSalary", extra: list ? { markets: list } : {} }
   );
 }
 
@@ -1285,14 +1370,19 @@ function assembleDraftProfile(draft) {
 async function draftProfile({ cv, answersText }, signal) {
   await i18nReady;
   const answers = answersText ? `\n\nCANDIDATE ANSWERS:\n${answersText}` : "";
-  const result = await callLmStudio(profileDraftPrompt(), `CV:\n${String(cv).slice(0, 20000)}${answers}`, { signal });
+  const result = await callLmStudio(profileDraftPrompt(), `CV:\n${String(cv).slice(0, 20000)}${answers}`, { signal, kind: "draftProfile" });
   if (!result.ok) return result;
   return { ok: true, profile: assembleDraftProfile(result.data || {}) };
 }
 
 async function suggestDomainFlags({ profile, languages }, signal) {
   await i18nReady;
-  const result = await callLmStudio(JOB_FIT_PROMPTS.suggestFlags(languages), `CANDIDATE PROFILE:\n${profile}`, { signal });
+  const reads = (Array.isArray(languages) ? languages : []).filter((l) => JOB_FIT_PROMPTS.LANGUAGES.includes(l));
+  const result = await callLmStudio(JOB_FIT_PROMPTS.suggestFlags(languages), `CANDIDATE PROFILE:\n${profile}`, {
+    signal,
+    kind: "suggestFlags",
+    extra: { languages: reads },
+  });
   if (!result.ok) return result;
   const terms = Array.isArray(result.data?.terms) ? result.data.terms : [];
   const seen = new Set();
@@ -1687,7 +1777,7 @@ async function runQueuedEvaluation(item) {
 
 async function runQueuedSummarize(item) {
   await i18nReady;
-  const result = await callLmStudio(summarizePrompt(), buildSummarizePrompt(item.postingText));
+  const result = await callLmStudio(summarizePrompt(), buildSummarizePrompt(item.postingText), { kind: "summarize" });
   if (!result.ok) return result;
 
   const summary = assembleSummary(result.data);
@@ -1724,12 +1814,22 @@ async function runQueuedSummarize(item) {
   return { ok: true };
 }
 
+// A pause that ends by itself (Tino Cloud's hourly brake, the OpenAI daily
+// budget at midnight) wakes the queue with this alarm. Alarms outlive the
+// worker and a browser restart.
+const QUEUE_RESUME_ALARM = "jobfit-queue-resume";
+
 JOB_FIT_QUEUE.configure({
   evaluate: runQueuedEvaluation,
   summarize: runQueuedSummarize,
   timeoutMs: configuredTimeoutMs,
   setBadge,
+  scheduleResume: (when) => chrome.alarms.create(QUEUE_RESUME_ALARM, { when }),
 });
+
+async function resumeWhenDue() {
+  if (await JOB_FIT_QUEUE.resumeIfDue()) kick();
+}
 
 // Kept only while there is something to watch, so the worker isn't woken
 // every minute forever.
@@ -1749,6 +1849,7 @@ async function kick() {
 
 chrome.alarms.onAlarm.addListener((alarm) => {
   if (alarm.name === QUEUE_ALARM) kick();
+  if (alarm.name === QUEUE_RESUME_ALARM) resumeWhenDue();
   if (alarm.name === ATTENTION_ALARM) {
     drawBadge();
     scheduleAttentionRedraw();
@@ -1758,6 +1859,7 @@ chrome.alarms.onAlarm.addListener((alarm) => {
 // Resume automatically after a browser restart or an extension reload: a batch
 // left running overnight should still be running in the morning.
 chrome.runtime.onStartup.addListener(() => {
+  resumeWhenDue();
   kick();
   syncFloatScripts();
   drawBadge();
@@ -2225,13 +2327,15 @@ let settingsResumeTimer = null;
 
 chrome.storage.onChanged.addListener((changes, area) => {
   if (area !== "local") return;
-  // Any of: provider switched, model or endpoint changed, API key added, an
-  // endpoint allowed.
-  const touched = Boolean(changes.endpointApprovalStamp) || ["modelProvider", "lmStudio", "openai"].some((key) => {
+  // Any of: provider switched, model, level or endpoint changed, API key
+  // added, signed in to Tino Cloud, an endpoint allowed.
+  const touched = Boolean(changes.endpointApprovalStamp) || ["modelProvider", "modelLevel", "lmStudio", "openai", "tinoCloud"].some((key) => {
     if (!changes[key]) return false;
     const before = changes[key].oldValue;
     const after = changes[key].newValue;
-    if (key === "modelProvider") return before !== after;
+    if (key === "modelProvider" || key === "modelLevel") return before !== after;
+    // The session is in the vault; its sessionSavedAt stamp is what changes here.
+    if (key === "tinoCloud") return (before || {}).sessionSavedAt !== (after || {}).sessionSavedAt;
     const b = before || {};
     const a = after || {};
     // The key is in the vault; its keySavedAt stamp is what changes here.

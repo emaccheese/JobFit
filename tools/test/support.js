@@ -27,7 +27,9 @@ function clone(value) {
 // chrome.* with an in-memory storage.local and every listener captured.
 // `syncStore`: chrome.storage.sync's contents, which tests share between two
 // "computers"; `syncFails` makes its writes throw (Chrome's size limit).
-function makeChrome({ store = {}, granted = new Set(), syncStore = {}, syncFails = null } = {}) {
+// `authFlow(url)`: what chrome.identity.launchWebAuthFlow returns (the
+// redirect URL) or throws, for Tino Cloud's Google sign-in.
+function makeChrome({ store = {}, granted = new Set(), syncStore = {}, syncFails = null, authFlow = null } = {}) {
   const listeners = { message: [], storage: [], added: [], removed: [] };
   const registered = new Map();
   const sentToTabs = [];
@@ -166,6 +168,13 @@ function makeChrome({ store = {}, granted = new Set(), syncStore = {}, syncFails
     commands: { onCommand: ev() },
     webNavigation: { async getAllFrames() { return []; } },
     i18n: { getUILanguage: () => "en" },
+    identity: {
+      getRedirectURL: () => `https://${EXT_ID}.chromiumapp.org/`,
+      async launchWebAuthFlow({ url }) {
+        if (!authFlow) throw new Error("The user did not approve access.");
+        return authFlow(url);
+      },
+    },
     contextMenus: { create() {}, onClicked: ev(), removeAll(cb) { if (cb) cb(); } },
   };
   return { chrome, store, granted, listeners, registered, sentToTabs, removedPerms, uninstallUrls, badge, alarmsCreated };
@@ -229,6 +238,11 @@ function makeContext(chrome, { origin = null, indexedDB = null, fetch = async ()
     navigator: { languages: ["en"] },
     Intl,
     AbortController,
+    crypto: globalThis.crypto,
+    btoa,
+    atob,
+    TextEncoder,
+    TextDecoder,
   };
   if (origin) ctx.location = { origin, href: `${origin}/` };
   if (indexedDB) ctx.indexedDB = indexedDB;

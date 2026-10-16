@@ -164,6 +164,22 @@ input:focus-visible, textarea:focus-visible, select:focus-visible { outline-offs
 
 .hint { font-size: var(--fs-xs); color: var(--muted); }
 
+/* The effort-level picker (lmstudio-ui.js renderLevelPicker), in Settings and
+   the wizard: one row per level, the whole row clickable. */
+.level-list { display: flex; flex-direction: column; gap: 6px; }
+.level-option {
+  display: flex; gap: 10px; align-items: flex-start; padding: 9px 11px;
+  border: 1px solid var(--line); border-radius: var(--radius-sm); background: var(--card); cursor: pointer;
+}
+.level-option:hover { border-color: var(--accent-line); }
+.level-option:has(input:checked) { border-color: var(--accent); background: var(--accent-soft); }
+.level-option input { margin-top: 3px; flex: 0 0 auto; }
+.level-text { display: flex; flex-direction: column; gap: 1px; min-width: 0; }
+.level-text strong { font-size: var(--fs-sm); }
+.level-blurb { font-size: var(--fs-xs); color: var(--muted); }
+.level-cost { font-size: var(--fs-xs); color: var(--text); font-variant-numeric: tabular-nums; }
+.level-cost:empty { display: none; }
+
 /* Visually hidden, still read by screen readers. Also the live region that
    JOB_FIT_UI.announce() writes to. */
 .sr-only {

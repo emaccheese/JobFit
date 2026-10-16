@@ -30,6 +30,8 @@ steps only you can take, in order. Tick them as you go.
 
 ## Public launch (with Tino Cloud, Phase 4)
 
+- [ ] Once Tino Cloud is live, add it to the listing (`store/listing.md`) and the landing page (`docs/index.html`): sign in with Google or an email code, about 1,000 free evaluations, nothing to install.
+
 - [ ] Switch the listing to **Public**.
 - [ ] Update the landing page's "Get Tino" button to the store link.
 - [ ] Have the designer polish Tino from the brief in `brand/brand.md`.

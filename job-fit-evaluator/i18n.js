@@ -144,7 +144,13 @@ var JOB_FIT_I18N = (function () {
       msg = msg[pluralCategory(n)] ?? msg.other ?? msg.one ?? "";
     }
     if (!vars) return msg;
-    return msg.replace(/\{(\w+)\}/g, (match, name) => (vars[name] != null ? String(vars[name]) : match));
+    // A count reads in the language's own digits: "1,000", "1 000", "1.000".
+    // Only count: other numbers (an error status, a score) stay as they are.
+    return msg.replace(/\{(\w+)\}/g, (match, name) => {
+      if (vars[name] == null) return match;
+      if (name === "count" && typeof vars[name] === "number") return formatNumber(vars[name]);
+      return String(vars[name]);
+    });
   }
 
   function has(key) {

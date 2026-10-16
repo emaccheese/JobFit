@@ -94,7 +94,8 @@
   .dot { width: 9px; height: 9px; border-radius: 50%; background: var(--green); flex: 0 0 auto; }
 
   /* provider choice */
-  .provider-choice { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; margin-bottom: 16px; }
+  /* Two or three cards (Tino Cloud only once it's open), as many as fit. */
+  .provider-choice { display: grid; grid-template-columns: repeat(auto-fit, minmax(180px, 1fr)); gap: 10px; margin-bottom: 16px; }
   @media (max-width: 560px) { .provider-choice { grid-template-columns: 1fr; } }
   .provider-card { display: flex; flex-direction: column; gap: 3px; border: 1px solid var(--line); border-radius: 8px; padding: 12px 14px; cursor: pointer; position: relative; }
   .provider-card:has(input:checked) { border-color: var(--accent); background: var(--accent-soft); }
@@ -349,16 +350,25 @@
 
           <div id="modelFull">
             <div class="provider-choice" role="radiogroup" aria-label="Model provider">
-              <label class="provider-card">
-                <input type="radio" name="provider" value="lmstudio">
-                <span class="provider-name">LM Studio</span>
-                <span class="provider-desc" data-i18n="wiz.model.lmDesc">Runs on this computer. Private and free, but needs a reasonably capable machine.</span>
+              <label class="provider-card" id="cloudCard">
+                <input type="radio" name="provider" value="tinocloud">
+                <span class="provider-name">Tino Cloud</span>
+                <span class="provider-desc" data-i18n="wiz.model.cloudDesc">Nothing to install: sign in and get about 1,000 free evaluations. Postings and your profile go to Tino's server and OpenAI to be scored.</span>
               </label>
               <label class="provider-card">
                 <input type="radio" name="provider" value="openai">
                 <span class="provider-name">OpenAI API</span>
                 <span class="provider-desc" data-i18n="wiz.model.oaDesc">Nothing to install and fast. Postings and your profile are sent to OpenAI and billed to your API key.</span>
               </label>
+              <label class="provider-card">
+                <input type="radio" name="provider" value="lmstudio">
+                <span class="provider-name">LM Studio</span>
+                <span class="provider-desc" data-i18n="wiz.model.lmDesc">Runs on this computer. Private and free, but needs a reasonably capable machine.</span>
+              </label>
+            </div>
+
+            <div id="cloudBox" hidden>
+              <div id="cloudSignInHost"></div>
             </div>
 
             <label class="field" id="openAiKeyField" hidden>
@@ -380,6 +390,12 @@
             </label>
 
             <div id="modelStatus"></div>
+
+            <div class="field" id="levelChoice" hidden>
+              <span class="field-label" id="wizLevelLabel" data-i18n="level.title">Effort level</span>
+              <div class="hint" style="margin-bottom:6px;" data-i18n="level.hint">How carefully postings are read. Higher levels catch more, and cost more per evaluation.</div>
+              <div id="wizLevelPicker" aria-labelledby="wizLevelLabel"></div>
+            </div>
 
             <div id="modelPicker" hidden>
               <span class="field-label" data-i18n="wiz.model.which">Which model should score postings?</span>
@@ -610,6 +626,7 @@
   <script src="defaults.js"></script>
   <script src="vault.js"></script>
   <script src="provider.js"></script>
+  <script src="tinocloud.js"></script>
   <script src="keywords.js"></script>
   <script src="screening.js"></script>
   <script src="profiles.js"></script>

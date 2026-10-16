@@ -269,9 +269,49 @@
         <div class="field">
           <label class="field-label" for="modelProvider" data-i18n="popup.provider">Provider</label>
           <select id="modelProvider" class="inline">
-            <option value="lmstudio" data-i18n="popup.providerLm">LM Studio (local, private, free)</option>
+            <option value="tinocloud" data-i18n="popup.providerCloud">Tino Cloud (no setup, free to start)</option>
             <option value="openai" data-i18n="popup.providerOpenAi">OpenAI API (ChatGPT models)</option>
+            <option value="lmstudio" data-i18n="popup.providerLm">LM Studio (local, private, free)</option>
           </select>
+        </div>
+
+        <!-- Tino Cloud: signing in, then the account -->
+        <div id="cloudFields" hidden>
+          <div class="callout info" id="cloudUnavailable" hidden data-i18n="cloud.comingSoon">Tino Cloud isn't open yet. Until it is, use your own OpenAI key or LM Studio.</div>
+          <div class="callout warn" id="cloudPrivacy" data-i18n="cloud.privacy">Your CV summary and each posting go to Tino's server and on to OpenAI to be scored. Tino keeps your email, your credit and usage counts, never your CV or the postings.</div>
+
+          <div id="cloudSignedOut">
+            <p class="lede" data-i18n="cloud.intro">Score postings with nothing else to install: sign in and get about 1,000 free evaluations.</p>
+            <div id="cloudSignInHost"></div>
+          </div>
+
+          <div id="cloudSignedIn" hidden>
+            <div class="row" style="justify-content:space-between;">
+              <span id="cloudWho"></span>
+              <button id="cloudSignOut" type="button" class="link" data-i18n="cloud.signOut">Sign out</button>
+            </div>
+            <p class="lede" id="cloudCredit"></p>
+            <div class="callout warn" id="cloudOut" hidden>
+              <p style="margin:0 0 8px;" data-i18n="cloud.outIntro">Your free credit is used up. You can keep scoring:</p>
+              <div class="actions">
+                <button id="cloudUseOpenAi" type="button" data-i18n="cloud.useOpenAi">Use my own OpenAI key</button>
+                <button id="cloudUseLm" type="button" data-i18n="cloud.useLm">Use LM Studio (free, on this computer)</button>
+                <button id="cloudInterest" type="button" data-i18n="cloud.interest">Tell me when recharges open</button>
+              </div>
+              <p class="hint" id="cloudInterestDone" hidden></p>
+            </div>
+            <div class="actions" style="margin-top:8px;">
+              <button id="cloudDelete" type="button" class="link" data-i18n="cloud.delete">Delete my Tino Cloud account</button>
+            </div>
+          </div>
+          <div class="hint" id="cloudStatus" role="status" aria-live="polite"></div>
+        </div>
+
+        <!-- Effort level: Tino Cloud and your own OpenAI key -->
+        <div class="field" id="levelField" hidden>
+          <span class="field-label" id="levelLabel" data-i18n="level.title">Effort level</span>
+          <div class="hint" style="margin-bottom:6px;" data-i18n="level.hint">How carefully postings are read. Higher levels catch more, and cost more per evaluation.</div>
+          <div id="levelPicker" aria-labelledby="levelLabel"></div>
         </div>
 
         <div id="lmStudioFields">
@@ -310,7 +350,7 @@
             <input id="openAiKey" type="password" autocomplete="off" spellcheck="false" placeholder="sk-…" aria-describedby="openAiKeyHint">
             <div class="hint" id="openAiKeyHint" data-i18n="popup.openAiKeyHint">Kept in Tino's own key store in this browser, out of reach of the job sites you visit. Never included in backups.</div>
           </div>
-          <div class="field">
+          <div class="field" id="openAiTierField">
             <label class="field-label" for="openAiTier" data-i18n="popup.model">Model</label>
             <select id="openAiTier"></select>
             <div class="hint" id="openAiTierHint"></div>
@@ -445,6 +485,7 @@
   <script src="defaults.js"></script>
   <script src="vault.js"></script>
   <script src="provider.js"></script>
+  <script src="tinocloud.js"></script>
   <script src="keywords.js"></script>
   <script src="profiles.js"></script>
   <script src="sync.js"></script>

@@ -33,7 +33,7 @@ WHAT YOU GET
 • Works on LinkedIn, Indeed, Greenhouse, Workday and most career sites, in English, Spanish, French and Portuguese.
 
 PRIVATE BY DESIGN
-• No account, no tracking, no ads. Everything is stored in your browser.
+• No account needed, no tracking, no ads. Everything is stored in your browser.
 • You choose where postings are scored: a model on your own computer (LM Studio), where nothing leaves it, or OpenAI with your own API key.
 • Free and open source: https://github.com/emaccheese/JobFit
 
@@ -59,7 +59,7 @@ LO QUE OBTIENES
 • Funciona en LinkedIn, Indeed, Greenhouse, Workday y la mayoría de los sitios de empleo, en español, inglés, francés y portugués.
 
 PRIVADO DESDE EL DISEÑO
-• Sin cuenta, sin rastreo, sin anuncios. Todo se guarda en tu navegador.
+• No necesitas cuenta, sin rastreo, sin anuncios. Todo se guarda en tu navegador.
 • Tú eliges dónde se evalúan las vacantes: un modelo en tu propia computadora (LM Studio), donde nada sale de ella, o OpenAI con tu propia clave de API.
 • Gratis y de código abierto: https://github.com/emaccheese/JobFit
 
@@ -85,7 +85,7 @@ CE QUE VOUS OBTENEZ
 • Fonctionne sur LinkedIn, Indeed, Greenhouse, Workday et la plupart des sites carrière, en français, anglais, espagnol et portugais.
 
 CONFIDENTIEL PAR CONCEPTION
-• Pas de compte, pas de pistage, pas de publicité. Tout est stocké dans votre navigateur.
+• Aucun compte nécessaire, pas de pistage, pas de publicité. Tout est stocké dans votre navigateur.
 • Vous choisissez où les offres sont évaluées : un modèle sur votre propre ordinateur (LM Studio), d'où rien ne sort, ou OpenAI avec votre propre clé d'API.
 • Gratuit et open source : https://github.com/emaccheese/JobFit
 
@@ -111,7 +111,7 @@ O QUE VOCÊ RECEBE
 • Funciona no LinkedIn, Indeed, Greenhouse, Workday e na maioria dos sites de carreira, em português, inglês, espanhol e francês.
 
 PRIVACIDADE DESDE A CONCEPÇÃO
-• Sem conta, sem rastreamento, sem anúncios. Tudo fica guardado no seu navegador.
+• Não precisa de conta, sem rastreamento, sem anúncios. Tudo fica guardado no seu navegador.
 • Você escolhe onde as vagas são avaliadas: um modelo no seu próprio computador (LM Studio), de onde nada sai, ou a OpenAI com a sua própria chave de API.
 • Gratuito e de código aberto: https://github.com/emaccheese/JobFit
 

@@ -1,9 +1,15 @@
-// Which model scores postings: LM Studio on this machine, or the OpenAI API.
+// Which model scores postings: LM Studio on this machine, the OpenAI API with
+// your own key, or Tino Cloud (Tino's server, on a starter credit).
 //
-// The settings live in three storage keys:
-//   modelProvider  "lmstudio" (default) | "openai"
+// The settings live in these storage keys:
+//   modelProvider  "lmstudio" (default) | "openai" | "tinocloud"
+//   modelLevel     "quick" | "careful" | "thorough" | "deep" | "custom": the
+//                  effort level (JOB_FIT_DEFAULTS.modelLevels), for OpenAI and
+//                  Tino Cloud; "custom" (OpenAI only) uses openai.model/reasoningEffort
 //   lmStudio       { url, model, timeoutSeconds, reasoningEffort, enableThinking, seed }
 //   openai         { model, reasoningEffort, keySavedAt, … }
+//   tinoCloud      { sessionSavedAt, email }: who is signed in, for display;
+//                  the session itself is in the vault
 // The OpenAI key itself is not in storage: it's in the vault (vault.js), where
 // the scripts on job pages can't read it. load() adds it; resolve() alone,
 // which those scripts use for the model name, never has it (except for an
@@ -18,30 +24,82 @@
 // Loaded in the service worker, the popup, the history page, the wizard and
 // injected pages; assigned with var so re-injection doesn't throw.
 var JOB_FIT_PROVIDER = (function () {
-  const KEYS = ["modelProvider", "lmStudio", "openai"];
+  const KEYS = ["modelProvider", "lmStudio", "openai", "modelLevel", "tinoCloud"];
   // The Responses API, OpenAI's current recommended API. LM Studio keeps its
   // chat-completions URL (see lmStudio.url).
   const OPENAI_RESPONSES_URL = "https://api.openai.com/v1/responses";
   const OPENAI_MODELS_URL = "https://api.openai.com/v1/models";
 
-  const LABELS = { lmstudio: "LM Studio", openai: "OpenAI" };
+  const LABELS = { lmstudio: "LM Studio", openai: "OpenAI", tinocloud: "Tino Cloud" };
+  const PROVIDERS = ["tinocloud", "openai", "lmstudio"];
+
+  // --- effort levels ------------------------------------------------------------
+
+  function levels() {
+    return JOB_FIT_DEFAULTS.modelLevels || [];
+  }
+
+  function levelById(id) {
+    return levels().find((l) => l.id === id) || null;
+  }
+
+  // The level for your own OpenAI key. Saved before levels existed, an install
+  // has a model and an effort but no level: the level that matches them, or
+  // "custom", so updating never switches anyone's model behind their back.
+  function openAiLevel(s, oa) {
+    if (s.modelLevel === "custom" || levelById(s.modelLevel)) return s.modelLevel;
+    if (s.modelLevel === undefined && s.openai && s.openai.model) {
+      const match = levels().find((l) => l.model === oa.model && l.effort === (oa.reasoningEffort || JOB_FIT_DEFAULTS.openai.reasoningEffort));
+      return match ? match.id : "custom";
+    }
+    return JOB_FIT_DEFAULTS.modelLevel;
+  }
+
+  // Tino Cloud has no "custom": the server decides from its own levels table.
+  function cloudLevel(s) {
+    return levelById(s.modelLevel) ? s.modelLevel : JOB_FIT_DEFAULTS.modelLevel;
+  }
+
+  function cloudUrl() {
+    return String((JOB_FIT_DEFAULTS.cloud && JOB_FIT_DEFAULTS.cloud.url) || "").replace(/\/+$/, "");
+  }
 
   function resolve(stored) {
     const s = stored || {};
-    const provider = s.modelProvider === "openai" ? "openai" : "lmstudio";
+    const provider = PROVIDERS.includes(s.modelProvider) ? s.modelProvider : "lmstudio";
     const lm = { ...JOB_FIT_DEFAULTS.lmStudio, ...(s.lmStudio || {}) };
     const oa = { ...JOB_FIT_DEFAULTS.openai, ...(s.openai || {}) };
     const timeoutSeconds = Number(lm.timeoutSeconds) || JOB_FIT_DEFAULTS.lmStudio.timeoutSeconds;
 
+    if (provider === "tinocloud") {
+      const level = cloudLevel(s);
+      return {
+        provider,
+        label: LABELS.tinocloud,
+        url: cloudUrl(),
+        // Not a model name: the server picks the model from the level. Saved
+        // scores carry it, so ones from another level read as out of date.
+        model: `tino-cloud:${level}`,
+        level,
+        apiKey: "",
+        email: (s.tinoCloud && s.tinoCloud.email) || "",
+        // The server gives the model up to 120 s; a little more for the trip.
+        timeoutSeconds: Math.max(timeoutSeconds, 150),
+      };
+    }
+
     if (provider === "openai") {
+      const level = openAiLevel(s, oa);
+      const preset = levelById(level);
       return {
         provider,
         label: LABELS.openai,
         url: OPENAI_RESPONSES_URL,
+        level,
         // Empty means "not chosen yet", not "none": use the default tier.
-        model: (oa.model || JOB_FIT_DEFAULTS.openai.model || "").trim(),
+        model: preset ? preset.model : (oa.model || JOB_FIT_DEFAULTS.openai.model || "").trim(),
         apiKey: (oa.apiKey || "").trim(),
-        reasoningEffort: oa.reasoningEffort || "",
+        reasoningEffort: preset ? preset.effort : oa.reasoningEffort || "",
         maxOutputTokens: clampOutputTokens(oa.maxOutputTokens),
         flex: ["bulk", "always", "never"].includes(oa.flex) ? oa.flex : "bulk",
         dailyTokenBudget: Math.max(0, Number(oa.dailyTokenBudget) || 0),
@@ -68,6 +126,9 @@ var JOB_FIT_PROVIDER = (function () {
     if (settings.provider === "openai" && typeof JOB_FIT_VAULT !== "undefined") {
       await JOB_FIT_VAULT.migrate();
       settings.apiKey = (await JOB_FIT_VAULT.openAiKey()) || settings.apiKey;
+    }
+    if (settings.provider === "tinocloud" && typeof JOB_FIT_VAULT !== "undefined") {
+      settings.session = await JOB_FIT_VAULT.tinoSession();
     }
     return settings;
   }
@@ -207,6 +268,10 @@ var JOB_FIT_PROVIDER = (function () {
   return {
     KEYS,
     LABELS,
+    PROVIDERS,
+    levels,
+    levelById,
+    cloudUrl,
     OPENAI_RESPONSES_URL,
     OPENAI_MODELS_URL,
     OUTPUT_TOKEN_RANGE,

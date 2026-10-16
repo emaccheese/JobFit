@@ -382,12 +382,35 @@ practical fix is setting reasoning effort to `low` and disabling thinking.
 - **Tests:** `node tools/test.js` runs every check (syntax, the suites in `tools/test/`,
   the brand assets, the locale catalogs).
 
-## Tino Cloud (in progress)
+## Tino Cloud and effort levels
 
-`cloud/` is the server for an optional hosted mode: sign in with Google and score
-without installing a model or bringing a key, with a daily free allowance. The server
-keeps accounts and usage counts, never CVs or postings. The extension doesn't use it
-yet. See [cloud/README.md](cloud/README.md).
+**Tino Cloud** is the third way to score, next to LM Studio and your own OpenAI key,
+and the one with nothing to install. In **Settings → Model** (or the setup wizard),
+choose Tino Cloud and sign in with Google or with a 6-digit code sent to your email.
+Every new account gets $1 of free credit, about 1,000 evaluations at the Quick level.
+When it runs out, Tino offers LM Studio, your own key, and "Tell me when recharges
+open". Tino's server passes each posting to OpenAI and keeps none of it; it keeps your
+email, your credit and usage counts. The server is in `cloud/`
+([cloud/README.md](cloud/README.md)). It's offered only in a build that knows the
+project's address (`cloud` in `defaults.js`); until then it doesn't appear.
+
+**Effort levels** decide the model and how long it thinks, for Tino Cloud and your
+own key alike:
+
+| Level | Model · reasoning effort | About per evaluation |
+|---|---|---|
+| Quick (default) | gpt-6-luna · low | $0.001 |
+| Careful | gpt-6-luna · medium | $0.002 |
+| Thorough | gpt-6-sol · low | $0.025 |
+| Deep | gpt-6-sol · medium | $0.04 |
+
+On Tino Cloud the picker shows about how many evaluations your credit has left at each
+level. With your own key it shows about what 100 evaluations cost, and **Custom** lets
+you choose any model and effort yourself. Setups from before levels keep their model:
+gpt-6-luna at low effort reads as Quick, anything else as Custom.
+
+To try the Tino Cloud screens without a real project: `node tools/fake-cloud.js` runs
+a stand-in (any email signs in with the code 123456) at `http://127.0.0.1:8787`.
 
 ## Design notes
 

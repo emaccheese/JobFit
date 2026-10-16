@@ -2204,6 +2204,54 @@ shows interest (`accounts.recharge_interest_at`).
   in the template (`cloud/supabase/templates/sign-in-code.html`), typed into the
   extension, so no link has to open a web page.
 
+
+## Tino Cloud in the extension (2026-10-14)
+
+Phase 4: the third provider, `tinocloud`, next to `lmstudio` and `openai`.
+
+- **Levels** (`JOB_FIT_DEFAULTS.modelLevels`, `modelLevel` in storage) are one choice
+  for Tino Cloud and your own OpenAI key. `provider.js` resolves an OpenAI level to its
+  model and effort unless it's `custom`. An install from before levels has no
+  `modelLevel`: it maps to the level matching its model and effort, or to `custom`, so
+  updating never switches anyone's model. Tino Cloud's resolved model is
+  `tino-cloud:<level>`, so scores from different levels read as out of date to each
+  other (`currentModel`).
+- **Sign-in** (`tinocloud.js`) uses Supabase Auth's REST API directly, no SDK:
+  - Email codes: `/otp`, then `/verify`.
+  - Google: `chrome.identity.launchWebAuthFlow` on `/authorize` with PKCE (a verifier
+    only this extension knows), then `/token?grant_type=pkce`.
+  - The session (access and refresh tokens) lives in the vault, out of reach of job-page
+    scripts, with only `tinoCloud.sessionSavedAt` and the email in storage, so other pages
+    and the worker notice.
+  - It's refreshed a minute before expiry. A refresh the server refuses signs out; one that
+    can't reach the server keeps the session. A 401 from a function refreshes once and
+    retries.
+- **Scoring** (`background.js` `callTinoCloud`): every `callLmStudio` caller now names
+  its kind (evaluate, summarize, draftProfile, suggestSalary, suggestFlags) and extras
+  (markets, languages). Tino Cloud sends those and the user message, never instructions;
+  the server picks them. Replies map to the queue's failures:
+  - 402 → `credit`, which waits for you: switch level, provider, or sign in;
+  - 429 `hourly` and 503 → `quota` with `retryAt`;
+  - 429 `busy` → one wait of up to 10 s, then a retry;
+  - 401 → `config` (sign in again).
+
+  The last balance is kept in `tinoCloudBalance` for the popup.
+- **Pauses that end by themselves.** `queue.js` stores `pauseUntil` for `quota` (Tino
+  Cloud's time) and `budget` (the OpenAI daily budget, just after local midnight, which
+  had no automatic resume before). An alarm (`jobfit-queue-resume`) calls `resumeIfDue`;
+  so does startup, since alarms outlive the worker.
+- **One sign-in form** (`mountCloudSignIn`) and **one level picker**
+  (`renderLevelPicker`), in `lmstudio-ui.js`, serve Settings and the wizard. The wizard
+  starts a fresh install on Tino Cloud once it's configured; until then it shows two
+  cards, and Settings hides the option.
+- **`manifest.json`** gains `identity` and `https://*.supabase.co/*`, to narrow to the
+  project's own host once it exists. The functions send no CORS headers; the extension
+  reaches them through the host permission.
+- **`tools/fake-cloud.js`** stands in for Auth and the functions (balance, 402, 429,
+  503 on request), for previews before a real project.
+- `t()` now writes `{count}` with the language's digit grouping ("1,000", "1 000",
+  "1.000"); other numbers are left as they are.
+
 ## Logging
 
 Append every evaluation to `chrome.storage.local["evaluations"]`:
